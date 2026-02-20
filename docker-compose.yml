@@ -1,0 +1,91 @@
+x-db-environment: &x-db-environment
+  POSTGRES_SSL_MODE: "disable"
+  POSTGRES_HOST: "db"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "sendmemes"
+  POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}" # set in .env
+  POSTGRES_USER: "${POSTGRES_USER}" # set in .env
+
+x-backend-app-environment: &x-backend-app-environment
+  GOMAXPROCS: "1"
+  # App
+  APP_NAME: "sendmemes-discord-bot"
+  APP_VERSION: "1.0.0"
+  # HTTP settings
+  HTTP_PORT: "8080"
+  HTTP_USE_PREFORK_MODE: "false"
+  # Logger
+  LOG_LEVEL: "debug"
+  # PG
+  PG_POOL_MAX: "2"
+  PG_URL: "postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@db:5432/sendmemes?sslmode=disable" # set in .env  
+  # Discord (set in .env for local run)
+  DISCORD_TOKEN: "${DISCORD_TOKEN:-your_bot_token}"
+  # Metrics
+  METRICS_ENABLED: "true"
+  # Swagger
+  SWAGGER_ENABLED: "true"
+
+
+services:
+  db:
+    container_name: db
+    image: postgres:15-alpine
+    environment:
+      <<: *x-db-environment
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      app_network:
+        aliases:
+          - db.lvh.me
+
+  app:
+    container_name: app
+    platform: linux/amd64
+    pid: "host"
+    build:
+      context: .
+    environment:
+      <<: *x-backend-app-environment
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: '2Gb'
+        reservations:
+          cpus: '0.60'
+          memory: '1Gb'
+    networks:
+      app_network:
+        aliases:
+          - app.lvh.me
+
+  nginx:
+    container_name: nginx
+    image: nginx:1.29.5-alpine
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+    ports:
+      - "80:80"
+    depends_on:
+      - app
+    networks:
+      app_network:
+        aliases:
+          - nginx.lvh.me
+
+
+networks:
+  app_network:
+    external: false
+
+
+volumes:
+  db_data:
