@@ -94,6 +94,15 @@ migrate-up: ### migration up
 	migrate -path migrations -database '$(PG_URL)?sslmode=disable' up
 .PHONY: migrate-up
 
+migrate-down: ### migration down one version
+	migrate -path migrations -database '$(PG_URL)?sslmode=disable' down 1
+.PHONY: migrate-down
+
+db-reset: ### reset DB: run all down migrations then up (clean state, no new migrations)
+	migrate -path migrations -database '$(PG_URL)?sslmode=disable' down 2
+	migrate -path migrations -database '$(PG_URL)?sslmode=disable' up
+.PHONY: db-reset
+
 bin-deps: ### install tools
 	go install tool
 	go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate

@@ -20,4 +20,9 @@ type (
 	TranslationWebAPI interface {
 		Translate(entity.Translation) (entity.Translation, error)
 	}
+
+	// ImagesRepo -.
+	ImagesRepo interface {
+		GetDefault(context.Context) (entity.Image, error)
+	}
 )

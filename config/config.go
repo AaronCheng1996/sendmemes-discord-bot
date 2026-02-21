@@ -29,6 +29,7 @@ type (
 	HTTP struct {
 		Port           string `env:"HTTP_PORT,required"`
 		UsePreforkMode bool   `env:"HTTP_USE_PREFORK_MODE" envDefault:"false"`
+		PublicURL      string `env:"HTTP_PUBLIC_URL" envDefault:"http://localhost:8080"` // base URL for Discord embed image resolution
 	}
 
 	// Log -.
@@ -50,7 +51,9 @@ type (
 
 	// Discord -.
 	Discord struct {
-		Token string `env:"DISCORD_TOKEN,required"`
+		Token          string `env:"DISCORD_TOKEN,required"`
+		ApplicationID  string `env:"DISCORD_APPLICATION_ID"`
+		GuildID        string `env:"DISCORD_GUILD_ID"`
 	}
 
 	// Metrics -.

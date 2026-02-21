@@ -11,6 +11,7 @@ import (
 	v1 "github.com/AaronCheng1996/sendmemes-discord-bot/internal/controller/restapi/v1"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/logger"
+	"github.com/AaronCheng1996/sendmemes-discord-bot/sample"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/swagger"
 )
@@ -41,6 +42,12 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.Translation, l logg
 
 	// K8s probe
 	app.Get("/healthz", func(ctx *fiber.Ctx) error { return ctx.SendStatus(http.StatusOK) })
+
+	// Embedded sample image for default /image
+	app.Get("/assets/sample/image.png", func(ctx *fiber.Ctx) error {
+		ctx.Set("Content-Type", "image/png")
+		return ctx.Send(sample.ImagePNG)
+	})
 
 	// Routers
 	apiV1Group := app.Group("/v1")

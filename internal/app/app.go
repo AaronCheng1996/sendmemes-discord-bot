@@ -12,6 +12,7 @@ import (
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/controller/restapi"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo/persistent"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo/webapi"
+	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/images"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/translation"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/httpserver"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/logger"
@@ -34,9 +35,10 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		persistent.New(pg),
 		webapi.New(),
 	)
+	imagesUseCase := images.New(persistent.NewImagesRepo(pg))
 
 	// Discord Bot
-	discordBot, err := discord.NewBot(cfg, l, translationUseCase)
+	discordBot, err := discord.NewBot(cfg, l, translationUseCase, imagesUseCase)
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - discord.NewBot: %w", err))
 	}
