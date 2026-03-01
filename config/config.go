@@ -15,6 +15,7 @@ type (
 		Log     Log
 		PG      PG
 		Discord Discord
+		PCloud  PCloud
 		Metrics Metrics
 		Swagger Swagger
 	}
@@ -51,9 +52,25 @@ type (
 
 	// Discord -.
 	Discord struct {
-		Token          string `env:"DISCORD_TOKEN,required"`
-		ApplicationID  string `env:"DISCORD_APPLICATION_ID"`
-		GuildID        string `env:"DISCORD_GUILD_ID"`
+		Token         string `env:"DISCORD_TOKEN,required"`
+		ApplicationID string `env:"DISCORD_APPLICATION_ID"`
+		GuildID       string `env:"DISCORD_GUILD_ID"`
+		// SendChannelID is the channel for scheduled periodic album sends.
+		SendChannelID string `env:"DISCORD_CHANNEL_ID"`
+		// SendInterval is how often to push a random album (Go duration string, e.g. "6h").
+		SendInterval string `env:"DISCORD_SEND_INTERVAL" envDefault:"6h"`
+	}
+
+	// PCloud holds credentials and settings for the pCloud integration.
+	// Auth priority: PCLOUD_ACCESS_TOKEN > PCLOUD_USERNAME + PCLOUD_PASSWORD.
+	PCloud struct {
+		AccessToken  string `env:"PCLOUD_ACCESS_TOKEN"`
+		Username     string `env:"PCLOUD_USERNAME"`
+		Password     string `env:"PCLOUD_PASSWORD"`
+		RootFolderID int64  `env:"CLOUD_MAIN_FOLDER_ID" envDefault:"0"`
+		// APIEndpoint is the pCloud REST base URL. Use https://eapi.pcloud.com for EU accounts.
+		APIEndpoint  string `env:"PCLOUD_API_ENDPOINT" envDefault:"https://api.pcloud.com"`
+		SyncInterval string `env:"PCLOUD_SYNC_INTERVAL" envDefault:"1h"`
 	}
 
 	// Metrics -.

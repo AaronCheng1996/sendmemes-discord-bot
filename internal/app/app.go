@@ -2,6 +2,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -13,6 +14,7 @@ import (
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo/persistent"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo/webapi"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/images"
+	syncuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/sync"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/translation"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/httpserver"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/logger"
@@ -30,15 +32,34 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	}
 	defer pg.Close()
 
-	// Use-Case
+	// Use-Case: translation
 	translationUseCase := translation.New(
 		persistent.New(pg),
 		webapi.New(),
 	)
-	imagesUseCase := images.New(persistent.NewImagesRepo(pg))
+
+	// Repos: images & albums
+	imagesRepo := persistent.NewImagesRepo(pg)
+	albumsRepo := persistent.NewAlbumsRepo(pg)
+
+	// pCloud client + sync use case
+	pcloudClient := webapi.NewPCloudClient(
+		cfg.PCloud.AccessToken,
+		cfg.PCloud.Username,
+		cfg.PCloud.Password,
+		cfg.PCloud.APIEndpoint,
+	)
+	// Authenticate once at startup (no-op if access token already set).
+	if err = pcloudClient.Login(context.Background()); err != nil {
+		l.Fatal(fmt.Errorf("app - Run - pcloudClient.Login: %w", err))
+	}
+	syncUseCase := syncuc.New(pcloudClient, albumsRepo, imagesRepo, cfg.PCloud.RootFolderID)
+
+	// Use-Case: images
+	imagesUseCase := images.New(imagesRepo, albumsRepo, pcloudClient, cfg.HTTP.PublicURL)
 
 	// Discord Bot
-	discordBot, err := discord.NewBot(cfg, l, translationUseCase, imagesUseCase)
+	discordBot, err := discord.NewBot(cfg, l, translationUseCase, imagesUseCase, syncUseCase)
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - discord.NewBot: %w", err))
 	}

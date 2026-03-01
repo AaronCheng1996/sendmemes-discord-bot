@@ -14,13 +14,25 @@ x-backend-app-environment: &x-backend-app-environment
   # HTTP settings
   HTTP_PORT: "8080"
   HTTP_USE_PREFORK_MODE: "false"
+  HTTP_PUBLIC_URL: "${HTTP_PUBLIC_URL:-http://localhost:8080}"
   # Logger
   LOG_LEVEL: "debug"
   # PG
   PG_POOL_MAX: "2"
-  PG_URL: "postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@db:5432/sendmemes?sslmode=disable" # set in .env  
-  # Discord (set in .env for local run)
-  DISCORD_TOKEN: "${DISCORD_TOKEN:-your_bot_token}"
+  PG_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/sendmemes?sslmode=disable"
+  # Discord
+  DISCORD_TOKEN: "${DISCORD_TOKEN}"
+  DISCORD_APPLICATION_ID: "${DISCORD_APPLICATION_ID}"
+  DISCORD_GUILD_ID: "${DISCORD_GUILD_ID}"
+  DISCORD_CHANNEL_ID: "${DISCORD_CHANNEL_ID}"
+  DISCORD_SEND_INTERVAL: "${DISCORD_SEND_INTERVAL:-6h}"
+  # pCloud
+  PCLOUD_ACCESS_TOKEN: "${PCLOUD_ACCESS_TOKEN}"
+  PCLOUD_USERNAME: "${PCLOUD_USERNAME}"
+  PCLOUD_PASSWORD: "${PCLOUD_PASSWORD}"
+  CLOUD_MAIN_FOLDER_ID: "${CLOUD_MAIN_FOLDER_ID}"
+  PCLOUD_API_ENDPOINT: "${PCLOUD_API_ENDPOINT:-https://api.pcloud.com}"
+  PCLOUD_SYNC_INTERVAL: "${PCLOUD_SYNC_INTERVAL:-1h}"
   # Metrics
   METRICS_ENABLED: "true"
   # Swagger
