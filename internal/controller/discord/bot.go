@@ -309,7 +309,10 @@ func (b *Bot) handleReactionAdd(s *discordgo.Session, r *discordgo.MessageReacti
 	ctx := context.Background()
 	if err := b.imagesUC.IncrAlbumRating(ctx, albumID); err != nil {
 		b.l.Error(fmt.Errorf("handleReactionAdd album=%d: %w", albumID, err))
+		return
 	}
+	b.vlog("reaction feedback: userID=%s emoji=%s albumID=%d messageID=%s",
+		r.UserID, r.Emoji.Name, albumID, r.MessageID)
 }
 
 // trackScheduledMsg registers a Discord message as a scheduled-send so that
@@ -400,6 +403,8 @@ func (b *Bot) handleInteractionCreate(s *discordgo.Session, i *discordgo.Interac
 // ---------------------------------------------------------------------------
 
 func (b *Bot) cmdImage(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	user := interactionUser(i)
+	b.vlog("/image received from %s", user)
 	b.deferInteraction(s, i)
 	go func() {
 		ctx := context.Background()
@@ -416,10 +421,13 @@ func (b *Bot) cmdImage(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 		b.editInteractionFiles(s, i, "", files)
+		b.vlog("/image completed for %s", user)
 	}()
 }
 
 func (b *Bot) cmdRngImage(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	user := interactionUser(i)
+	b.vlog("/rng_image received from %s", user)
 	b.deferInteraction(s, i)
 	go func() {
 		ctx := context.Background()
@@ -436,14 +444,16 @@ func (b *Bot) cmdRngImage(s *discordgo.Session, i *discordgo.InteractionCreate) 
 			return
 		}
 		b.editInteractionFiles(s, i, img.AlbumName, files)
+		b.vlog("/rng_image completed for %s: album=%q", user, img.AlbumName)
 	}()
 }
 
 func (b *Bot) cmdRngAlbum(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	user := interactionUser(i)
+	b.vlog("/rng_album received from %s", user)
 	b.deferInteraction(s, i)
 	go func() {
 		ctx := context.Background()
-		// Fetch poolSize images so fitToLimit has candidates to refill after trimming.
 		imgs, err := b.imagesUC.GetRandomAlbumImages(ctx, albumPoolSize)
 		if err != nil {
 			b.l.Error(fmt.Errorf("cmdRngAlbum: %w", err))
@@ -457,11 +467,14 @@ func (b *Bot) cmdRngAlbum(s *discordgo.Session, i *discordgo.InteractionCreate) 
 			return
 		}
 		b.editInteractionFiles(s, i, albumNameFrom(imgs), files)
+		b.vlog("/rng_album completed for %s: album=%q files=%d", user, albumNameFrom(imgs), len(files))
 	}()
 }
 
 func (b *Bot) cmdAlbum(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	albumName := i.ApplicationCommandData().Options[0].StringValue()
+	user := interactionUser(i)
+	b.vlog("/album received from %s: album=%q", user, albumName)
 	b.deferInteraction(s, i)
 	go func() {
 		ctx := context.Background()
@@ -478,11 +491,14 @@ func (b *Bot) cmdAlbum(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 		b.editInteractionFiles(s, i, albumName, files)
+		b.vlog("/album completed for %s: album=%q files=%d", user, albumName, len(files))
 	}()
 }
 
 func (b *Bot) cmdFullAlbum(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	albumName := i.ApplicationCommandData().Options[0].StringValue()
+	user := interactionUser(i)
+	b.vlog("/full_album received from %s: album=%q", user, albumName)
 	b.deferInteraction(s, i)
 
 	go func() {
@@ -509,6 +525,7 @@ func (b *Bot) cmdFullAlbum(s *discordgo.Session, i *discordgo.InteractionCreate)
 			b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** is empty.", albumName))
 			return
 		}
+		b.vlog("/full_album %q: total=%d images, hasCover=%v", albumName, total, hasCover)
 
 		msg, err := b.session.InteractionResponse(i.Interaction)
 		if err != nil {
@@ -529,6 +546,7 @@ func (b *Bot) cmdFullAlbum(s *discordgo.Session, i *discordgo.InteractionCreate)
 		b.sendFullAlbumToThread(ctx, thread.ID, albumName, cover, hasCover, imgs)
 		b.editInteractionContent(s, i,
 			fmt.Sprintf("Full album **%s** — %d images posted in <#%s>.", albumName, total, thread.ID))
+		b.vlog("/full_album completed for %s: album=%q total=%d", user, albumName, total)
 	}()
 }
 
@@ -537,6 +555,7 @@ func (b *Bot) cmdFullAlbum(s *discordgo.Session, i *discordgo.InteractionCreate)
 // ---------------------------------------------------------------------------
 
 func (b *Bot) msgImage(ctx context.Context, s *discordgo.Session, channelID string) {
+	b.vlog("!image received in channel %s", channelID)
 	img, err := b.imagesUC.GetImage(ctx)
 	if err != nil {
 		b.l.Error(fmt.Errorf("msgImage: %w", err))
@@ -549,9 +568,11 @@ func (b *Bot) msgImage(ctx context.Context, s *discordgo.Session, channelID stri
 		return
 	}
 	b.channelSendFiles(s, channelID, "", files)
+	b.vlog("!image completed in channel %s", channelID)
 }
 
 func (b *Bot) msgRngImage(ctx context.Context, s *discordgo.Session, channelID string) {
+	b.vlog("!rng_image received in channel %s", channelID)
 	img, err := b.imagesUC.GetRandom(ctx)
 	if err != nil {
 		b.l.Error(fmt.Errorf("msgRngImage: %w", err))
@@ -564,9 +585,11 @@ func (b *Bot) msgRngImage(ctx context.Context, s *discordgo.Session, channelID s
 		return
 	}
 	b.channelSendFiles(s, channelID, img.AlbumName, files)
+	b.vlog("!rng_image completed in channel %s: album=%q", channelID, img.AlbumName)
 }
 
 func (b *Bot) msgRngAlbum(ctx context.Context, s *discordgo.Session, channelID string) {
+	b.vlog("!rng_album received in channel %s", channelID)
 	imgs, err := b.imagesUC.GetRandomAlbumImages(ctx, albumPoolSize)
 	if err != nil {
 		b.l.Error(fmt.Errorf("msgRngAlbum: %w", err))
@@ -574,9 +597,11 @@ func (b *Bot) msgRngAlbum(ctx context.Context, s *discordgo.Session, channelID s
 		return
 	}
 	b.sendAlbumToChannel(ctx, s, channelID, albumNameFrom(imgs), imgs)
+	b.vlog("!rng_album completed in channel %s: album=%q", channelID, albumNameFrom(imgs))
 }
 
 func (b *Bot) msgAlbum(ctx context.Context, s *discordgo.Session, channelID, albumName string) {
+	b.vlog("!album received in channel %s: album=%q", channelID, albumName)
 	imgs, err := b.imagesUC.GetAlbumImages(ctx, albumName, albumPoolSize)
 	if err != nil {
 		b.l.Error(fmt.Errorf("msgAlbum %q: %w", albumName, err))
@@ -584,9 +609,11 @@ func (b *Bot) msgAlbum(ctx context.Context, s *discordgo.Session, channelID, alb
 		return
 	}
 	b.sendAlbumToChannel(ctx, s, channelID, albumName, imgs)
+	b.vlog("!album completed in channel %s: album=%q", channelID, albumName)
 }
 
 func (b *Bot) msgFullAlbum(ctx context.Context, s *discordgo.Session, channelID, albumName string) {
+	b.vlog("!full_album received in channel %s: album=%q", channelID, albumName)
 	initMsg, err := s.ChannelMessageSend(channelID, fmt.Sprintf("Creating thread for album **%s**…", albumName))
 	if err != nil {
 		b.l.Error(fmt.Errorf("msgFullAlbum ChannelMessageSend: %w", err))
@@ -618,10 +645,12 @@ func (b *Bot) msgFullAlbum(ctx context.Context, s *discordgo.Session, channelID,
 	if hasCover {
 		total++
 	}
+	b.vlog("!full_album %q: total=%d images, hasCover=%v", albumName, total, hasCover)
 	b.sendFullAlbumToThread(ctx, thread.ID, albumName, cover, hasCover, imgs)
 
 	content := fmt.Sprintf("Full album **%s** — %d images posted in <#%s>.", albumName, total, thread.ID)
 	_, _ = s.ChannelMessageEdit(channelID, initMsg.ID, content)
+	b.vlog("!full_album completed in channel %s: album=%q total=%d", channelID, albumName, total)
 }
 
 // ---------------------------------------------------------------------------
@@ -635,7 +664,15 @@ func (b *Bot) sendFullAlbumToThread(
 	hasCover bool,
 	imgs []entity.Image,
 ) {
+	totalBatches := (len(imgs) + albumPoolSize - 1) / albumPoolSize
 	if hasCover {
+		totalBatches++ // cover is batch 0
+	}
+	batchNum := 0
+
+	if hasCover {
+		batchNum++
+		b.vlog("full_album %q: sending cover (batch %d/%d)", albumName, batchNum, totalBatches)
 		cover.IsCover = true
 		files, err := b.downloadImages(ctx, []entity.Image{cover})
 		if err != nil {
@@ -651,12 +688,15 @@ func (b *Bot) sendFullAlbumToThread(
 		if end > len(imgs) {
 			end = len(imgs)
 		}
+		batchNum++
+		b.vlog("full_album %q: sending batch %d/%d (images %d–%d)", albumName, batchNum, totalBatches, start+1, end)
 		files, err := b.downloadAndFit(ctx, imgs[start:end])
 		if err != nil {
-			b.l.Error(fmt.Errorf("sendFullAlbumToThread batch %d %q: %w", start, albumName, err))
+			b.l.Error(fmt.Errorf("sendFullAlbumToThread batch %d %q: %w", batchNum, albumName, err))
 			continue
 		}
 		b.channelSendFiles(b.session, threadID, "", files)
+		b.vlog("full_album %q: batch %d/%d sent (%d files)", albumName, batchNum, totalBatches, len(files))
 	}
 }
 
@@ -715,15 +755,19 @@ func (b *Bot) runSendScheduler() {
 
 func (b *Bot) doScheduledSend(channelID string) {
 	ctx := context.Background()
+	b.vlog("scheduled send: selecting album (history=%d)", b.cfg.Discord.SendHistorySize)
 	imgs, albumID, err := b.imagesUC.GetScheduledAlbumImages(ctx, b.cfg.Discord.SendHistorySize, albumPoolSize)
 	if err != nil {
 		b.l.Error(fmt.Errorf("doScheduledSend GetScheduledAlbumImages: %w", err))
 		return
 	}
-	msg := b.sendAlbumToChannel(ctx, b.session, channelID, albumNameFrom(imgs), imgs)
+	albumName := albumNameFrom(imgs)
+	b.vlog("scheduled send: album=%q id=%d sending to channel %s", albumName, albumID, channelID)
+	msg := b.sendAlbumToChannel(ctx, b.session, channelID, albumName, imgs)
 	// Track the sent message so any user reaction increments the album's rating.
 	if msg != nil {
 		b.trackScheduledMsg(msg.ID, albumID)
+		b.vlog("scheduled send: completed album=%q messageID=%s", albumName, msg.ID)
 	}
 	// Stamp last_sent_at regardless of whether the Discord upload succeeded,
 	// so the same album is not retried immediately on the next tick.
@@ -867,6 +911,29 @@ func (b *Bot) editInteractionContent(s *discordgo.Session, i *discordgo.Interact
 	if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &content}); err != nil {
 		b.l.Error(fmt.Errorf("editInteractionContent: %w", err))
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Verbose logging helper
+// ---------------------------------------------------------------------------
+
+// vlog emits an info log only when DISCORD_VERBOSE_LOG is enabled.
+// Use this for per-request and per-batch operational messages.
+func (b *Bot) vlog(format string, args ...interface{}) {
+	if b.cfg.Discord.VerboseLog {
+		b.l.Info(format, args...)
+	}
+}
+
+// interactionUser returns a display name for the user who triggered a slash command.
+func interactionUser(i *discordgo.InteractionCreate) string {
+	if i.Member != nil && i.Member.User != nil {
+		return i.Member.User.Username
+	}
+	if i.User != nil {
+		return i.User.Username
+	}
+	return "unknown"
 }
 
 // ---------------------------------------------------------------------------

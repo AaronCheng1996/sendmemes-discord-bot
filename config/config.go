@@ -63,6 +63,9 @@ type (
 		// the next scheduled send.  When total albums ≤ SendHistorySize, the history
 		// resets automatically (all albums become eligible again).  Default 10.
 		SendHistorySize int `env:"DISCORD_SEND_HISTORY_SIZE" envDefault:"10"`
+		// VerboseLog enables info-level logging for every bot request and scheduled
+		// send (received, completed, per-batch progress for full_album).
+		VerboseLog bool `env:"DISCORD_VERBOSE_LOG" envDefault:"true"`
 	}
 
 	// PCloud holds credentials and settings for the pCloud integration.
