@@ -33,6 +33,15 @@ type (
 		GetOrCreate(ctx context.Context, name string) (entity.Album, error)
 		GetByName(ctx context.Context, name string) (entity.Album, error)
 		GetRandom(ctx context.Context) (entity.Album, error)
+		// GetRandomExcludeRecent returns a random album that is NOT among the
+		// excludeN most recently sent (by last_sent_at DESC).
+		// When no eligible album exists (all sent within the history window),
+		// it falls back to GetRandom so the scheduler never stalls.
+		GetRandomExcludeRecent(ctx context.Context, excludeN int) (entity.Album, error)
+		// MarkSent stamps last_sent_at = NOW() for albumID.
+		MarkSent(ctx context.Context, albumID int) error
+		// IncrRating increments positive_rating by 1 for albumID.
+		IncrRating(ctx context.Context, albumID int) error
 		// SetCover marks an album as having a cover and records which image it is.
 		SetCover(ctx context.Context, albumID, coverImageID int) error
 		// ClearCover removes cover designation from an album.

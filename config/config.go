@@ -59,6 +59,10 @@ type (
 		SendChannelID string `env:"DISCORD_CHANNEL_ID"`
 		// SendInterval is how often to push a random album (Go duration string, e.g. "6h").
 		SendInterval string `env:"DISCORD_SEND_INTERVAL" envDefault:"6h"`
+		// SendHistorySize is the number of most-recently-sent albums to exclude from
+		// the next scheduled send.  When total albums ≤ SendHistorySize, the history
+		// resets automatically (all albums become eligible again).  Default 10.
+		SendHistorySize int `env:"DISCORD_SEND_HISTORY_SIZE" envDefault:"10"`
 	}
 
 	// PCloud holds credentials and settings for the pCloud integration.

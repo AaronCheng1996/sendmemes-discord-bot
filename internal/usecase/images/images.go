@@ -92,6 +92,37 @@ func (uc *UseCase) albumImagesWithCover(ctx context.Context, album entity.Album,
 	return append([]entity.Image{cover}, rest...), nil
 }
 
+// GetScheduledAlbumImages picks a random album with anti-repeat logic and returns
+// up to limit images (cover-first) together with the selected album's ID.
+// Pass the returned albumID to MarkAlbumSent after the message is sent.
+func (uc *UseCase) GetScheduledAlbumImages(ctx context.Context, excludeN, limit int) ([]entity.Image, int, error) {
+	album, err := uc.albums.GetRandomExcludeRecent(ctx, excludeN)
+	if err != nil {
+		return nil, 0, fmt.Errorf("ImagesUseCase - GetScheduledAlbumImages - GetRandomExcludeRecent: %w", err)
+	}
+	imgs, err := uc.albumImagesWithCover(ctx, album, limit)
+	if err != nil {
+		return nil, 0, fmt.Errorf("ImagesUseCase - GetScheduledAlbumImages - albumImagesWithCover: %w", err)
+	}
+	return imgs, album.ID, nil
+}
+
+// MarkAlbumSent stamps last_sent_at = NOW() for albumID.
+func (uc *UseCase) MarkAlbumSent(ctx context.Context, albumID int) error {
+	if err := uc.albums.MarkSent(ctx, albumID); err != nil {
+		return fmt.Errorf("ImagesUseCase - MarkAlbumSent: %w", err)
+	}
+	return nil
+}
+
+// IncrAlbumRating increments positive_rating by 1 for albumID.
+func (uc *UseCase) IncrAlbumRating(ctx context.Context, albumID int) error {
+	if err := uc.albums.IncrRating(ctx, albumID); err != nil {
+		return fmt.Errorf("ImagesUseCase - IncrAlbumRating: %w", err)
+	}
+	return nil
+}
+
 // GetFullAlbum returns all non-cover images in the named album ordered by id.
 // The cover (if any) is excluded here and sent separately by the caller via GetAlbumCover.
 func (uc *UseCase) GetFullAlbum(ctx context.Context, albumName string) ([]entity.Image, error) {

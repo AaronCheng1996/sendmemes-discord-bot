@@ -26,6 +26,17 @@ type (
 		// GetRandomAlbumImages picks a random album then returns up to limit images from it.
 		// If the album has a cover, it is always the first element; the rest are random.
 		GetRandomAlbumImages(ctx context.Context, limit int) ([]entity.Image, error)
+		// GetScheduledAlbumImages picks a random album while avoiding the excludeN most
+		// recently sent albums; returns up to limit images (cover-first) and the album ID.
+		// When all albums fall within the history window, it resets and picks fully at random.
+		// Call MarkAlbumSent(albumID) after a successful scheduled send.
+		GetScheduledAlbumImages(ctx context.Context, excludeN, limit int) (imgs []entity.Image, albumID int, err error)
+		// MarkAlbumSent stamps last_sent_at = NOW() for albumID so future scheduled sends
+		// avoid it for the next excludeN rounds.
+		MarkAlbumSent(ctx context.Context, albumID int) error
+		// IncrAlbumRating increments positive_rating by 1 for albumID.
+		// Called when a user adds any reaction to a scheduled-send message.
+		IncrAlbumRating(ctx context.Context, albumID int) error
 		// GetFullAlbum returns all non-cover images in the named album ordered by id.
 		// The cover (if any) is sent separately by the caller via GetAlbumCover.
 		GetFullAlbum(ctx context.Context, albumName string) ([]entity.Image, error)

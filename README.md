@@ -440,6 +440,44 @@ In addition to Clean architecture, _Onion architecture_ and _Hexagonal_ (_Ports 
 Both are based on the principle of Dependency Inversion.
 _Ports and adapters_ are very close to _Clean Architecture_, the differences are mainly in terminology.
 
+---
+
+## Bot Features
+
+### Scheduled Album Sends
+
+The bot periodically posts a random album to a designated Discord channel.
+
+**Anti-repeat** (`DISCORD_SEND_HISTORY_SIZE`, default `10`): the scheduler tracks `last_sent_at` on each album and skips the N most recently sent ones.  When the total number of albums is ≤ N (all albums have been cycled through), the history automatically resets so all albums become eligible again.
+
+**Configuration**
+
+| Variable | Default | Description |
+|---|---|---|
+| `DISCORD_CHANNEL_ID` | — | Channel to post scheduled albums |
+| `DISCORD_SEND_INTERVAL` | `6h` | How often to send (Go duration, e.g. `30m`, `6h`) |
+| `DISCORD_SEND_HISTORY_SIZE` | `10` | Number of recent albums to exclude from the next send |
+
+---
+
+### Album Feedback System
+
+Any reaction a non-bot user adds to a scheduled-send message is counted as positive feedback for that album.
+
+**How it works**
+- After each scheduled send, the bot stores `messageID → albumID` in an in-memory FIFO map (last 200 messages).
+- When `messageReactionAdd` fires, if the message is in the map the album's `positive_rating` column is incremented by 1.
+- Multiple different emoji by the same user each count as one increment.
+
+**Schema** (`albums` table):
+- `positive_rating INT DEFAULT 0` — cumulative reaction count
+
+**Roadmap** (not yet implemented):
+- Weighted random selection: bias `GetRandomExcludeRecent` toward high-rating albums, e.g. `ORDER BY RANDOM() * (1 + positive_rating) DESC`.
+- `/album_stats` slash command — list top-rated albums.
+
+---
+
 ## Similar projects
 
 - [https://github.com/bxcodec/go-clean-arch](https://github.com/bxcodec/go-clean-arch)

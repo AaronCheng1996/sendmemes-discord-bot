@@ -37,6 +37,10 @@ const (
 	// downloadTimeout is used for both pCloud downloads and Discord uploads.
 	// Large albums can have multi-MB images; give plenty of headroom.
 	downloadTimeout = 5 * time.Minute
+
+	// reactMapMaxSize is the maximum number of scheduled-send messages tracked
+	// for reaction-based feedback.  Oldest entries are evicted when full.
+	reactMapMaxSize = 200
 )
 
 // fileEntry is an already-downloaded image file, kept in memory so that
@@ -159,6 +163,13 @@ type Bot struct {
 	mu         sync.Mutex
 	closed     bool
 	stopCh     chan struct{}
+
+	// Reaction-feedback tracking for scheduled-send messages.
+	// reactMap holds messageID → albumID for the most recent reactMapMaxSize sends.
+	// reactQueue is a FIFO used to evict the oldest entry when the map is full.
+	reactMu    sync.RWMutex
+	reactMap   map[string]int
+	reactQueue []string
 }
 
 // NewBot creates a Discord bot that delegates to use cases.
@@ -173,7 +184,9 @@ func NewBot(
 	if err != nil {
 		return nil, fmt.Errorf("discord NewSession: %w", err)
 	}
-	s.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsDirectMessages
+	s.Identify.Intents = discordgo.IntentsGuildMessages |
+		discordgo.IntentsDirectMessages |
+		discordgo.IntentsGuildMessageReactions
 
 	// discordgo defaults to 20 s — far too short for uploading many large images.
 	s.Client = &http.Client{Timeout: downloadTimeout}
@@ -188,10 +201,13 @@ func NewBot(
 		// Separate client for pCloud downloads (same generous timeout).
 		httpClient: &http.Client{Timeout: downloadTimeout},
 		stopCh:     make(chan struct{}),
+		reactMap:   make(map[string]int),
+		reactQueue: make([]string, 0, reactMapMaxSize),
 	}
 	s.AddHandler(b.handleReady)
 	s.AddHandler(b.handleMessageCreate)
 	s.AddHandler(b.handleInteractionCreate)
+	s.AddHandler(b.handleReactionAdd)
 	return b, nil
 }
 
@@ -272,6 +288,43 @@ func (b *Bot) handleReady(s *discordgo.Session, r *discordgo.Ready) {
 	for _, cmd := range registered {
 		b.l.Info("registered slash command /%s", cmd.Name)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Reaction feedback handler
+// ---------------------------------------------------------------------------
+
+// handleReactionAdd is called whenever any user adds a reaction to any message.
+// If the message is a tracked scheduled-send, positive_rating is incremented.
+func (b *Bot) handleReactionAdd(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
+	if r.UserID == s.State.User.ID {
+		return // ignore the bot's own reactions
+	}
+	b.reactMu.RLock()
+	albumID, ok := b.reactMap[r.MessageID]
+	b.reactMu.RUnlock()
+	if !ok {
+		return
+	}
+	ctx := context.Background()
+	if err := b.imagesUC.IncrAlbumRating(ctx, albumID); err != nil {
+		b.l.Error(fmt.Errorf("handleReactionAdd album=%d: %w", albumID, err))
+	}
+}
+
+// trackScheduledMsg registers a Discord message as a scheduled-send so that
+// future reactions on it update the associated album's positive_rating.
+// Evicts the oldest entry when the map reaches reactMapMaxSize.
+func (b *Bot) trackScheduledMsg(msgID string, albumID int) {
+	b.reactMu.Lock()
+	defer b.reactMu.Unlock()
+	if len(b.reactQueue) >= reactMapMaxSize {
+		oldest := b.reactQueue[0]
+		b.reactQueue = b.reactQueue[1:]
+		delete(b.reactMap, oldest)
+	}
+	b.reactMap[msgID] = albumID
+	b.reactQueue = append(b.reactQueue, msgID)
 }
 
 // ---------------------------------------------------------------------------
@@ -662,12 +715,21 @@ func (b *Bot) runSendScheduler() {
 
 func (b *Bot) doScheduledSend(channelID string) {
 	ctx := context.Background()
-	imgs, err := b.imagesUC.GetRandomAlbumImages(ctx, albumPoolSize)
+	imgs, albumID, err := b.imagesUC.GetScheduledAlbumImages(ctx, b.cfg.Discord.SendHistorySize, albumPoolSize)
 	if err != nil {
-		b.l.Error(fmt.Errorf("doScheduledSend GetRandomAlbumImages: %w", err))
+		b.l.Error(fmt.Errorf("doScheduledSend GetScheduledAlbumImages: %w", err))
 		return
 	}
-	b.sendAlbumToChannel(ctx, b.session, channelID, albumNameFrom(imgs), imgs)
+	msg := b.sendAlbumToChannel(ctx, b.session, channelID, albumNameFrom(imgs), imgs)
+	// Track the sent message so any user reaction increments the album's rating.
+	if msg != nil {
+		b.trackScheduledMsg(msg.ID, albumID)
+	}
+	// Stamp last_sent_at regardless of whether the Discord upload succeeded,
+	// so the same album is not retried immediately on the next tick.
+	if err := b.imagesUC.MarkAlbumSent(ctx, albumID); err != nil {
+		b.l.Error(fmt.Errorf("doScheduledSend MarkAlbumSent: %w", err))
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -745,28 +807,33 @@ func (b *Bot) downloadAndFit(ctx context.Context, imgs []entity.Image) ([]*disco
 // ---------------------------------------------------------------------------
 
 // sendAlbumToChannel downloads imgs with pool fitting and sends to channel.
-func (b *Bot) sendAlbumToChannel(ctx context.Context, s *discordgo.Session, channelID, caption string, imgs []entity.Image) {
+// Returns the sent Discord message (nil on failure) so callers can track it.
+func (b *Bot) sendAlbumToChannel(ctx context.Context, s *discordgo.Session, channelID, caption string, imgs []entity.Image) *discordgo.Message {
 	files, err := b.downloadAndFit(ctx, imgs)
 	if err != nil {
 		b.l.Error(fmt.Errorf("sendAlbumToChannel downloadAndFit: %w", err))
 		_, _ = s.ChannelMessageSend(channelID, "Failed to download images.")
-		return
+		return nil
 	}
-	b.channelSendFiles(s, channelID, caption, files)
+	return b.channelSendFiles(s, channelID, caption, files)
 }
 
 // channelSendFiles sends file attachments to a channel with an optional bold caption.
-func (b *Bot) channelSendFiles(s *discordgo.Session, channelID, caption string, files []*discordgo.File) {
+// Returns the sent message (nil on failure).
+func (b *Bot) channelSendFiles(s *discordgo.Session, channelID, caption string, files []*discordgo.File) *discordgo.Message {
 	if len(files) == 0 {
-		return
+		return nil
 	}
-	msg := &discordgo.MessageSend{Files: files}
+	payload := &discordgo.MessageSend{Files: files}
 	if caption != "" {
-		msg.Content = "**" + caption + "**"
+		payload.Content = "**" + caption + "**"
 	}
-	if _, err := s.ChannelMessageSendComplex(channelID, msg); err != nil {
+	msg, err := s.ChannelMessageSendComplex(channelID, payload)
+	if err != nil {
 		b.l.Error(fmt.Errorf("channelSendFiles: %w", err))
+		return nil
 	}
+	return msg
 }
 
 // ---------------------------------------------------------------------------
