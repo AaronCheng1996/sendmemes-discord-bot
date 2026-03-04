@@ -30,10 +30,6 @@ const (
 	// Discord's hard cap is 25 MB; we use 24 MB to leave room for JSON overhead.
 	discordMsgLimit = 24 * 1024 * 1024
 
-	// maxFillAttempts: after trimming oversized images, try this many times to
-	// randomly add a replacement before giving up and sending the current set.
-	maxFillAttempts = 3
-
 	// downloadTimeout is used for both pCloud downloads and Discord uploads.
 	// Large albums can have multi-MB images; give plenty of headroom.
 	downloadTimeout = 5 * time.Minute
@@ -56,13 +52,16 @@ func (f fileEntry) size() int { return len(f.data) }
 
 // fitToLimit selects files from pool to send as one Discord message.
 //
-// Strategy (per spec):
-//  1. Start with cover (always kept) + up to targetCount−1 non-cover images.
-//  2. While total size > maxBytes: remove the largest non-cover image.
-//  3. While count < targetCount and pool has candidates:
-//     – pick a random candidate; add it if it fits.
-//     – after maxFillAttempts consecutive failures, stop.
-func fitToLimit(pool []fileEntry, targetCount, maxBytes int) []fileEntry {
+// Strategy:
+//  1. Shuffle non-cover candidates for random selection order.
+//  2. Fill selected with cover + first targetCount−1 shuffled candidates.
+//  3. Single loop until one of three conditions is met:
+//     – Condition 1: selected == targetCount and total size ≤ maxBytes.
+//     – Condition 2: total size ≤ maxBytes but pool exhausted (sends what we have).
+//     – Condition 3: pool exhausted with nothing fitting — logs a warning and returns nil.
+//  Within the loop: if over limit, remove the largest non-cover then refill with the
+//  next shuffled candidate; repeat until within limit or conditions above are met.
+func fitToLimit(l logger.Interface, pool []fileEntry, targetCount, maxBytes int) []fileEntry {
 	if len(pool) == 0 {
 		return nil
 	}
@@ -79,25 +78,40 @@ func fitToLimit(pool []fileEntry, targetCount, maxBytes int) []fileEntry {
 		}
 	}
 
-	// Build initial selection.
+	// Shuffle for random selection order from the start.
+	rand.Shuffle(len(candidates), func(i, j int) {
+		candidates[i], candidates[j] = candidates[j], candidates[i]
+	})
+
+	// Build initial selection: cover + first (targetCount−1) shuffled candidates.
 	selected := make([]fileEntry, 0, targetCount)
 	totalBytes := 0
 	if cover != nil {
 		selected = append(selected, *cover)
 		totalBytes += cover.size()
 	}
-	remaining := make([]fileEntry, 0, len(candidates))
-	for _, fe := range candidates {
-		if len(selected) < targetCount {
-			selected = append(selected, fe)
-			totalBytes += fe.size()
-		} else {
-			remaining = append(remaining, fe)
-		}
+	nextIdx := 0
+	for nextIdx < len(candidates) && len(selected) < targetCount {
+		selected = append(selected, candidates[nextIdx])
+		totalBytes += candidates[nextIdx].size()
+		nextIdx++
 	}
 
-	// Step 2: trim largest non-cover until within limit.
-	for totalBytes > maxBytes {
+	// Single loop: trim if over limit, refill from next in shuffled order.
+	for {
+		if totalBytes <= maxBytes {
+			// Condition 1: full and within limit. Condition 2: pool exhausted.
+			if len(selected) == targetCount || nextIdx >= len(candidates) {
+				break
+			}
+			// Room for more; add next candidate from shuffled order.
+			selected = append(selected, candidates[nextIdx])
+			totalBytes += candidates[nextIdx].size()
+			nextIdx++
+			continue
+		}
+
+		// Over limit: remove the largest non-cover image.
 		maxIdx, maxSz := -1, 0
 		for j, fe := range selected {
 			if !fe.isCover && fe.size() > maxSz {
@@ -106,30 +120,25 @@ func fitToLimit(pool []fileEntry, targetCount, maxBytes int) []fileEntry {
 			}
 		}
 		if maxIdx == -1 {
-			break // only cover left — nothing safe to remove
+			// Only cover remains and it alone exceeds the limit — condition 3.
+			l.Warn("fitToLimit: cover alone exceeds Discord size limit, skipping message")
+			return nil
 		}
-		removed := selected[maxIdx]
-		totalBytes -= removed.size()
-		remaining = append(remaining, removed)
+		totalBytes -= selected[maxIdx].size()
 		selected = append(selected[:maxIdx], selected[maxIdx+1:]...)
+
+		// Refill with the next candidate in shuffled order.
+		if nextIdx < len(candidates) {
+			selected = append(selected, candidates[nextIdx])
+			totalBytes += candidates[nextIdx].size()
+			nextIdx++
+		}
 	}
 
-	// Step 3: refill from remaining pool (random order, up to maxFillAttempts consecutive failures).
-	consecutiveFails := 0
-	for len(selected) < targetCount && len(remaining) > 0 && consecutiveFails < maxFillAttempts {
-		idx := rand.Intn(len(remaining))
-		candidate := remaining[idx]
-		// Remove this candidate from the pool regardless of outcome.
-		remaining[idx] = remaining[len(remaining)-1]
-		remaining = remaining[:len(remaining)-1]
-
-		if totalBytes+candidate.size() <= maxBytes {
-			selected = append(selected, candidate)
-			totalBytes += candidate.size()
-			consecutiveFails = 0
-		} else {
-			consecutiveFails++
-		}
+	// Condition 3: all candidates exhausted without a single image fitting.
+	if len(selected) == 0 {
+		l.Warn("fitToLimit: no images fit within Discord size limit, skipping message")
+		return nil
 	}
 
 	return selected
@@ -839,7 +848,7 @@ func (b *Bot) downloadAndFit(ctx context.Context, imgs []entity.Image) ([]*disco
 	if err != nil {
 		return nil, err
 	}
-	selected := fitToLimit(pool, albumBatchSize, discordMsgLimit)
+	selected := fitToLimit(b.l, pool, albumBatchSize, discordMsgLimit)
 	if len(selected) == 0 {
 		return nil, fmt.Errorf("downloadAndFit: no images fit within Discord size limit")
 	}
