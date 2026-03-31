@@ -8,7 +8,6 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -167,6 +166,7 @@ type Bot struct {
 	uc         usecase.Translation
 	imagesUC   usecase.Images
 	syncUC     usecase.Sync
+	settingsUC usecase.Settings
 	session    *discordgo.Session
 	httpClient *http.Client
 	mu         sync.Mutex
@@ -188,6 +188,7 @@ func NewBot(
 	uc usecase.Translation,
 	imagesUC usecase.Images,
 	syncUC usecase.Sync,
+	settingsUC usecase.Settings,
 ) (*Bot, error) {
 	s, err := discordgo.New("Bot " + cfg.Discord.Token)
 	if err != nil {
@@ -201,12 +202,13 @@ func NewBot(
 	s.Client = &http.Client{Timeout: downloadTimeout}
 
 	b := &Bot{
-		cfg:      cfg,
-		l:        l,
-		uc:       uc,
-		imagesUC: imagesUC,
-		syncUC:   syncUC,
-		session:  s,
+		cfg:        cfg,
+		l:          l,
+		uc:         uc,
+		imagesUC:   imagesUC,
+		syncUC:     syncUC,
+		settingsUC: settingsUC,
+		session:    s,
 		// Separate client for pCloud downloads (same generous timeout).
 		httpClient: &http.Client{Timeout: downloadTimeout},
 		stopCh:     make(chan struct{}),
@@ -254,52 +256,6 @@ func (b *Bot) Close() error {
 }
 
 // ---------------------------------------------------------------------------
-// Slash command registration
-// ---------------------------------------------------------------------------
-
-var slashCommands = []*discordgo.ApplicationCommand{
-	{Name: "image", Description: "Send the default image"},
-	{Name: "rng_image", Description: "Send one random image from all albums"},
-	{Name: "rng_album", Description: "Send 10 random images from a random album"},
-	{
-		Name:        "album",
-		Description: "Send 10 random images from a named album",
-		Options: []*discordgo.ApplicationCommandOption{{
-			Type: discordgo.ApplicationCommandOptionString, Name: "name",
-			Description: "Album name", Required: true,
-		}},
-	},
-	{
-		Name:        "full_album",
-		Description: "Send all images in an album via a thread (10 at a time)",
-		Options: []*discordgo.ApplicationCommandOption{{
-			Type: discordgo.ApplicationCommandOptionString, Name: "name",
-			Description: "Album name", Required: true,
-		}},
-	},
-}
-
-// handleReady registers slash commands via BulkOverwrite, which atomically
-// replaces ALL existing guild commands (old commands are automatically removed).
-func (b *Bot) handleReady(s *discordgo.Session, r *discordgo.Ready) {
-	b.l.Info("discord bot ready: user %s", r.User.Username)
-	if b.cfg.Discord.ApplicationID == "" {
-		b.l.Info("DISCORD_APPLICATION_ID not set, skipping slash command registration")
-		return
-	}
-	registered, err := s.ApplicationCommandBulkOverwrite(
-		b.cfg.Discord.ApplicationID, b.cfg.Discord.GuildID, slashCommands,
-	)
-	if err != nil {
-		b.l.Error(fmt.Errorf("discord BulkOverwrite commands: %w", err))
-		return
-	}
-	for _, cmd := range registered {
-		b.l.Info("registered slash command /%s", cmd.Name)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Reaction feedback handler
 // ---------------------------------------------------------------------------
 
@@ -337,329 +293,6 @@ func (b *Bot) trackScheduledMsg(msgID string, albumID int) {
 	}
 	b.reactMap[msgID] = albumID
 	b.reactQueue = append(b.reactQueue, msgID)
-}
-
-// ---------------------------------------------------------------------------
-// Text command handler  (!command [args])
-// ---------------------------------------------------------------------------
-
-func (b *Bot) handleMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-	if m.Author.ID == s.State.User.ID {
-		return
-	}
-	content := strings.TrimSpace(m.Content)
-	if content == "" || content[0] != '!' {
-		return
-	}
-	cmd, arg, _ := strings.Cut(content[1:], " ")
-	cmd = strings.ToLower(strings.TrimSpace(cmd))
-	arg = strings.TrimSpace(arg)
-
-	ctx := context.Background()
-	switch cmd {
-	case "ping":
-		_, _ = s.ChannelMessageSend(m.ChannelID, "pong")
-	case "image":
-		go b.msgImage(ctx, s, m.ChannelID)
-	case "rng_image":
-		go b.msgRngImage(ctx, s, m.ChannelID)
-	case "rng_album":
-		go b.msgRngAlbum(ctx, s, m.ChannelID)
-	case "album":
-		if arg == "" {
-			_, _ = s.ChannelMessageSend(m.ChannelID, "Usage: `!album <name>`")
-			return
-		}
-		go b.msgAlbum(ctx, s, m.ChannelID, arg)
-	case "full_album":
-		if arg == "" {
-			_, _ = s.ChannelMessageSend(m.ChannelID, "Usage: `!full_album <name>`")
-			return
-		}
-		go b.msgFullAlbum(ctx, s, m.ChannelID, arg)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Interaction dispatcher
-// ---------------------------------------------------------------------------
-
-func (b *Bot) handleInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if i.Type != discordgo.InteractionApplicationCommand {
-		return
-	}
-	switch i.ApplicationCommandData().Name {
-	case "image":
-		b.cmdImage(s, i)
-	case "rng_image":
-		b.cmdRngImage(s, i)
-	case "rng_album":
-		b.cmdRngAlbum(s, i)
-	case "album":
-		b.cmdAlbum(s, i)
-	case "full_album":
-		b.cmdFullAlbum(s, i)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Slash command handlers
-//
-// All handlers defer the Discord response immediately (well within the 3 s
-// window) then do the actual work — which may include pCloud HTTP calls and
-// image downloads — in a goroutine, finally editing the deferred reply.
-// Images are sent as file attachments so Discord always renders them inline.
-// ---------------------------------------------------------------------------
-
-func (b *Bot) cmdImage(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	user := interactionUser(i)
-	b.vlog("/image received from %s", user)
-	b.deferInteraction(s, i)
-	go func() {
-		ctx := context.Background()
-		img, err := b.imagesUC.GetImage(ctx)
-		if err != nil {
-			b.l.Error(fmt.Errorf("cmdImage: %w", err))
-			b.editInteractionContent(s, i, "Failed to get image.")
-			return
-		}
-		files, err := b.downloadImages(ctx, []entity.Image{img})
-		if err != nil {
-			b.l.Error(fmt.Errorf("cmdImage download: %w", err))
-			b.editInteractionContent(s, i, "Failed to download image.")
-			return
-		}
-		b.editInteractionFiles(s, i, "", files)
-		b.vlog("/image completed for %s", user)
-	}()
-}
-
-func (b *Bot) cmdRngImage(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	user := interactionUser(i)
-	b.vlog("/rng_image received from %s", user)
-	b.deferInteraction(s, i)
-	go func() {
-		ctx := context.Background()
-		img, err := b.imagesUC.GetRandom(ctx)
-		if err != nil {
-			b.l.Error(fmt.Errorf("cmdRngImage: %w", err))
-			b.editInteractionContent(s, i, "Failed to get a random image.")
-			return
-		}
-		files, err := b.downloadImages(ctx, []entity.Image{img})
-		if err != nil {
-			b.l.Error(fmt.Errorf("cmdRngImage download: %w", err))
-			b.editInteractionContent(s, i, "Failed to download image.")
-			return
-		}
-		b.editInteractionFiles(s, i, img.AlbumName, files)
-		b.vlog("/rng_image completed for %s: album=%q", user, img.AlbumName)
-	}()
-}
-
-func (b *Bot) cmdRngAlbum(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	user := interactionUser(i)
-	b.vlog("/rng_album received from %s", user)
-	b.deferInteraction(s, i)
-	go func() {
-		ctx := context.Background()
-		imgs, err := b.imagesUC.GetRandomAlbumImages(ctx, albumPoolSize)
-		if err != nil {
-			b.l.Error(fmt.Errorf("cmdRngAlbum: %w", err))
-			b.editInteractionContent(s, i, "Failed to get random album.")
-			return
-		}
-		files, err := b.downloadAndFit(ctx, imgs)
-		if err != nil {
-			b.l.Error(fmt.Errorf("cmdRngAlbum downloadAndFit: %w", err))
-			b.editInteractionContent(s, i, "Failed to download images.")
-			return
-		}
-		b.editInteractionFiles(s, i, albumNameFrom(imgs), files)
-		b.vlog("/rng_album completed for %s: album=%q files=%d", user, albumNameFrom(imgs), len(files))
-	}()
-}
-
-func (b *Bot) cmdAlbum(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	albumName := i.ApplicationCommandData().Options[0].StringValue()
-	user := interactionUser(i)
-	b.vlog("/album received from %s: album=%q", user, albumName)
-	b.deferInteraction(s, i)
-	go func() {
-		ctx := context.Background()
-		imgs, err := b.imagesUC.GetAlbumImages(ctx, albumName, albumPoolSize)
-		if err != nil {
-			b.l.Error(fmt.Errorf("cmdAlbum %q: %w", albumName, err))
-			b.editInteractionContent(s, i, fmt.Sprintf("Album %q not found or empty.", albumName))
-			return
-		}
-		files, err := b.downloadAndFit(ctx, imgs)
-		if err != nil {
-			b.l.Error(fmt.Errorf("cmdAlbum downloadAndFit %q: %w", albumName, err))
-			b.editInteractionContent(s, i, "Failed to download images.")
-			return
-		}
-		b.editInteractionFiles(s, i, albumName, files)
-		b.vlog("/album completed for %s: album=%q files=%d", user, albumName, len(files))
-	}()
-}
-
-func (b *Bot) cmdFullAlbum(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	albumName := i.ApplicationCommandData().Options[0].StringValue()
-	user := interactionUser(i)
-	b.vlog("/full_album received from %s: album=%q", user, albumName)
-	b.deferInteraction(s, i)
-
-	go func() {
-		ctx := context.Background()
-
-		cover, hasCover, err := b.imagesUC.GetAlbumCover(ctx, albumName)
-		if err != nil {
-			b.l.Error(fmt.Errorf("cmdFullAlbum GetAlbumCover %q: %w", albumName, err))
-			b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** not found.", albumName))
-			return
-		}
-		imgs, err := b.imagesUC.GetFullAlbum(ctx, albumName)
-		if err != nil {
-			b.l.Error(fmt.Errorf("cmdFullAlbum GetFullAlbum %q: %w", albumName, err))
-			b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** not found.", albumName))
-			return
-		}
-
-		total := len(imgs)
-		if hasCover {
-			total++
-		}
-		if total == 0 {
-			b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** is empty.", albumName))
-			return
-		}
-		b.vlog("/full_album %q: total=%d images, hasCover=%v", albumName, total, hasCover)
-
-		msg, err := b.session.InteractionResponse(i.Interaction)
-		if err != nil {
-			b.l.Error(fmt.Errorf("cmdFullAlbum InteractionResponse: %w", err))
-			return
-		}
-		thread, err := b.session.MessageThreadStartComplex(msg.ChannelID, msg.ID, &discordgo.ThreadStart{
-			Name:                fmt.Sprintf("Full album: %s", albumName),
-			AutoArchiveDuration: 60,
-			Type:                discordgo.ChannelTypeGuildPublicThread,
-		})
-		if err != nil {
-			b.l.Error(fmt.Errorf("cmdFullAlbum ThreadStart: %w", err))
-			b.editInteractionContent(s, i, "Failed to create thread.")
-			return
-		}
-
-		b.sendFullAlbumToThread(ctx, thread.ID, albumName, cover, hasCover, imgs)
-		b.editInteractionContent(s, i,
-			fmt.Sprintf("Full album **%s** — %d images posted in <#%s>.", albumName, total, thread.ID))
-		b.vlog("/full_album completed for %s: album=%q total=%d", user, albumName, total)
-	}()
-}
-
-// ---------------------------------------------------------------------------
-// Text command handlers  (!command)
-// ---------------------------------------------------------------------------
-
-func (b *Bot) msgImage(ctx context.Context, s *discordgo.Session, channelID string) {
-	b.vlog("!image received in channel %s", channelID)
-	img, err := b.imagesUC.GetImage(ctx)
-	if err != nil {
-		b.l.Error(fmt.Errorf("msgImage: %w", err))
-		_, _ = s.ChannelMessageSend(channelID, "Failed to get image.")
-		return
-	}
-	files, err := b.downloadImages(ctx, []entity.Image{img})
-	if err != nil {
-		b.l.Error(fmt.Errorf("msgImage download: %w", err))
-		return
-	}
-	b.channelSendFiles(s, channelID, "", files)
-	b.vlog("!image completed in channel %s", channelID)
-}
-
-func (b *Bot) msgRngImage(ctx context.Context, s *discordgo.Session, channelID string) {
-	b.vlog("!rng_image received in channel %s", channelID)
-	img, err := b.imagesUC.GetRandom(ctx)
-	if err != nil {
-		b.l.Error(fmt.Errorf("msgRngImage: %w", err))
-		_, _ = s.ChannelMessageSend(channelID, "Failed to get a random image.")
-		return
-	}
-	files, err := b.downloadImages(ctx, []entity.Image{img})
-	if err != nil {
-		b.l.Error(fmt.Errorf("msgRngImage download: %w", err))
-		return
-	}
-	b.channelSendFiles(s, channelID, img.AlbumName, files)
-	b.vlog("!rng_image completed in channel %s: album=%q", channelID, img.AlbumName)
-}
-
-func (b *Bot) msgRngAlbum(ctx context.Context, s *discordgo.Session, channelID string) {
-	b.vlog("!rng_album received in channel %s", channelID)
-	imgs, err := b.imagesUC.GetRandomAlbumImages(ctx, albumPoolSize)
-	if err != nil {
-		b.l.Error(fmt.Errorf("msgRngAlbum: %w", err))
-		_, _ = s.ChannelMessageSend(channelID, "Failed to get random album.")
-		return
-	}
-	b.sendAlbumToChannel(ctx, s, channelID, albumNameFrom(imgs), imgs)
-	b.vlog("!rng_album completed in channel %s: album=%q", channelID, albumNameFrom(imgs))
-}
-
-func (b *Bot) msgAlbum(ctx context.Context, s *discordgo.Session, channelID, albumName string) {
-	b.vlog("!album received in channel %s: album=%q", channelID, albumName)
-	imgs, err := b.imagesUC.GetAlbumImages(ctx, albumName, albumPoolSize)
-	if err != nil {
-		b.l.Error(fmt.Errorf("msgAlbum %q: %w", albumName, err))
-		_, _ = s.ChannelMessageSend(channelID, fmt.Sprintf("Album %q not found or empty.", albumName))
-		return
-	}
-	b.sendAlbumToChannel(ctx, s, channelID, albumName, imgs)
-	b.vlog("!album completed in channel %s: album=%q", channelID, albumName)
-}
-
-func (b *Bot) msgFullAlbum(ctx context.Context, s *discordgo.Session, channelID, albumName string) {
-	b.vlog("!full_album received in channel %s: album=%q", channelID, albumName)
-	initMsg, err := s.ChannelMessageSend(channelID, fmt.Sprintf("Creating thread for album **%s**…", albumName))
-	if err != nil {
-		b.l.Error(fmt.Errorf("msgFullAlbum ChannelMessageSend: %w", err))
-		return
-	}
-	thread, err := s.MessageThreadStartComplex(channelID, initMsg.ID, &discordgo.ThreadStart{
-		Name:                fmt.Sprintf("Full album: %s", albumName),
-		AutoArchiveDuration: 60,
-		Type:                discordgo.ChannelTypeGuildPublicThread,
-	})
-	if err != nil {
-		b.l.Error(fmt.Errorf("msgFullAlbum ThreadStart: %w", err))
-		_, _ = s.ChannelMessageEdit(channelID, initMsg.ID, "Failed to create thread.")
-		return
-	}
-
-	cover, hasCover, err := b.imagesUC.GetAlbumCover(ctx, albumName)
-	if err != nil {
-		b.l.Error(fmt.Errorf("msgFullAlbum GetAlbumCover %q: %w", albumName, err))
-		return
-	}
-	imgs, err := b.imagesUC.GetFullAlbum(ctx, albumName)
-	if err != nil {
-		b.l.Error(fmt.Errorf("msgFullAlbum GetFullAlbum %q: %w", albumName, err))
-		return
-	}
-
-	total := len(imgs)
-	if hasCover {
-		total++
-	}
-	b.vlog("!full_album %q: total=%d images, hasCover=%v", albumName, total, hasCover)
-	b.sendFullAlbumToThread(ctx, thread.ID, albumName, cover, hasCover, imgs)
-
-	content := fmt.Sprintf("Full album **%s** — %d images posted in <#%s>.", albumName, total, thread.ID)
-	_, _ = s.ChannelMessageEdit(channelID, initMsg.ID, content)
-	b.vlog("!full_album completed in channel %s: album=%q total=%d", channelID, albumName, total)
 }
 
 // ---------------------------------------------------------------------------
@@ -706,82 +339,6 @@ func (b *Bot) sendFullAlbumToThread(
 		}
 		b.channelSendFiles(b.session, threadID, "", files)
 		b.vlog("full_album %q: batch %d/%d sent (%d files)", albumName, batchNum, totalBatches, len(files))
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Scheduler goroutines
-// ---------------------------------------------------------------------------
-
-func (b *Bot) runSyncScheduler() {
-	interval := parseDuration(b.cfg.PCloud.SyncInterval, time.Hour)
-	hasCredentials := b.cfg.PCloud.AccessToken != "" || b.cfg.PCloud.Username != ""
-	if interval <= 0 || !hasCredentials {
-		b.l.Info("pCloud sync disabled (no credentials configured or invalid interval)")
-		return
-	}
-	b.doSync()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			b.doSync()
-		case <-b.stopCh:
-			return
-		}
-	}
-}
-
-func (b *Bot) doSync() {
-	ctx := context.Background()
-	b.l.Info("pCloud sync started")
-	if err := b.syncUC.SyncImages(ctx); err != nil {
-		b.l.Error(fmt.Errorf("doSync: %w", err))
-	} else {
-		b.l.Info("pCloud sync completed")
-	}
-}
-
-func (b *Bot) runSendScheduler() {
-	interval := parseDuration(b.cfg.Discord.SendInterval, 6*time.Hour)
-	channelID := b.cfg.Discord.SendChannelID
-	if interval <= 0 || channelID == "" {
-		b.l.Info("scheduled send disabled (no channel ID or invalid interval)")
-		return
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			b.doScheduledSend(channelID)
-		case <-b.stopCh:
-			return
-		}
-	}
-}
-
-func (b *Bot) doScheduledSend(channelID string) {
-	ctx := context.Background()
-	b.vlog("scheduled send: selecting album (history=%d)", b.cfg.Discord.SendHistorySize)
-	imgs, albumID, err := b.imagesUC.GetScheduledAlbumImages(ctx, b.cfg.Discord.SendHistorySize, albumPoolSize)
-	if err != nil {
-		b.l.Error(fmt.Errorf("doScheduledSend GetScheduledAlbumImages: %w", err))
-		return
-	}
-	albumName := albumNameFrom(imgs)
-	b.vlog("scheduled send: album=%q id=%d sending to channel %s", albumName, albumID, channelID)
-	msg := b.sendAlbumToChannel(ctx, b.session, channelID, albumName, imgs)
-	// Track the sent message so any user reaction increments the album's rating.
-	if msg != nil {
-		b.trackScheduledMsg(msg.ID, albumID)
-		b.vlog("scheduled send: completed album=%q messageID=%s", albumName, msg.ID)
-	}
-	// Stamp last_sent_at regardless of whether the Discord upload succeeded,
-	// so the same album is not retried immediately on the next tick.
-	if err := b.imagesUC.MarkAlbumSent(ctx, albumID); err != nil {
-		b.l.Error(fmt.Errorf("doScheduledSend MarkAlbumSent: %w", err))
 	}
 }
 
@@ -962,4 +519,8 @@ func parseDuration(s string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+func timeParseDuration(s string) (time.Duration, error) {
+	return time.ParseDuration(s)
 }

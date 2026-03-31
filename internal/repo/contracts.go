@@ -30,9 +30,14 @@ type (
 
 	// AlbumsRepo manages album persistence.
 	AlbumsRepo interface {
+		List(ctx context.Context, offset, limit int) ([]entity.Album, error)
+		GetByID(ctx context.Context, id int) (entity.Album, error)
+		Create(ctx context.Context, name string) (entity.Album, error)
 		GetOrCreate(ctx context.Context, name string) (entity.Album, error)
 		GetByName(ctx context.Context, name string) (entity.Album, error)
 		GetRandom(ctx context.Context) (entity.Album, error)
+		Update(ctx context.Context, id int, name string) (entity.Album, error)
+		Delete(ctx context.Context, id int) error
 		// GetRandomExcludeRecent returns a random album that is NOT among the
 		// excludeN most recently sent (by last_sent_at DESC).
 		// When no eligible album exists (all sent within the history window),
@@ -50,8 +55,13 @@ type (
 
 	// ImagesRepo manages image persistence.
 	ImagesRepo interface {
+		List(ctx context.Context, albumID, offset, limit int) ([]entity.Image, error)
+		GetByID(ctx context.Context, id int) (entity.Image, error)
 		GetDefault(ctx context.Context) (entity.Image, error)
 		GetRandom(ctx context.Context) (entity.Image, error)
+		Insert(ctx context.Context, img entity.Image) (entity.Image, error)
+		Update(ctx context.Context, img entity.Image) (entity.Image, error)
+		Delete(ctx context.Context, id int) error
 		// GetRandomByAlbum returns up to limit random images from albumID,
 		// optionally excluding the image with excludeID (pass 0 for no exclusion).
 		GetRandomByAlbum(ctx context.Context, albumID, limit, excludeID int) ([]entity.Image, error)
@@ -63,6 +73,12 @@ type (
 		// FindCoverByAlbum returns the image in albumID whose filename matches
 		// the cover convention (cover.* or _cover.*), case-insensitive.
 		FindCoverByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error)
+	}
+
+	// ScheduleSettingsRepo manages runtime send scheduling per guild.
+	ScheduleSettingsRepo interface {
+		GetByGuild(ctx context.Context, guildID string) (entity.DiscordScheduleSettings, bool, error)
+		Upsert(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error)
 	}
 
 	// PCloudAPI abstracts the pCloud REST API.

@@ -52,4 +52,24 @@ type (
 		// SyncImages fetches the pCloud folder tree and reconciles it with the database.
 		SyncImages(ctx context.Context) error
 	}
+
+	Settings interface {
+		GetEffectiveSchedule(ctx context.Context, guildID string) (entity.EffectiveScheduleSettings, error)
+		UpsertSchedule(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error)
+	}
+
+	Admin interface {
+		ListAlbums(ctx context.Context, offset, limit int) ([]entity.Album, error)
+		GetAlbum(ctx context.Context, id int) (entity.Album, error)
+		CreateAlbum(ctx context.Context, name string) (entity.Album, error)
+		UpdateAlbum(ctx context.Context, id int, name string) (entity.Album, error)
+		DeleteAlbum(ctx context.Context, id int) error
+		ListImages(ctx context.Context, albumID, offset, limit int) ([]entity.Image, error)
+		GetImage(ctx context.Context, id int) (entity.Image, error)
+		CreateImage(ctx context.Context, img entity.Image) (entity.Image, error)
+		UpdateImage(ctx context.Context, img entity.Image) (entity.Image, error)
+		DeleteImage(ctx context.Context, id int) error
+		GetEffectiveSchedule(ctx context.Context, guildID string) (entity.EffectiveScheduleSettings, error)
+		UpsertSchedule(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error)
+	}
 )

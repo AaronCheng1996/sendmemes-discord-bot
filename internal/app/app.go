@@ -13,7 +13,9 @@ import (
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/controller/restapi"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo/persistent"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo/webapi"
+	adminuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/admin"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/images"
+	settingsuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/settings"
 	syncuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/sync"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/translation"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/httpserver"
@@ -41,6 +43,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	// Repos: images & albums
 	imagesRepo := persistent.NewImagesRepo(pg)
 	albumsRepo := persistent.NewAlbumsRepo(pg)
+	scheduleSettingsRepo := persistent.NewScheduleSettingsRepo(pg)
 
 	// pCloud client + sync use case
 	pcloudClient := webapi.NewPCloudClient(
@@ -57,9 +60,11 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	// Use-Case: images
 	imagesUseCase := images.New(imagesRepo, albumsRepo, pcloudClient, cfg.HTTP.PublicURL)
+	settingsUseCase := settingsuc.New(cfg, scheduleSettingsRepo)
+	adminUseCase := adminuc.New(albumsRepo, imagesRepo, settingsUseCase)
 
 	// Discord Bot
-	discordBot, err := discord.NewBot(cfg, l, translationUseCase, imagesUseCase, syncUseCase)
+	discordBot, err := discord.NewBot(cfg, l, translationUseCase, imagesUseCase, syncUseCase, settingsUseCase)
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - discord.NewBot: %w", err))
 	}
@@ -67,7 +72,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	// HTTP Server (REST API)
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
-	restapi.NewRouter(httpServer.App, cfg, translationUseCase, l)
+	restapi.NewRouter(httpServer.App, cfg, translationUseCase, adminUseCase, l)
 	httpServer.Start()
 
 	// Waiting signal

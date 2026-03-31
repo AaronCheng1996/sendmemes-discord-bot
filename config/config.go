@@ -14,6 +14,7 @@ type (
 		HTTP    HTTP
 		Log     Log
 		PG      PG
+		Admin   Admin
 		Discord Discord
 		PCloud  PCloud
 		Metrics Metrics
@@ -66,6 +67,11 @@ type (
 		// VerboseLog enables info-level logging for every bot request and scheduled
 		// send (received, completed, per-batch progress for full_album).
 		VerboseLog bool `env:"DISCORD_VERBOSE_LOG" envDefault:"true"`
+	}
+
+	// Admin controls privileged API access.
+	Admin struct {
+		APIKey string `env:"ADMIN_API_KEY"`
 	}
 
 	// PCloud holds credentials and settings for the pCloud integration.

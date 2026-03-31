@@ -22,6 +22,71 @@ func NewImagesRepo(pg *postgres.Postgres) *ImagesRepo {
 	return &ImagesRepo{Postgres: pg}
 }
 
+func imageSelectBuilder(r *ImagesRepo) sq.SelectBuilder {
+	return r.Builder.
+		Select("i.id", "i.url", "i.source", "i.file_id", "i.album_id", "COALESCE(i.guild_id, '')", "COALESCE(a.name, '')").
+		From("images i").
+		LeftJoin("albums a ON a.id = i.album_id")
+}
+
+func scanImageRow(row pgx.Row) (entity.Image, error) {
+	var e entity.Image
+	var source *string
+	var fileID *int64
+	var albumID *int
+	var guildID string
+	if err := row.Scan(&e.ID, &e.URL, &source, &fileID, &albumID, &guildID, &e.AlbumName); err != nil {
+		return entity.Image{}, err
+	}
+	if source != nil {
+		e.Source = *source
+	}
+	if fileID != nil {
+		e.FileID = *fileID
+	}
+	if albumID != nil {
+		e.AlbumID = *albumID
+	}
+	e.GuildID = guildID
+	return e, nil
+}
+
+// List returns images with optional album filter and pagination.
+func (r *ImagesRepo) List(ctx context.Context, albumID, offset, limit int) ([]entity.Image, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	q := imageSelectBuilder(r).OrderBy("i.id ASC").Offset(uint64(offset)).Limit(uint64(limit))
+	if albumID > 0 {
+		q = q.Where(sq.Eq{"i.album_id": albumID})
+	}
+
+	sql, args, err := q.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("ImagesRepo - List - r.Builder: %w", err)
+	}
+	return r.queryImages(ctx, "ImagesRepo - List", sql, args)
+}
+
+// GetByID returns image by primary key.
+func (r *ImagesRepo) GetByID(ctx context.Context, id int) (entity.Image, error) {
+	sql, args, err := imageSelectBuilder(r).Where("i.id = ?", id).Limit(1).ToSql()
+	if err != nil {
+		return entity.Image{}, fmt.Errorf("ImagesRepo - GetByID - r.Builder: %w", err)
+	}
+	e, err := scanImageRow(r.Pool.QueryRow(ctx, sql, args...))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return entity.Image{}, fmt.Errorf("ImagesRepo - GetByID - image %d not found", id)
+		}
+		return entity.Image{}, fmt.Errorf("ImagesRepo - GetByID - QueryRow: %w", err)
+	}
+	return e, nil
+}
+
 // GetDefault returns the default image (first row by id).
 func (r *ImagesRepo) GetDefault(ctx context.Context) (entity.Image, error) {
 	sql, args, err := r.Builder.
@@ -51,33 +116,14 @@ func (r *ImagesRepo) GetDefault(ctx context.Context) (entity.Image, error) {
 
 // GetRandom returns a single random image from all images.
 func (r *ImagesRepo) GetRandom(ctx context.Context) (entity.Image, error) {
-	sql, args, err := r.Builder.
-		Select("i.id", "i.url", "i.source", "i.file_id", "i.album_id", "COALESCE(a.name, '')").
-		From("images i").
-		LeftJoin("albums a ON a.id = i.album_id").
-		OrderBy("RANDOM()").
-		Limit(1).
-		ToSql()
+	sql, args, err := imageSelectBuilder(r).OrderBy("RANDOM()").Limit(1).ToSql()
 	if err != nil {
 		return entity.Image{}, fmt.Errorf("ImagesRepo - GetRandom - r.Builder: %w", err)
 	}
 
-	var e entity.Image
-	var source *string
-	var albumID *int
-	var fileID *int64
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(&e.ID, &e.URL, &source, &fileID, &albumID, &e.AlbumName)
+	e, err := scanImageRow(r.Pool.QueryRow(ctx, sql, args...))
 	if err != nil {
 		return entity.Image{}, fmt.Errorf("ImagesRepo - GetRandom - QueryRow: %w", err)
-	}
-	if source != nil {
-		e.Source = *source
-	}
-	if fileID != nil {
-		e.FileID = *fileID
-	}
-	if albumID != nil {
-		e.AlbumID = *albumID
 	}
 	return e, nil
 }
@@ -85,13 +131,7 @@ func (r *ImagesRepo) GetRandom(ctx context.Context) (entity.Image, error) {
 // GetRandomByAlbum returns up to limit random images from the given album.
 // Pass excludeID > 0 to exclude a specific image (e.g. the cover) from the result.
 func (r *ImagesRepo) GetRandomByAlbum(ctx context.Context, albumID, limit, excludeID int) ([]entity.Image, error) {
-	q := r.Builder.
-		Select("i.id", "i.url", "i.source", "i.file_id", "i.album_id", "COALESCE(a.name, '')").
-		From("images i").
-		LeftJoin("albums a ON a.id = i.album_id").
-		Where(sq.Eq{"i.album_id": albumID}).
-		OrderBy("RANDOM()").
-		Limit(uint64(limit))
+	q := imageSelectBuilder(r).Where(sq.Eq{"i.album_id": albumID}).OrderBy("RANDOM()").Limit(uint64(limit))
 
 	if excludeID > 0 {
 		q = q.Where(sq.NotEq{"i.id": excludeID})
@@ -107,12 +147,7 @@ func (r *ImagesRepo) GetRandomByAlbum(ctx context.Context, albumID, limit, exclu
 // GetAllByAlbum returns all images in the given album ordered by id.
 // Pass excludeID > 0 to exclude a specific image (e.g. the cover) from the result.
 func (r *ImagesRepo) GetAllByAlbum(ctx context.Context, albumID, excludeID int) ([]entity.Image, error) {
-	q := r.Builder.
-		Select("i.id", "i.url", "i.source", "i.file_id", "i.album_id", "COALESCE(a.name, '')").
-		From("images i").
-		LeftJoin("albums a ON a.id = i.album_id").
-		Where(sq.Eq{"i.album_id": albumID}).
-		OrderBy("i.id ASC")
+	q := imageSelectBuilder(r).Where(sq.Eq{"i.album_id": albumID}).OrderBy("i.id ASC")
 
 	if excludeID > 0 {
 		q = q.Where(sq.NotEq{"i.id": excludeID})
@@ -128,38 +163,78 @@ func (r *ImagesRepo) GetAllByAlbum(ctx context.Context, albumID, excludeID int) 
 // FindCoverByAlbum returns the image in albumID whose filename matches the cover
 // convention: cover.* or _cover.* (case-insensitive).
 func (r *ImagesRepo) FindCoverByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error) {
-	sql, args, err := r.Builder.
-		Select("i.id", "i.url", "i.source", "i.file_id", "i.album_id", "COALESCE(a.name, '')").
-		From("images i").
-		LeftJoin("albums a ON a.id = i.album_id").
+	sql, args, err := imageSelectBuilder(r).
 		Where("i.album_id = ? AND i.url ~* ?", albumID, `^_?cover\.`).
-		Limit(1).
-		ToSql()
+		Limit(1).ToSql()
 	if err != nil {
 		return entity.Image{}, false, fmt.Errorf("ImagesRepo - FindCoverByAlbum - r.Builder: %w", err)
 	}
 
-	var e entity.Image
-	var source *string
-	var fileID *int64
-	var albumIDVal *int
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(&e.ID, &e.URL, &source, &fileID, &albumIDVal, &e.AlbumName)
+	e, err := scanImageRow(r.Pool.QueryRow(ctx, sql, args...))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return entity.Image{}, false, nil
 		}
 		return entity.Image{}, false, fmt.Errorf("ImagesRepo - FindCoverByAlbum - QueryRow: %w", err)
 	}
-	if source != nil {
-		e.Source = *source
-	}
-	if fileID != nil {
-		e.FileID = *fileID
-	}
-	if albumIDVal != nil {
-		e.AlbumID = *albumIDVal
-	}
 	return e, true, nil
+}
+
+// Insert inserts one image row.
+func (r *ImagesRepo) Insert(ctx context.Context, img entity.Image) (entity.Image, error) {
+	sql, args, err := r.Builder.
+		Insert("images").
+		Columns("url", "source", "guild_id", "album_id", "file_id").
+		Values(img.URL, nullableString(img.Source), nullableString(img.GuildID), nullableInt(img.AlbumID), nullableInt64(img.FileID)).
+		Suffix("RETURNING id, url, COALESCE(source, ''), COALESCE(guild_id, ''), COALESCE(album_id, 0), COALESCE(file_id, 0)").
+		ToSql()
+	if err != nil {
+		return entity.Image{}, fmt.Errorf("ImagesRepo - Insert - r.Builder: %w", err)
+	}
+
+	var out entity.Image
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&out.ID, &out.URL, &out.Source, &out.GuildID, &out.AlbumID, &out.FileID); err != nil {
+		return entity.Image{}, fmt.Errorf("ImagesRepo - Insert - QueryRow: %w", err)
+	}
+	return out, nil
+}
+
+// Update updates image fields and returns updated row.
+func (r *ImagesRepo) Update(ctx context.Context, img entity.Image) (entity.Image, error) {
+	sql, args, err := r.Builder.
+		Update("images").
+		Set("url", img.URL).
+		Set("source", nullableString(img.Source)).
+		Set("guild_id", nullableString(img.GuildID)).
+		Set("album_id", nullableInt(img.AlbumID)).
+		Set("file_id", nullableInt64(img.FileID)).
+		Where("id = ?", img.ID).
+		Suffix("RETURNING id, url, COALESCE(source, ''), COALESCE(guild_id, ''), COALESCE(album_id, 0), COALESCE(file_id, 0)").
+		ToSql()
+	if err != nil {
+		return entity.Image{}, fmt.Errorf("ImagesRepo - Update - r.Builder: %w", err)
+	}
+
+	var out entity.Image
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&out.ID, &out.URL, &out.Source, &out.GuildID, &out.AlbumID, &out.FileID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return entity.Image{}, fmt.Errorf("ImagesRepo - Update - image %d not found", img.ID)
+		}
+		return entity.Image{}, fmt.Errorf("ImagesRepo - Update - QueryRow: %w", err)
+	}
+	return out, nil
+}
+
+// Delete removes image by id.
+func (r *ImagesRepo) Delete(ctx context.Context, id int) error {
+	sql, args, err := r.Builder.Delete("images").Where("id = ?", id).ToSql()
+	if err != nil {
+		return fmt.Errorf("ImagesRepo - Delete - r.Builder: %w", err)
+	}
+	if _, err = r.Pool.Exec(ctx, sql, args...); err != nil {
+		return fmt.Errorf("ImagesRepo - Delete - Exec: %w", err)
+	}
+	return nil
 }
 
 // UpsertByFileID inserts or updates an image record keyed on file_id.
@@ -213,21 +288,9 @@ func (r *ImagesRepo) queryImages(ctx context.Context, caller, sqlStr string, arg
 
 	var images []entity.Image
 	for rows.Next() {
-		var e entity.Image
-		var source *string
-		var fileID *int64
-		var albumID *int
-		if err = rows.Scan(&e.ID, &e.URL, &source, &fileID, &albumID, &e.AlbumName); err != nil {
-			return nil, fmt.Errorf("%s - Scan: %w", caller, err)
-		}
-		if source != nil {
-			e.Source = *source
-		}
-		if fileID != nil {
-			e.FileID = *fileID
-		}
-		if albumID != nil {
-			e.AlbumID = *albumID
+		e, scanErr := scanImageRow(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("%s - Scan: %w", caller, scanErr)
 		}
 		images = append(images, e)
 	}
@@ -235,4 +298,25 @@ func (r *ImagesRepo) queryImages(ctx context.Context, caller, sqlStr string, arg
 		return nil, fmt.Errorf("%s - rows.Err: %w", caller, err)
 	}
 	return images, nil
+}
+
+func nullableString(v string) interface{} {
+	if v == "" {
+		return nil
+	}
+	return v
+}
+
+func nullableInt(v int) interface{} {
+	if v <= 0 {
+		return nil
+	}
+	return v
+}
+
+func nullableInt64(v int64) interface{} {
+	if v <= 0 {
+		return nil
+	}
+	return v
 }

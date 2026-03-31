@@ -4,7 +4,6 @@ package restapi
 import (
 	"net/http"
 
-	"github.com/ansrivas/fiberprometheus/v2"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/config"
 	_ "github.com/AaronCheng1996/sendmemes-discord-bot/docs" // Swagger docs.
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/controller/restapi/middleware"
@@ -12,6 +11,7 @@ import (
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/logger"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/sample"
+	"github.com/ansrivas/fiberprometheus/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/swagger"
 )
@@ -23,7 +23,7 @@ import (
 // @version     1.0
 // @host        localhost:8080
 // @BasePath    /v1
-func NewRouter(app *fiber.App, cfg *config.Config, t usecase.Translation, l logger.Interface) {
+func NewRouter(app *fiber.App, cfg *config.Config, t usecase.Translation, a usecase.Admin, l logger.Interface) {
 	// Options
 	app.Use(middleware.Logger(l))
 	app.Use(middleware.Recovery(l))
@@ -52,6 +52,8 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.Translation, l logg
 	// Routers
 	apiV1Group := app.Group("/v1")
 	{
-		v1.NewTranslationRoutes(apiV1Group, t, l)
+		v1.NewTranslationRoutes(apiV1Group, t, a, l)
+		adminGroup := apiV1Group.Group("/admin", middleware.AdminAPIKey(cfg.Admin.APIKey))
+		v1.NewAdminRoutes(adminGroup, a, l)
 	}
 }
