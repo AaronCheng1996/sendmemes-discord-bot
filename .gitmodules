@@ -1,0 +1,3 @@
+[submodule "ui"]
+	path = ui
+	url = git@github.com:AaronCheng1996/sendmemes-ui.git
