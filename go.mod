@@ -1,6 +1,6 @@
 module github.com/AaronCheng1996/sendmemes-discord-bot
 
-go 1.25
+go 1.25.0
 
 tool (
 	github.com/daixiang0/gci
@@ -23,7 +23,7 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.11
 	github.com/gofiber/swagger v1.1.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
-	github.com/jackc/pgx/v5 v5.8.0
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/rs/zerolog v1.34.0
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/swag v1.16.6
