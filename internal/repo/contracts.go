@@ -81,6 +81,16 @@ type (
 		Upsert(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error)
 	}
 
+	// AdminAuditRepo stores admin action audit logs.
+	AdminAuditRepo interface {
+		Insert(ctx context.Context, log entity.AdminAuditLog) error
+	}
+
+	// SystemRepo provides system-level checks.
+	SystemRepo interface {
+		Ping(ctx context.Context) error
+	}
+
 	// PCloudAPI abstracts the pCloud REST API.
 	PCloudAPI interface {
 		ListFolder(ctx context.Context, folderID int64) ([]PCloudEntry, error)

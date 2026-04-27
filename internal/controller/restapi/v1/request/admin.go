@@ -30,3 +30,7 @@ type SchedulePut struct {
 	SendInterval    string `json:"send_interval"`
 	SendHistorySize int    `json:"send_history_size"`
 }
+
+type ScheduleTriggerNow struct {
+	GuildID string `json:"guild_id"`
+}

@@ -524,3 +524,21 @@ func parseDuration(s string, fallback time.Duration) time.Duration {
 func timeParseDuration(s string) (time.Duration, error) {
 	return time.ParseDuration(s)
 }
+
+// TriggerScheduleNow triggers one immediate scheduled-send cycle.
+func (b *Bot) TriggerScheduleNow(ctx context.Context, guildID string) (entity.ManualScheduleTriggerResult, error) {
+	effective, err := b.settingsUC.GetEffectiveSchedule(ctx, guildID)
+	if err != nil {
+		return entity.ManualScheduleTriggerResult{}, err
+	}
+	return b.doScheduledSend(effective.SendChannelID, effective.SendHistorySize)
+}
+
+// GetDiscordStatus returns current session online status and username.
+func (b *Bot) GetDiscordStatus(ctx context.Context) (bool, string) {
+	_ = ctx
+	if b.session == nil || b.session.State == nil || b.session.State.User == nil {
+		return false, ""
+	}
+	return b.session.DataReady, b.session.State.User.Username
+}

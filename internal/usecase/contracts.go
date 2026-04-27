@@ -58,6 +58,11 @@ type (
 		UpsertSchedule(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error)
 	}
 
+	AdminRuntime interface {
+		TriggerScheduleNow(ctx context.Context, guildID string) (entity.ManualScheduleTriggerResult, error)
+		GetDiscordStatus(ctx context.Context) (connected bool, user string)
+	}
+
 	Admin interface {
 		ListAlbums(ctx context.Context, offset, limit int) ([]entity.Album, error)
 		GetAlbum(ctx context.Context, id int) (entity.Album, error)
@@ -71,5 +76,8 @@ type (
 		DeleteImage(ctx context.Context, id int) error
 		GetEffectiveSchedule(ctx context.Context, guildID string) (entity.EffectiveScheduleSettings, error)
 		UpsertSchedule(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error)
+		RecordAudit(ctx context.Context, actor, action, targetType, targetID string, metadata map[string]any) error
+		GetSystemStatus(ctx context.Context, guildID string) (entity.SystemStatus, error)
+		TriggerScheduleNow(ctx context.Context, guildID, actor string) (entity.ManualScheduleTriggerResult, error)
 	}
 )

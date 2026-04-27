@@ -10,6 +10,14 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+func actorFromCtx(ctx *fiber.Ctx) string {
+	actor := strings.TrimSpace(ctx.Get("X-Admin-Actor"))
+	if actor == "" {
+		return "api_key"
+	}
+	return actor
+}
+
 func parseIntQuery(ctx *fiber.Ctx, key string, defaultVal int) int {
 	v := strings.TrimSpace(ctx.Query(key))
 	if v == "" {
@@ -48,6 +56,7 @@ func (r *V1) createAlbum(ctx *fiber.Ctx) error {
 		r.l.Error(err, "restapi - v1 - createAlbum")
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
+	_ = r.a.RecordAudit(ctx.UserContext(), actorFromCtx(ctx), "album.create", "album", strconv.Itoa(album.ID), map[string]any{"name": album.Name})
 	return ctx.Status(http.StatusCreated).JSON(album)
 }
 
@@ -81,6 +90,7 @@ func (r *V1) updateAlbum(ctx *fiber.Ctx) error {
 		r.l.Error(err, "restapi - v1 - updateAlbum")
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
+	_ = r.a.RecordAudit(ctx.UserContext(), actorFromCtx(ctx), "album.update", "album", strconv.Itoa(id), map[string]any{"name": body.Name})
 	return ctx.Status(http.StatusOK).JSON(album)
 }
 
@@ -93,6 +103,7 @@ func (r *V1) deleteAlbum(ctx *fiber.Ctx) error {
 		r.l.Error(err, "restapi - v1 - deleteAlbum")
 		return errorResponse(ctx, http.StatusBadRequest, "failed to delete album")
 	}
+	_ = r.a.RecordAudit(ctx.UserContext(), actorFromCtx(ctx), "album.delete", "album", strconv.Itoa(id), nil)
 	return ctx.SendStatus(http.StatusNoContent)
 }
 
@@ -129,6 +140,7 @@ func (r *V1) createImage(ctx *fiber.Ctx) error {
 		r.l.Error(err, "restapi - v1 - createImage")
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
+	_ = r.a.RecordAudit(ctx.UserContext(), actorFromCtx(ctx), "image.create", "image", strconv.Itoa(img.ID), map[string]any{"url": img.URL})
 	return ctx.Status(http.StatusCreated).JSON(img)
 }
 
@@ -169,6 +181,7 @@ func (r *V1) updateImage(ctx *fiber.Ctx) error {
 		r.l.Error(err, "restapi - v1 - updateImage")
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
+	_ = r.a.RecordAudit(ctx.UserContext(), actorFromCtx(ctx), "image.update", "image", strconv.Itoa(id), map[string]any{"url": body.URL})
 	return ctx.Status(http.StatusOK).JSON(img)
 }
 
@@ -181,6 +194,7 @@ func (r *V1) deleteImage(ctx *fiber.Ctx) error {
 		r.l.Error(err, "restapi - v1 - deleteImage")
 		return errorResponse(ctx, http.StatusBadRequest, "failed to delete image")
 	}
+	_ = r.a.RecordAudit(ctx.UserContext(), actorFromCtx(ctx), "image.delete", "image", strconv.Itoa(id), nil)
 	return ctx.SendStatus(http.StatusNoContent)
 }
 
@@ -209,5 +223,33 @@ func (r *V1) putSchedule(ctx *fiber.Ctx) error {
 		r.l.Error(err, "restapi - v1 - putSchedule")
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
+	_ = r.a.RecordAudit(ctx.UserContext(), actorFromCtx(ctx), "schedule.update", "schedule", strings.TrimSpace(body.GuildID), map[string]any{
+		"send_channel_id":   body.SendChannelID,
+		"send_interval":     body.SendInterval,
+		"send_history_size": body.SendHistorySize,
+	})
 	return ctx.Status(http.StatusOK).JSON(out)
+}
+
+func (r *V1) getSystemStatus(ctx *fiber.Ctx) error {
+	guildID := strings.TrimSpace(ctx.Query("guild_id"))
+	out, err := r.a.GetSystemStatus(ctx.UserContext(), guildID)
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - getSystemStatus")
+		return errorResponse(ctx, http.StatusInternalServerError, "failed to get system status")
+	}
+	return ctx.Status(http.StatusOK).JSON(out)
+}
+
+func (r *V1) triggerScheduleNow(ctx *fiber.Ctx) error {
+	var body request.ScheduleTriggerNow
+	if err := ctx.BodyParser(&body); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
+	}
+	res, err := r.a.TriggerScheduleNow(ctx.UserContext(), strings.TrimSpace(body.GuildID), actorFromCtx(ctx))
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - triggerScheduleNow")
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+	return ctx.Status(http.StatusOK).JSON(res)
 }

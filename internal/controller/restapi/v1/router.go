@@ -36,4 +36,6 @@ func NewAdminRoutes(adminGroup fiber.Router, a usecase.Admin, l logger.Interface
 
 	adminGroup.Get("/schedule", r.getSchedule)
 	adminGroup.Put("/schedule", r.putSchedule)
+	adminGroup.Post("/schedule/trigger-now", r.triggerScheduleNow)
+	adminGroup.Get("/system/status", r.getSystemStatus)
 }
