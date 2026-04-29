@@ -6,9 +6,29 @@ import (
 	"strings"
 
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/controller/restapi/v1/request"
+	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/controller/restapi/v1/response"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 	"github.com/gofiber/fiber/v2"
 )
+
+const (
+	defaultListLimit = 50
+	maxListLimit     = 200
+)
+
+// clampPagination normalises offset/limit so callers cannot abuse the API.
+func clampPagination(offset, limit int) (int, int) {
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 {
+		limit = defaultListLimit
+	}
+	if limit > maxListLimit {
+		limit = maxListLimit
+	}
+	return offset, limit
+}
 
 func actorFromCtx(ctx *fiber.Ctx) string {
 	actor := strings.TrimSpace(ctx.Get("X-Admin-Actor"))
@@ -35,12 +55,21 @@ func parseIDParam(ctx *fiber.Ctx) (int, error) {
 }
 
 func (r *V1) listAlbums(ctx *fiber.Ctx) error {
-	albums, err := r.a.ListAlbums(ctx.UserContext(), parseIntQuery(ctx, "offset", 0), parseIntQuery(ctx, "limit", 50))
+	offset, limit := clampPagination(parseIntQuery(ctx, "offset", 0), parseIntQuery(ctx, "limit", defaultListLimit))
+	albums, total, err := r.a.ListAlbums(ctx.UserContext(), offset, limit)
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - listAlbums")
 		return errorResponse(ctx, http.StatusInternalServerError, "failed to list albums")
 	}
-	return ctx.Status(http.StatusOK).JSON(albums)
+	if albums == nil {
+		albums = []entity.Album{}
+	}
+	return ctx.Status(http.StatusOK).JSON(response.Page[entity.Album]{
+		Items:  albums,
+		Total:  total,
+		Offset: offset,
+		Limit:  limit,
+	})
 }
 
 func (r *V1) createAlbum(ctx *fiber.Ctx) error {
@@ -108,17 +137,26 @@ func (r *V1) deleteAlbum(ctx *fiber.Ctx) error {
 }
 
 func (r *V1) listImages(ctx *fiber.Ctx) error {
-	images, err := r.a.ListImages(
+	offset, limit := clampPagination(parseIntQuery(ctx, "offset", 0), parseIntQuery(ctx, "limit", defaultListLimit))
+	images, total, err := r.a.ListImages(
 		ctx.UserContext(),
 		parseIntQuery(ctx, "album_id", 0),
-		parseIntQuery(ctx, "offset", 0),
-		parseIntQuery(ctx, "limit", 50),
+		offset,
+		limit,
 	)
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - listImages")
 		return errorResponse(ctx, http.StatusInternalServerError, "failed to list images")
 	}
-	return ctx.Status(http.StatusOK).JSON(images)
+	if images == nil {
+		images = []entity.Image{}
+	}
+	return ctx.Status(http.StatusOK).JSON(response.Page[entity.Image]{
+		Items:  images,
+		Total:  total,
+		Offset: offset,
+		Limit:  limit,
+	})
 }
 
 func (r *V1) createImage(ctx *fiber.Ctx) error {

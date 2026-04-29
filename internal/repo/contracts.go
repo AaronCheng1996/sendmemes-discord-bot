@@ -31,6 +31,7 @@ type (
 	// AlbumsRepo manages album persistence.
 	AlbumsRepo interface {
 		List(ctx context.Context, offset, limit int) ([]entity.Album, error)
+		Count(ctx context.Context) (int, error)
 		GetByID(ctx context.Context, id int) (entity.Album, error)
 		Create(ctx context.Context, name string) (entity.Album, error)
 		GetOrCreate(ctx context.Context, name string) (entity.Album, error)
@@ -56,6 +57,8 @@ type (
 	// ImagesRepo manages image persistence.
 	ImagesRepo interface {
 		List(ctx context.Context, albumID, offset, limit int) ([]entity.Image, error)
+		Count(ctx context.Context, albumID int) (int, error)
+		GetFirstByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error)
 		GetByID(ctx context.Context, id int) (entity.Image, error)
 		GetDefault(ctx context.Context) (entity.Image, error)
 		GetRandom(ctx context.Context) (entity.Image, error)

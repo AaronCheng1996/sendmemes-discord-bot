@@ -13,18 +13,20 @@ import (
 
 // UseCase provides admin CRUD and settings operations.
 type UseCase struct {
-	albums   repo.AlbumsRepo
-	images   repo.ImagesRepo
-	settings usecase.Settings
-	audit    repo.AdminAuditRepo
-	system   repo.SystemRepo
-	runtime  usecase.AdminRuntime
+	albums    repo.AlbumsRepo
+	images    repo.ImagesRepo
+	imagesUC  usecase.Images
+	settings  usecase.Settings
+	audit     repo.AdminAuditRepo
+	system    repo.SystemRepo
+	runtime   usecase.AdminRuntime
 }
 
 // New creates admin usecase.
 func New(
 	albums repo.AlbumsRepo,
 	images repo.ImagesRepo,
+	imagesUC usecase.Images,
 	settings usecase.Settings,
 	audit repo.AdminAuditRepo,
 	system repo.SystemRepo,
@@ -33,6 +35,7 @@ func New(
 	return &UseCase{
 		albums:   albums,
 		images:   images,
+		imagesUC: imagesUC,
 		settings: settings,
 		audit:    audit,
 		system:   system,
@@ -40,8 +43,54 @@ func New(
 	}
 }
 
-func (uc *UseCase) ListAlbums(ctx context.Context, offset, limit int) ([]entity.Album, error) {
-	return uc.albums.List(ctx, offset, limit)
+// ListAlbums returns paginated albums with preview URLs already resolved.
+// Preview rule: cover image (if has_cover && cover_image_id) → first image in album → empty.
+// pCloud URLs go through PCloudClient's in-memory cache to limit upstream API calls.
+func (uc *UseCase) ListAlbums(ctx context.Context, offset, limit int) ([]entity.Album, int, error) {
+	items, err := uc.albums.List(ctx, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := uc.albums.Count(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range items {
+		url, _, perr := uc.resolveAlbumPreviewURL(ctx, items[i])
+		if perr != nil {
+			// Preview is best-effort; skip without failing the whole list.
+			continue
+		}
+		items[i].PreviewURL = url
+	}
+	return items, total, nil
+}
+
+// resolveAlbumPreviewURL picks the album's cover image (if any) or the lowest-id
+// image as a fallback, then resolves it to a public URL.
+func (uc *UseCase) resolveAlbumPreviewURL(ctx context.Context, album entity.Album) (string, bool, error) {
+	var img entity.Image
+	if album.HasCover && album.CoverImageID > 0 {
+		var err error
+		img, err = uc.images.GetByID(ctx, album.CoverImageID)
+		if err != nil {
+			return "", false, err
+		}
+	} else {
+		fallback, found, err := uc.images.GetFirstByAlbum(ctx, album.ID)
+		if err != nil {
+			return "", false, err
+		}
+		if !found {
+			return "", false, nil
+		}
+		img = fallback
+	}
+	url, err := uc.imagesUC.ResolveURL(ctx, img)
+	if err != nil {
+		return "", false, err
+	}
+	return url, true, nil
 }
 
 func (uc *UseCase) GetAlbum(ctx context.Context, id int) (entity.Album, error) {
@@ -68,8 +117,25 @@ func (uc *UseCase) DeleteAlbum(ctx context.Context, id int) error {
 	return uc.albums.Delete(ctx, id)
 }
 
-func (uc *UseCase) ListImages(ctx context.Context, albumID, offset, limit int) ([]entity.Image, error) {
-	return uc.images.List(ctx, albumID, offset, limit)
+// ListImages returns paginated images with preview URLs already resolved.
+// pCloud URLs go through PCloudClient's in-memory cache to limit upstream API calls.
+func (uc *UseCase) ListImages(ctx context.Context, albumID, offset, limit int) ([]entity.Image, int, error) {
+	items, err := uc.images.List(ctx, albumID, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := uc.images.Count(ctx, albumID)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range items {
+		url, perr := uc.imagesUC.ResolveURL(ctx, items[i])
+		if perr != nil {
+			continue
+		}
+		items[i].PreviewURL = url
+	}
+	return items, total, nil
 }
 
 func (uc *UseCase) GetImage(ctx context.Context, id int) (entity.Image, error) {

@@ -92,6 +92,19 @@ func (r *AlbumsRepo) List(ctx context.Context, offset, limit int) ([]entity.Albu
 	return albums, nil
 }
 
+// Count returns the total number of albums.
+func (r *AlbumsRepo) Count(ctx context.Context) (int, error) {
+	sql, args, err := r.Builder.Select("COUNT(*)").From("albums").ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("AlbumsRepo - Count - r.Builder: %w", err)
+	}
+	var n int
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("AlbumsRepo - Count - QueryRow: %w", err)
+	}
+	return n, nil
+}
+
 // GetByID returns album by primary key.
 func (r *AlbumsRepo) GetByID(ctx context.Context, id int) (entity.Album, error) {
 	sql, args, err := albumSelectBuilder(r).

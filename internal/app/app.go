@@ -70,7 +70,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		l.Fatal(fmt.Errorf("app - Run - discord.NewBot: %w", err))
 	}
 	discordBot.Start()
-	adminUseCase := adminuc.New(albumsRepo, imagesRepo, settingsUseCase, adminAuditRepo, systemRepo, discordBot)
+	adminUseCase := adminuc.New(albumsRepo, imagesRepo, imagesUseCase, settingsUseCase, adminAuditRepo, systemRepo, discordBot)
 
 	// HTTP Server (REST API)
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))

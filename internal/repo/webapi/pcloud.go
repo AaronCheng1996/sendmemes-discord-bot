@@ -27,6 +27,11 @@ const (
 
 	// pcloudRetryBase is the initial backoff duration; it doubles each retry.
 	pcloudRetryBase = 500 * time.Millisecond
+
+	// pcloudFileLinkTTL bounds how long a cached getfilelink URL is reused.
+	// pCloud's signed download URLs are typically valid for several hours; we
+	// expire well below that to stay safe and pick up server hostname changes.
+	pcloudFileLinkTTL = 50 * time.Minute
 )
 
 // isTokenErr returns true when err signals that the pCloud session token
@@ -85,6 +90,12 @@ type pcloudUserInfoResponse struct {
 // pCloud uses two different query parameter names depending on how the token was obtained:
 //   - OAuth2 token  →  access_token=TOKEN
 //   - Session token (from username/password login)  →  auth=TOKEN
+// fileLinkCacheEntry holds a pCloud getfilelink result with its expiry.
+type fileLinkCacheEntry struct {
+	url       string
+	expiresAt time.Time
+}
+
 type PCloudClient struct {
 	mu          sync.RWMutex
 	token       string // current token value
@@ -101,6 +112,13 @@ type PCloudClient struct {
 	// loginMu serialises re-login so that when many goroutines detect a
 	// token error at the same time only one issues the userinfo request.
 	loginMu sync.Mutex
+
+	// fileLinkCache memoizes getfilelink responses by file_id.
+	// pCloud returns expensive temporary URLs that stay valid for hours; this
+	// cache prevents N pCloud calls per admin list refresh and benefits Discord
+	// embeds when the same image is sent multiple times within the TTL window.
+	fileLinkMu    sync.RWMutex
+	fileLinkCache map[int64]fileLinkCacheEntry
 }
 
 // NewPCloudClient creates a new pCloud API client.
@@ -108,11 +126,12 @@ type PCloudClient struct {
 // Otherwise call Login(ctx) once at startup to exchange username/password for a session token (auth param).
 func NewPCloudClient(accessToken, username, password, apiEndpoint string) *PCloudClient {
 	c := &PCloudClient{
-		username:    username,
-		password:    password,
-		apiEndpoint: strings.TrimSuffix(apiEndpoint, "/"),
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
-		sem:         make(chan struct{}, pcloudMaxConcurrent),
+		username:      username,
+		password:      password,
+		apiEndpoint:   strings.TrimSuffix(apiEndpoint, "/"),
+		httpClient:    &http.Client{Timeout: 30 * time.Second},
+		sem:           make(chan struct{}, pcloudMaxConcurrent),
+		fileLinkCache: make(map[int64]fileLinkCacheEntry),
 	}
 	if accessToken != "" {
 		c.token = accessToken
@@ -347,9 +366,36 @@ func collectImages(node pcloudMeta, albumName string, out *[]repo.PCloudEntry) {
 // GetFileLink
 // ---------------------------------------------------------------------------
 
+// getFileLinkFromCache returns a cached download URL when present and unexpired.
+func (c *PCloudClient) getFileLinkFromCache(fileID int64) (string, bool) {
+	c.fileLinkMu.RLock()
+	defer c.fileLinkMu.RUnlock()
+	entry, ok := c.fileLinkCache[fileID]
+	if !ok || time.Now().After(entry.expiresAt) {
+		return "", false
+	}
+	return entry.url, true
+}
+
+// putFileLinkInCache stores a freshly resolved URL with TTL.
+func (c *PCloudClient) putFileLinkInCache(fileID int64, url string) {
+	c.fileLinkMu.Lock()
+	defer c.fileLinkMu.Unlock()
+	c.fileLinkCache[fileID] = fileLinkCacheEntry{
+		url:       url,
+		expiresAt: time.Now().Add(pcloudFileLinkTTL),
+	}
+}
+
 // GetFileLink returns a temporary download URL for a pCloud file.
 // Retries up to pcloudMaxRetries times; re-logs in if the token has expired.
+// Results are cached in memory for pcloudFileLinkTTL to avoid repeating the
+// API call for the same file_id (e.g. admin list refreshes).
 func (c *PCloudClient) GetFileLink(ctx context.Context, fileID int64) (string, error) {
+	if url, ok := c.getFileLinkFromCache(fileID); ok {
+		return url, nil
+	}
+
 	var lastErr error
 	backoff := pcloudRetryBase
 	needRelogin := false
@@ -373,6 +419,7 @@ func (c *PCloudClient) GetFileLink(ctx context.Context, fileID int64) (string, e
 
 		link, err := c.doGetFileLink(ctx, fileID)
 		if err == nil {
+			c.putFileLinkInCache(fileID, link)
 			return link, nil
 		}
 		lastErr = err

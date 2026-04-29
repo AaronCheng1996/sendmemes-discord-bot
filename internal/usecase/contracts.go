@@ -64,12 +64,15 @@ type (
 	}
 
 	Admin interface {
-		ListAlbums(ctx context.Context, offset, limit int) ([]entity.Album, error)
+		// ListAlbums returns paginated albums with embedded preview_url already resolved
+		// (cover image when present, otherwise the lowest-id image in the album).
+		ListAlbums(ctx context.Context, offset, limit int) ([]entity.Album, int, error)
 		GetAlbum(ctx context.Context, id int) (entity.Album, error)
 		CreateAlbum(ctx context.Context, name string) (entity.Album, error)
 		UpdateAlbum(ctx context.Context, id int, name string) (entity.Album, error)
 		DeleteAlbum(ctx context.Context, id int) error
-		ListImages(ctx context.Context, albumID, offset, limit int) ([]entity.Image, error)
+		// ListImages returns paginated images with embedded preview_url already resolved.
+		ListImages(ctx context.Context, albumID, offset, limit int) ([]entity.Image, int, error)
 		GetImage(ctx context.Context, id int) (entity.Image, error)
 		CreateImage(ctx context.Context, img entity.Image) (entity.Image, error)
 		UpdateImage(ctx context.Context, img entity.Image) (entity.Image, error)

@@ -11,4 +11,7 @@ type Album struct {
 	CoverImageID   int        `json:"cover_image_id,omitempty"`
 	LastSentAt     *time.Time `json:"last_sent_at,omitempty"`
 	PositiveRating int        `json:"positive_rating"`
+	// PreviewURL is resolved on demand by the admin list endpoint (cover image
+	// when present, otherwise the lowest-id image in the album). Not persisted.
+	PreviewURL string `json:"preview_url,omitempty"`
 }

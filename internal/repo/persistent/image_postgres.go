@@ -71,6 +71,44 @@ func (r *ImagesRepo) List(ctx context.Context, albumID, offset, limit int) ([]en
 	return r.queryImages(ctx, "ImagesRepo - List", sql, args)
 }
 
+// Count returns the total number of images, optionally filtered by albumID (>0).
+func (r *ImagesRepo) Count(ctx context.Context, albumID int) (int, error) {
+	q := r.Builder.Select("COUNT(*)").From("images")
+	if albumID > 0 {
+		q = q.Where(sq.Eq{"album_id": albumID})
+	}
+	sql, args, err := q.ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("ImagesRepo - Count - r.Builder: %w", err)
+	}
+	var n int
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("ImagesRepo - Count - QueryRow: %w", err)
+	}
+	return n, nil
+}
+
+// GetFirstByAlbum returns the lowest-id image in albumID, used as a preview when
+// the album has no explicit cover. Returns (zero, false, nil) when the album has no images.
+func (r *ImagesRepo) GetFirstByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error) {
+	sql, args, err := imageSelectBuilder(r).
+		Where(sq.Eq{"i.album_id": albumID}).
+		OrderBy("i.id ASC").
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return entity.Image{}, false, fmt.Errorf("ImagesRepo - GetFirstByAlbum - r.Builder: %w", err)
+	}
+	e, err := scanImageRow(r.Pool.QueryRow(ctx, sql, args...))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return entity.Image{}, false, nil
+		}
+		return entity.Image{}, false, fmt.Errorf("ImagesRepo - GetFirstByAlbum - QueryRow: %w", err)
+	}
+	return e, true, nil
+}
+
 // GetByID returns image by primary key.
 func (r *ImagesRepo) GetByID(ctx context.Context, id int) (entity.Image, error) {
 	sql, args, err := imageSelectBuilder(r).Where("i.id = ?", id).Limit(1).ToSql()
