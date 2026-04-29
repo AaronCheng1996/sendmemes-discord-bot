@@ -23,3 +23,6 @@ bin/
 vendor/
 
 coverage.txt
+
+# Local scratchpad / dev notes
+tmp/
