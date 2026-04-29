@@ -21,6 +21,9 @@ x-backend-app-environment: &x-backend-app-environment
   PG_POOL_MAX: "2"
   PG_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/sendmemes?sslmode=disable"
   # Discord
+  # Admin
+  ADMIN_API_KEY: "${ADMIN_API_KEY}"
+  # Discord
   DISCORD_TOKEN: "${DISCORD_TOKEN}"
   DISCORD_APPLICATION_ID: "${DISCORD_APPLICATION_ID}"
   DISCORD_GUILD_ID: "${DISCORD_GUILD_ID}"

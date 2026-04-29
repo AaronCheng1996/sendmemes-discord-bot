@@ -76,6 +76,7 @@ type (
 
 	// PCloud holds credentials and settings for the pCloud integration.
 	// Auth priority: PCLOUD_ACCESS_TOKEN > PCLOUD_USERNAME + PCLOUD_PASSWORD.
+	// Note: pCloud does not support 2FA via API. Disable 2FA on the account if using username/password.
 	PCloud struct {
 		AccessToken  string `env:"PCLOUD_ACCESS_TOKEN"`
 		Username     string `env:"PCLOUD_USERNAME"`

@@ -13,6 +13,7 @@ import (
 	"github.com/AaronCheng1996/sendmemes-discord-bot/sample"
 	"github.com/ansrivas/fiberprometheus/v2"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/swagger"
 )
 
@@ -25,6 +26,11 @@ import (
 // @BasePath    /v1
 func NewRouter(app *fiber.App, cfg *config.Config, t usecase.Translation, a usecase.Admin, l logger.Interface) {
 	// Options
+	app.Use(cors.New(cors.Config{
+		AllowOrigins: "*",
+		AllowHeaders: "Origin, Content-Type, Accept, X-Admin-Key, Authorization",
+		AllowMethods: "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+	}))
 	app.Use(middleware.Logger(l))
 	app.Use(middleware.Recovery(l))
 

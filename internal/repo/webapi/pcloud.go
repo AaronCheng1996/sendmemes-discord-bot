@@ -88,7 +88,7 @@ type pcloudUserInfoResponse struct {
 type PCloudClient struct {
 	mu          sync.RWMutex
 	token       string // current token value
-	tokenParam  string // "access_token" or "auth"
+	tokenParam  string // always "auth" for both pre-set and session tokens
 	username    string
 	password    string
 	apiEndpoint string
@@ -116,7 +116,7 @@ func NewPCloudClient(accessToken, username, password, apiEndpoint string) *PClou
 	}
 	if accessToken != "" {
 		c.token = accessToken
-		c.tokenParam = "access_token"
+		c.tokenParam = "auth" // pre-obtained session tokens use "auth" param
 	}
 	return c
 }
@@ -159,7 +159,6 @@ func (c *PCloudClient) doLogin(ctx context.Context) error {
 		url.QueryEscape(c.username),
 		url.QueryEscape(c.password),
 	)
-
 	var lastErr error
 	backoff := pcloudRetryBase
 	for attempt := 1; attempt <= pcloudMaxRetries; attempt++ {
