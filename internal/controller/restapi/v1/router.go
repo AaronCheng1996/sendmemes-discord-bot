@@ -24,6 +24,7 @@ func NewAdminRoutes(adminGroup fiber.Router, a usecase.Admin, l logger.Interface
 	r := &V1{a: a, l: l, v: validator.New(validator.WithRequiredStructEnabled())}
 	adminGroup.Get("/albums", r.listAlbums)
 	adminGroup.Post("/albums", r.createAlbum)
+	adminGroup.Post("/albums/:id/send-test", r.sendAlbumTest)
 	adminGroup.Get("/albums/:id", r.getAlbum)
 	adminGroup.Patch("/albums/:id", r.updateAlbum)
 	adminGroup.Delete("/albums/:id", r.deleteAlbum)

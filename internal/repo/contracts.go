@@ -30,14 +30,14 @@ type (
 
 	// AlbumsRepo manages album persistence.
 	AlbumsRepo interface {
-		List(ctx context.Context, offset, limit int) ([]entity.Album, error)
-		Count(ctx context.Context) (int, error)
+		List(ctx context.Context, q AlbumAdminListQuery, offset, limit int) ([]entity.Album, error)
+		Count(ctx context.Context, q AlbumAdminListQuery) (int, error)
 		GetByID(ctx context.Context, id int) (entity.Album, error)
-		Create(ctx context.Context, name string) (entity.Album, error)
+		Create(ctx context.Context, name string, sendMode entity.AlbumSendMode, sendConfigJSON string) (entity.Album, error)
 		GetOrCreate(ctx context.Context, name string) (entity.Album, error)
 		GetByName(ctx context.Context, name string) (entity.Album, error)
 		GetRandom(ctx context.Context) (entity.Album, error)
-		Update(ctx context.Context, id int, name string) (entity.Album, error)
+		Update(ctx context.Context, id int, name string, sendMode entity.AlbumSendMode, sendConfigJSON string) (entity.Album, error)
 		Delete(ctx context.Context, id int) error
 		// GetRandomExcludeRecent returns a random album that is NOT among the
 		// excludeN most recently sent (by last_sent_at DESC).
@@ -56,8 +56,8 @@ type (
 
 	// ImagesRepo manages image persistence.
 	ImagesRepo interface {
-		List(ctx context.Context, albumID, offset, limit int) ([]entity.Image, error)
-		Count(ctx context.Context, albumID int) (int, error)
+		List(ctx context.Context, q ImageAdminListQuery, offset, limit int) ([]entity.Image, error)
+		Count(ctx context.Context, q ImageAdminListQuery) (int, error)
 		GetFirstByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error)
 		GetByID(ctx context.Context, id int) (entity.Image, error)
 		GetDefault(ctx context.Context) (entity.Image, error)

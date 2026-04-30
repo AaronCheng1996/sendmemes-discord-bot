@@ -8,6 +8,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -532,6 +533,48 @@ func (b *Bot) TriggerScheduleNow(ctx context.Context, guildID string) (entity.Ma
 		return entity.ManualScheduleTriggerResult{}, err
 	}
 	return b.doScheduledSend(effective.SendChannelID, effective.SendHistorySize)
+}
+
+// SendAlbumTest posts a one-off preview of albumID to the effective schedule send channel.
+// It does not call MarkAlbumSent and does not affect anti-repeat scheduling.
+func (b *Bot) SendAlbumTest(ctx context.Context, guildID string, albumID int) (entity.ManualScheduleTriggerResult, error) {
+	effective, err := b.settingsUC.GetEffectiveSchedule(ctx, guildID)
+	if err != nil {
+		return entity.ManualScheduleTriggerResult{}, err
+	}
+	ch := strings.TrimSpace(effective.SendChannelID)
+	if ch == "" {
+		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("send channel is not configured (schedule send_channel_id or DISCORD_CHANNEL_ID)")
+	}
+	imgs, album, err := b.imagesUC.GetAlbumImagesByID(ctx, albumID, albumPoolSize)
+	if err != nil {
+		return entity.ManualScheduleTriggerResult{}, err
+	}
+	result := entity.ManualScheduleTriggerResult{
+		AlbumID:   album.ID,
+		AlbumName: album.Name,
+		ChannelID: ch,
+	}
+	caption := "[TEST] " + album.Name
+	if len(imgs) == 0 {
+		content := "**" + caption + "**\n_(no images in this album)_"
+		msg, sendErr := b.session.ChannelMessageSend(ch, content)
+		if sendErr != nil {
+			return entity.ManualScheduleTriggerResult{}, fmt.Errorf("discord SendAlbumTest text: %w", sendErr)
+		}
+		if msg != nil {
+			result.Triggered = true
+			result.MessageID = msg.ID
+		}
+		return result, nil
+	}
+	msg := b.sendAlbumToChannel(ctx, b.session, ch, caption, imgs)
+	if msg == nil {
+		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("failed to send test attachments (see server logs)")
+	}
+	result.Triggered = true
+	result.MessageID = msg.ID
+	return result, nil
 }
 
 // GetDiscordStatus returns current session online status and username.

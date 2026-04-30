@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
+	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo"
 )
 
 //go:generate mockgen -source=contracts.go -destination=./mocks_usecase_test.go -package=usecase_test
@@ -23,6 +24,8 @@ type (
 		// GetAlbumImages returns up to limit images from the named album.
 		// If the album has a cover, it is always the first element; the rest are random.
 		GetAlbumImages(ctx context.Context, albumName string, limit int) ([]entity.Image, error)
+		// GetAlbumImagesByID returns up to limit images for albumID using the same cover-first rules.
+		GetAlbumImagesByID(ctx context.Context, albumID, limit int) ([]entity.Image, entity.Album, error)
 		// GetRandomAlbumImages picks a random album then returns up to limit images from it.
 		// If the album has a cover, it is always the first element; the rest are random.
 		GetRandomAlbumImages(ctx context.Context, limit int) ([]entity.Image, error)
@@ -60,19 +63,22 @@ type (
 
 	AdminRuntime interface {
 		TriggerScheduleNow(ctx context.Context, guildID string) (entity.ManualScheduleTriggerResult, error)
+		// SendAlbumTest posts a preview of one album to the effective schedule channel.
+		// It does not update last_sent_at or anti-repeat history.
+		SendAlbumTest(ctx context.Context, guildID string, albumID int) (entity.ManualScheduleTriggerResult, error)
 		GetDiscordStatus(ctx context.Context) (connected bool, user string)
 	}
 
 	Admin interface {
 		// ListAlbums returns paginated albums with embedded preview_url already resolved
 		// (cover image when present, otherwise the lowest-id image in the album).
-		ListAlbums(ctx context.Context, offset, limit int) ([]entity.Album, int, error)
+		ListAlbums(ctx context.Context, q repo.AlbumAdminListQuery, offset, limit int) ([]entity.Album, int, error)
 		GetAlbum(ctx context.Context, id int) (entity.Album, error)
-		CreateAlbum(ctx context.Context, name string) (entity.Album, error)
-		UpdateAlbum(ctx context.Context, id int, name string) (entity.Album, error)
+		CreateAlbum(ctx context.Context, name string, sendMode entity.AlbumSendMode, sendConfigJSON string) (entity.Album, error)
+		UpdateAlbum(ctx context.Context, id int, name string, sendMode entity.AlbumSendMode, sendConfigJSON string) (entity.Album, error)
 		DeleteAlbum(ctx context.Context, id int) error
 		// ListImages returns paginated images with embedded preview_url already resolved.
-		ListImages(ctx context.Context, albumID, offset, limit int) ([]entity.Image, int, error)
+		ListImages(ctx context.Context, q repo.ImageAdminListQuery, offset, limit int) ([]entity.Image, int, error)
 		GetImage(ctx context.Context, id int) (entity.Image, error)
 		CreateImage(ctx context.Context, img entity.Image) (entity.Image, error)
 		UpdateImage(ctx context.Context, img entity.Image) (entity.Image, error)
@@ -82,5 +88,7 @@ type (
 		RecordAudit(ctx context.Context, actor, action, targetType, targetID string, metadata map[string]any) error
 		GetSystemStatus(ctx context.Context, guildID string) (entity.SystemStatus, error)
 		TriggerScheduleNow(ctx context.Context, guildID, actor string) (entity.ManualScheduleTriggerResult, error)
+		// SendAlbumTest delivers a one-off preview for albumID to the configured send channel (see schedule / env).
+		SendAlbumTest(ctx context.Context, guildID string, albumID int, actor string) (entity.ManualScheduleTriggerResult, error)
 	}
 )

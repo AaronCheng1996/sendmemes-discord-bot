@@ -1,11 +1,15 @@
 package request
 
 type AlbumCreate struct {
-	Name string `json:"name" validate:"required"`
+	Name           string `json:"name" validate:"required"`
+	SendMode       string `json:"send_mode"`
+	SendConfigJSON string `json:"send_config_json"`
 }
 
 type AlbumUpdate struct {
-	Name string `json:"name" validate:"required"`
+	Name           string `json:"name" validate:"required"`
+	SendMode       string `json:"send_mode"`
+	SendConfigJSON string `json:"send_config_json"`
 }
 
 type ImageCreate struct {
@@ -32,5 +36,10 @@ type SchedulePut struct {
 }
 
 type ScheduleTriggerNow struct {
+	GuildID string `json:"guild_id"`
+}
+
+// AlbumSendTest triggers a one-off preview send for the album in the URL path.
+type AlbumSendTest struct {
 	GuildID string `json:"guild_id"`
 }

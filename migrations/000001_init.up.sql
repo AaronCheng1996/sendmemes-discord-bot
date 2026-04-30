@@ -8,10 +8,16 @@ CREATE TABLE IF NOT EXISTS albums (
     name            text        NOT NULL UNIQUE,
     has_cover       boolean     NOT NULL DEFAULT false,
     cover_image_id  int,
+    send_mode       text        NOT NULL DEFAULT 'Random',
+    send_config_json jsonb      NOT NULL DEFAULT '{}'::jsonb,
     last_sent_at    timestamptz,
     positive_rating int         NOT NULL DEFAULT 0,
     created_at      timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE albums
+    ADD CONSTRAINT albums_send_mode_check
+    CHECK (send_mode IN ('Order', 'Random', 'Single', 'Custom'));
 
 CREATE TABLE IF NOT EXISTS images (
     id          serial      PRIMARY KEY,

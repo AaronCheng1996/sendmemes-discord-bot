@@ -57,6 +57,19 @@ func (uc *UseCase) GetAlbumImages(ctx context.Context, albumName string, limit i
 	return uc.albumImagesWithCover(ctx, album, limit)
 }
 
+// GetAlbumImagesByID returns up to limit images for albumID using the same cover-first rules as GetAlbumImages.
+func (uc *UseCase) GetAlbumImagesByID(ctx context.Context, albumID, limit int) ([]entity.Image, entity.Album, error) {
+	album, err := uc.albums.GetByID(ctx, albumID)
+	if err != nil {
+		return nil, entity.Album{}, fmt.Errorf("ImagesUseCase - GetAlbumImagesByID - GetByID %d: %w", albumID, err)
+	}
+	imgs, err := uc.albumImagesWithCover(ctx, album, limit)
+	if err != nil {
+		return nil, entity.Album{}, fmt.Errorf("ImagesUseCase - GetAlbumImagesByID - albumImagesWithCover: %w", err)
+	}
+	return imgs, album, nil
+}
+
 // GetRandomAlbumImages picks a random album and returns up to limit images from it.
 // If the album has a cover, it is always prepended as the first element.
 func (uc *UseCase) GetRandomAlbumImages(ctx context.Context, limit int) ([]entity.Image, error) {

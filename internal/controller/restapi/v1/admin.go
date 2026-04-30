@@ -8,6 +8,7 @@ import (
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/controller/restapi/v1/request"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/controller/restapi/v1/response"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
+	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -54,9 +55,38 @@ func parseIDParam(ctx *fiber.Ctx) (int, error) {
 	return strconv.Atoi(strings.TrimSpace(ctx.Params("id")))
 }
 
+func parseAlbumListQuery(ctx *fiber.Ctx) repo.AlbumAdminListQuery {
+	q := repo.AlbumAdminListQuery{
+		SortBy:    strings.TrimSpace(ctx.Query("sort_by")),
+		FilterCol: strings.TrimSpace(ctx.Query("filter_field")),
+		FilterQ:   strings.TrimSpace(ctx.Query("filter_q")),
+	}
+	so := strings.ToLower(strings.TrimSpace(ctx.Query("sort_order")))
+	q.SortAsc = so == "" || so == "asc"
+	if q.SortBy == "" {
+		q.SortBy = "id"
+	}
+	return q
+}
+
+func parseImageListQuery(ctx *fiber.Ctx) repo.ImageAdminListQuery {
+	q := repo.ImageAdminListQuery{
+		AlbumScopeID: parseIntQuery(ctx, "album_id", 0),
+		SortBy:       strings.TrimSpace(ctx.Query("sort_by")),
+		FilterCol:    strings.TrimSpace(ctx.Query("filter_field")),
+		FilterQ:      strings.TrimSpace(ctx.Query("filter_q")),
+	}
+	so := strings.ToLower(strings.TrimSpace(ctx.Query("sort_order")))
+	q.SortAsc = so == "" || so == "asc"
+	if q.SortBy == "" {
+		q.SortBy = "id"
+	}
+	return q
+}
+
 func (r *V1) listAlbums(ctx *fiber.Ctx) error {
 	offset, limit := clampPagination(parseIntQuery(ctx, "offset", 0), parseIntQuery(ctx, "limit", defaultListLimit))
-	albums, total, err := r.a.ListAlbums(ctx.UserContext(), offset, limit)
+	albums, total, err := r.a.ListAlbums(ctx.UserContext(), parseAlbumListQuery(ctx), offset, limit)
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - listAlbums")
 		return errorResponse(ctx, http.StatusInternalServerError, "failed to list albums")
@@ -80,12 +110,21 @@ func (r *V1) createAlbum(ctx *fiber.Ctx) error {
 	if err := r.v.Struct(body); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
 	}
-	album, err := r.a.CreateAlbum(ctx.UserContext(), body.Name)
+	album, err := r.a.CreateAlbum(
+		ctx.UserContext(),
+		body.Name,
+		entity.AlbumSendMode(body.SendMode),
+		body.SendConfigJSON,
+	)
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - createAlbum")
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
-	_ = r.a.RecordAudit(ctx.UserContext(), actorFromCtx(ctx), "album.create", "album", strconv.Itoa(album.ID), map[string]any{"name": album.Name})
+	_ = r.a.RecordAudit(ctx.UserContext(), actorFromCtx(ctx), "album.create", "album", strconv.Itoa(album.ID), map[string]any{
+		"name":             album.Name,
+		"send_mode":        album.SendMode,
+		"send_config_json": album.SendConfigJSON,
+	})
 	return ctx.Status(http.StatusCreated).JSON(album)
 }
 
@@ -114,12 +153,22 @@ func (r *V1) updateAlbum(ctx *fiber.Ctx) error {
 	if err = r.v.Struct(body); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
 	}
-	album, err := r.a.UpdateAlbum(ctx.UserContext(), id, body.Name)
+	album, err := r.a.UpdateAlbum(
+		ctx.UserContext(),
+		id,
+		body.Name,
+		entity.AlbumSendMode(body.SendMode),
+		body.SendConfigJSON,
+	)
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - updateAlbum")
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
-	_ = r.a.RecordAudit(ctx.UserContext(), actorFromCtx(ctx), "album.update", "album", strconv.Itoa(id), map[string]any{"name": body.Name})
+	_ = r.a.RecordAudit(ctx.UserContext(), actorFromCtx(ctx), "album.update", "album", strconv.Itoa(id), map[string]any{
+		"name":             body.Name,
+		"send_mode":        body.SendMode,
+		"send_config_json": body.SendConfigJSON,
+	})
 	return ctx.Status(http.StatusOK).JSON(album)
 }
 
@@ -138,12 +187,7 @@ func (r *V1) deleteAlbum(ctx *fiber.Ctx) error {
 
 func (r *V1) listImages(ctx *fiber.Ctx) error {
 	offset, limit := clampPagination(parseIntQuery(ctx, "offset", 0), parseIntQuery(ctx, "limit", defaultListLimit))
-	images, total, err := r.a.ListImages(
-		ctx.UserContext(),
-		parseIntQuery(ctx, "album_id", 0),
-		offset,
-		limit,
-	)
+	images, total, err := r.a.ListImages(ctx.UserContext(), parseImageListQuery(ctx), offset, limit)
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - listImages")
 		return errorResponse(ctx, http.StatusInternalServerError, "failed to list images")
@@ -287,6 +331,23 @@ func (r *V1) triggerScheduleNow(ctx *fiber.Ctx) error {
 	res, err := r.a.TriggerScheduleNow(ctx.UserContext(), strings.TrimSpace(body.GuildID), actorFromCtx(ctx))
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - triggerScheduleNow")
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+	return ctx.Status(http.StatusOK).JSON(res)
+}
+
+func (r *V1) sendAlbumTest(ctx *fiber.Ctx) error {
+	id, err := parseIDParam(ctx)
+	if err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid id")
+	}
+	var body request.AlbumSendTest
+	if err := ctx.BodyParser(&body); err != nil {
+		body = request.AlbumSendTest{}
+	}
+	res, err := r.a.SendAlbumTest(ctx.UserContext(), strings.TrimSpace(body.GuildID), id, actorFromCtx(ctx))
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - sendAlbumTest")
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 	return ctx.Status(http.StatusOK).JSON(res)

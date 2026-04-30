@@ -2,7 +2,9 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,13 +15,13 @@ import (
 
 // UseCase provides admin CRUD and settings operations.
 type UseCase struct {
-	albums    repo.AlbumsRepo
-	images    repo.ImagesRepo
-	imagesUC  usecase.Images
-	settings  usecase.Settings
-	audit     repo.AdminAuditRepo
-	system    repo.SystemRepo
-	runtime   usecase.AdminRuntime
+	albums   repo.AlbumsRepo
+	images   repo.ImagesRepo
+	imagesUC usecase.Images
+	settings usecase.Settings
+	audit    repo.AdminAuditRepo
+	system   repo.SystemRepo
+	runtime  usecase.AdminRuntime
 }
 
 // New creates admin usecase.
@@ -46,12 +48,12 @@ func New(
 // ListAlbums returns paginated albums with preview URLs already resolved.
 // Preview rule: cover image (if has_cover && cover_image_id) → first image in album → empty.
 // pCloud URLs go through PCloudClient's in-memory cache to limit upstream API calls.
-func (uc *UseCase) ListAlbums(ctx context.Context, offset, limit int) ([]entity.Album, int, error) {
-	items, err := uc.albums.List(ctx, offset, limit)
+func (uc *UseCase) ListAlbums(ctx context.Context, q repo.AlbumAdminListQuery, offset, limit int) ([]entity.Album, int, error) {
+	items, err := uc.albums.List(ctx, q, offset, limit)
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := uc.albums.Count(ctx)
+	total, err := uc.albums.Count(ctx, q)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -97,20 +99,60 @@ func (uc *UseCase) GetAlbum(ctx context.Context, id int) (entity.Album, error) {
 	return uc.albums.GetByID(ctx, id)
 }
 
-func (uc *UseCase) CreateAlbum(ctx context.Context, name string) (entity.Album, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return entity.Album{}, fmt.Errorf("album name is required")
+func normalizeAlbumSendMode(sendMode entity.AlbumSendMode) (entity.AlbumSendMode, error) {
+	mode := entity.AlbumSendMode(strings.TrimSpace(string(sendMode)))
+	switch mode {
+	case "":
+		return entity.AlbumSendModeRandom, nil
+	case entity.AlbumSendModeOrder, entity.AlbumSendModeRandom, entity.AlbumSendModeSingle, entity.AlbumSendModeCustom:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("invalid album send mode: %s", mode)
 	}
-	return uc.albums.Create(ctx, name)
 }
 
-func (uc *UseCase) UpdateAlbum(ctx context.Context, id int, name string) (entity.Album, error) {
+func normalizeAlbumSendConfigJSON(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "{}", nil
+	}
+	var payload any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return "", fmt.Errorf("send_config_json must be valid JSON: %w", err)
+	}
+	return raw, nil
+}
+
+func (uc *UseCase) CreateAlbum(ctx context.Context, name string, sendMode entity.AlbumSendMode, sendConfigJSON string) (entity.Album, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return entity.Album{}, fmt.Errorf("album name is required")
 	}
-	return uc.albums.Update(ctx, id, name)
+	mode, err := normalizeAlbumSendMode(sendMode)
+	if err != nil {
+		return entity.Album{}, err
+	}
+	configJSON, err := normalizeAlbumSendConfigJSON(sendConfigJSON)
+	if err != nil {
+		return entity.Album{}, err
+	}
+	return uc.albums.Create(ctx, name, mode, configJSON)
+}
+
+func (uc *UseCase) UpdateAlbum(ctx context.Context, id int, name string, sendMode entity.AlbumSendMode, sendConfigJSON string) (entity.Album, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return entity.Album{}, fmt.Errorf("album name is required")
+	}
+	mode, err := normalizeAlbumSendMode(sendMode)
+	if err != nil {
+		return entity.Album{}, err
+	}
+	configJSON, err := normalizeAlbumSendConfigJSON(sendConfigJSON)
+	if err != nil {
+		return entity.Album{}, err
+	}
+	return uc.albums.Update(ctx, id, name, mode, configJSON)
 }
 
 func (uc *UseCase) DeleteAlbum(ctx context.Context, id int) error {
@@ -119,12 +161,12 @@ func (uc *UseCase) DeleteAlbum(ctx context.Context, id int) error {
 
 // ListImages returns paginated images with preview URLs already resolved.
 // pCloud URLs go through PCloudClient's in-memory cache to limit upstream API calls.
-func (uc *UseCase) ListImages(ctx context.Context, albumID, offset, limit int) ([]entity.Image, int, error) {
-	items, err := uc.images.List(ctx, albumID, offset, limit)
+func (uc *UseCase) ListImages(ctx context.Context, q repo.ImageAdminListQuery, offset, limit int) ([]entity.Image, int, error) {
+	items, err := uc.images.List(ctx, q, offset, limit)
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := uc.images.Count(ctx, albumID)
+	total, err := uc.images.Count(ctx, q)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -221,6 +263,24 @@ func (uc *UseCase) TriggerScheduleNow(ctx context.Context, guildID, actor string
 	}
 	_ = uc.RecordAudit(ctx, actor, "schedule.trigger_now", "schedule", guildID, map[string]any{
 		"triggered":  res.Triggered,
+		"album_id":   res.AlbumID,
+		"album_name": res.AlbumName,
+		"channel_id": res.ChannelID,
+		"message_id": res.MessageID,
+	})
+	return res, nil
+}
+
+func (uc *UseCase) SendAlbumTest(ctx context.Context, guildID string, albumID int, actor string) (entity.ManualScheduleTriggerResult, error) {
+	if uc.runtime == nil {
+		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("runtime trigger is not available")
+	}
+	res, err := uc.runtime.SendAlbumTest(ctx, guildID, albumID)
+	if err != nil {
+		return entity.ManualScheduleTriggerResult{}, err
+	}
+	_ = uc.RecordAudit(ctx, actor, "album.send_test", "album", strconv.Itoa(albumID), map[string]any{
+		"guild_id":   guildID,
 		"album_id":   res.AlbumID,
 		"album_name": res.AlbumName,
 		"channel_id": res.ChannelID,
