@@ -58,7 +58,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	if err = pcloudClient.Login(context.Background()); err != nil {
 		l.Fatal(fmt.Errorf("app - Run - pcloudClient.Login: %w", err))
 	}
-	syncUseCase := syncuc.New(pcloudClient, albumsRepo, imagesRepo, cfg.PCloud.RootFolderID)
+	syncUseCase := syncuc.New(pcloudClient, albumsRepo, imagesRepo, cfg.PCloud.RootFolderIDs)
 
 	// Use-Case: images
 	imagesUseCase := images.New(imagesRepo, albumsRepo, pcloudClient, cfg.HTTP.PublicURL)

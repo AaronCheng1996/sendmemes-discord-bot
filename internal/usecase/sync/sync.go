@@ -11,19 +11,19 @@ import (
 
 // UseCase synchronises the pCloud folder tree with the database.
 type UseCase struct {
-	pcloud   repo.PCloudAPI
-	albums   repo.AlbumsRepo
-	images   repo.ImagesRepo
-	folderID int64
+	pcloud    repo.PCloudAPI
+	albums    repo.AlbumsRepo
+	images    repo.ImagesRepo
+	folderIDs []int64
 }
 
 // New creates a new sync use case.
-func New(pcloud repo.PCloudAPI, albums repo.AlbumsRepo, images repo.ImagesRepo, folderID int64) *UseCase {
+func New(pcloud repo.PCloudAPI, albums repo.AlbumsRepo, images repo.ImagesRepo, folderIDs []int64) *UseCase {
 	return &UseCase{
-		pcloud:   pcloud,
-		albums:   albums,
-		images:   images,
-		folderID: folderID,
+		pcloud:    pcloud,
+		albums:    albums,
+		images:    images,
+		folderIDs: folderIDs,
 	}
 }
 
@@ -32,9 +32,13 @@ func New(pcloud repo.PCloudAPI, albums repo.AlbumsRepo, images repo.ImagesRepo, 
 //  2. Remove DB rows for images that no longer exist in pCloud (per album).
 //  3. Detect cover images (filename matches cover.* or _cover.*) and update album.has_cover.
 func (uc *UseCase) SyncImages(ctx context.Context) error {
-	entries, err := uc.pcloud.ListFolder(ctx, uc.folderID)
-	if err != nil {
-		return fmt.Errorf("SyncUseCase - SyncImages - ListFolder: %w", err)
+	var entries []repo.PCloudEntry
+	for _, folderID := range uc.folderIDs {
+		folderEntries, err := uc.pcloud.ListFolder(ctx, folderID)
+		if err != nil {
+			return fmt.Errorf("SyncUseCase - SyncImages - ListFolder folderID=%d: %w", folderID, err)
+		}
+		entries = append(entries, folderEntries...)
 	}
 
 	// Group file IDs per album name so we can prune stale rows and detect covers after upsert.

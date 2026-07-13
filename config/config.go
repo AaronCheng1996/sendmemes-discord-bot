@@ -78,10 +78,11 @@ type (
 	// Auth priority: PCLOUD_ACCESS_TOKEN > PCLOUD_USERNAME + PCLOUD_PASSWORD.
 	// Note: pCloud does not support 2FA via API. Disable 2FA on the account if using username/password.
 	PCloud struct {
-		AccessToken  string `env:"PCLOUD_ACCESS_TOKEN"`
-		Username     string `env:"PCLOUD_USERNAME"`
-		Password     string `env:"PCLOUD_PASSWORD"`
-		RootFolderID int64  `env:"CLOUD_MAIN_FOLDER_ID" envDefault:"0"`
+		AccessToken string `env:"PCLOUD_ACCESS_TOKEN"`
+		Username    string `env:"PCLOUD_USERNAME"`
+		Password    string `env:"PCLOUD_PASSWORD"`
+		// RootFolderIDs is a comma-separated list of pCloud folder IDs to sync (e.g. "26096342557,26083978164").
+		RootFolderIDs []int64 `env:"CLOUD_MAIN_FOLDER_ID"`
 		// APIEndpoint is the pCloud REST base URL. Use https://eapi.pcloud.com for EU accounts.
 		APIEndpoint  string `env:"PCLOUD_API_ENDPOINT" envDefault:"https://api.pcloud.com"`
 		SyncInterval string `env:"PCLOUD_SYNC_INTERVAL" envDefault:"1h"`
