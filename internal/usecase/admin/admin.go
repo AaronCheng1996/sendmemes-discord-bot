@@ -100,15 +100,7 @@ func (uc *UseCase) GetAlbum(ctx context.Context, id int) (entity.Album, error) {
 }
 
 func normalizeAlbumSendMode(sendMode entity.AlbumSendMode) (entity.AlbumSendMode, error) {
-	mode := entity.AlbumSendMode(strings.TrimSpace(string(sendMode)))
-	switch mode {
-	case "":
-		return entity.AlbumSendModeRandom, nil
-	case entity.AlbumSendModeOrder, entity.AlbumSendModeRandom, entity.AlbumSendModeSingle, entity.AlbumSendModeCustom:
-		return mode, nil
-	default:
-		return "", fmt.Errorf("invalid album send mode: %s", mode)
-	}
+	return entity.ParseAlbumSendMode(string(sendMode))
 }
 
 func normalizeAlbumSendConfigJSON(raw string) (string, error) {

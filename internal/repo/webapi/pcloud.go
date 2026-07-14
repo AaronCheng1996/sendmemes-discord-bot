@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo"
 )
 
@@ -52,9 +53,21 @@ func isTokenErr(err error) bool {
 		strings.Contains(s, "API error 2094") // Invalid access_token
 }
 
-// imageExtensions is the set of file extensions treated as images.
-var imageExtensions = map[string]struct{}{
-	".jpg": {}, ".jpeg": {}, ".png": {}, ".gif": {}, ".webp": {},
+// mediaExtensions maps a lowercased file extension to its media kind
+// (entity.MediaKindImage or entity.MediaKindVideo). Extensions absent from the
+// map are ignored during folder walks.
+var mediaExtensions = map[string]string{
+	".jpg":  entity.MediaKindImage,
+	".jpeg": entity.MediaKindImage,
+	".png":  entity.MediaKindImage,
+	".gif":  entity.MediaKindImage,
+	".webp": entity.MediaKindImage,
+	".mp4":  entity.MediaKindVideo,
+	".webm": entity.MediaKindVideo,
+	".mov":  entity.MediaKindVideo,
+	".m4v":  entity.MediaKindVideo,
+	".mkv":  entity.MediaKindVideo,
+	".avi":  entity.MediaKindVideo,
 }
 
 // pcloudMeta mirrors the JSON structure returned by pCloud's listfolder API.
@@ -62,6 +75,7 @@ type pcloudMeta struct {
 	Name     string       `json:"name"`
 	IsFolder bool         `json:"isfolder"`
 	FileID   int64        `json:"fileid"`
+	Size     int64        `json:"size"`
 	Contents []pcloudMeta `json:"contents"`
 }
 
@@ -90,6 +104,7 @@ type pcloudUserInfoResponse struct {
 // pCloud uses two different query parameter names depending on how the token was obtained:
 //   - OAuth2 token  →  access_token=TOKEN
 //   - Session token (from username/password login)  →  auth=TOKEN
+//
 // fileLinkCacheEntry holds a pCloud getfilelink result with its expiry.
 type fileLinkCacheEntry struct {
 	url       string
@@ -337,27 +352,31 @@ func (c *PCloudClient) doListFolder(ctx context.Context, folderID int64) ([]repo
 		if !child.IsFolder {
 			continue
 		}
-		collectImages(child, child.Name, &entries)
+		collectMedia(child, child.Name, &entries)
 	}
 	return entries, nil
 }
 
-// collectImages recursively walks a pCloud folder tree node.
-// albumName is always the leaf folder name containing the image file.
-func collectImages(node pcloudMeta, albumName string, out *[]repo.PCloudEntry) {
+// collectMedia recursively walks a pCloud folder tree node, collecting image and
+// video files (per mediaExtensions). Unknown extensions and root-level files are
+// skipped. albumName is always the leaf folder name containing the file.
+func collectMedia(node pcloudMeta, albumName string, out *[]repo.PCloudEntry) {
 	for _, child := range node.Contents {
 		if child.IsFolder {
-			collectImages(child, child.Name, out)
+			collectMedia(child, child.Name, out)
 			continue
 		}
 		ext := strings.ToLower(filepath.Ext(child.Name))
-		if _, ok := imageExtensions[ext]; !ok {
+		kind, ok := mediaExtensions[ext]
+		if !ok {
 			continue
 		}
 		*out = append(*out, repo.PCloudEntry{
 			FileID:           child.FileID,
 			Name:             child.Name,
 			ParentFolderName: albumName,
+			Kind:             kind,
+			Size:             child.Size,
 		})
 	}
 }

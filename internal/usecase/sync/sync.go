@@ -51,10 +51,12 @@ func (uc *UseCase) SyncImages(ctx context.Context) error {
 		}
 
 		img := entity.Image{
-			FileID:  entry.FileID,
-			URL:     entry.Name, // store filename; full link resolved at send time via GetFileLink
-			Source:  "pcloud",
-			AlbumID: album.ID,
+			FileID:    entry.FileID,
+			URL:       entry.Name, // store filename; full link resolved at send time via GetFileLink
+			Source:    "pcloud",
+			AlbumID:   album.ID,
+			Kind:      entry.Kind,
+			SizeBytes: entry.Size,
 		}
 		if err = uc.images.UpsertByFileID(ctx, img); err != nil {
 			return fmt.Errorf("SyncUseCase - SyncImages - UpsertByFileID fileID=%d: %w", entry.FileID, err)

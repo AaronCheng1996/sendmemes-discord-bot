@@ -9,11 +9,13 @@ import (
 
 //go:generate mockgen -source=contracts.go -destination=../usecase/mocks_repo_test.go -package=usecase_test
 
-// PCloudEntry is a single image file discovered in the pCloud folder tree.
+// PCloudEntry is a single media file (image or video) discovered in the pCloud folder tree.
 type PCloudEntry struct {
 	FileID           int64
 	Name             string
 	ParentFolderName string // immediate parent folder name (= album name)
+	Kind             string // "image" or "video" (see entity.MediaKind*)
+	Size             int64  // file size in bytes (0 when unknown)
 }
 
 type (
@@ -71,6 +73,9 @@ type (
 		// GetAllByAlbum returns all images in albumID ordered by id,
 		// optionally excluding the image with excludeID (pass 0 for no exclusion).
 		GetAllByAlbum(ctx context.Context, albumID, excludeID int) ([]entity.Image, error)
+		// GetRandomVideoByAlbum returns one random video (kind='video') from albumID.
+		// Returns (zero, false, nil) when the album has no videos.
+		GetRandomVideoByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error)
 		UpsertByFileID(ctx context.Context, img entity.Image) error
 		DeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, fileIDs []int64) error
 		// FindCoverByAlbum returns the image in albumID whose filename matches

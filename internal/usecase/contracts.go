@@ -24,16 +24,27 @@ type (
 		// GetAlbumImages returns up to limit images from the named album.
 		// If the album has a cover, it is always the first element; the rest are random.
 		GetAlbumImages(ctx context.Context, albumName string, limit int) ([]entity.Image, error)
-		// GetAlbumImagesByID returns up to limit images for albumID using the same cover-first rules.
-		GetAlbumImagesByID(ctx context.Context, albumID, limit int) ([]entity.Image, entity.Album, error)
 		// GetRandomAlbumImages picks a random album then returns up to limit images from it.
 		// If the album has a cover, it is always the first element; the rest are random.
 		GetRandomAlbumImages(ctx context.Context, limit int) ([]entity.Image, error)
-		// GetScheduledAlbumImages picks a random album while avoiding the excludeN most
-		// recently sent albums; returns up to limit images (cover-first) and the album ID.
-		// When all albums fall within the history window, it resets and picks fully at random.
-		// Call MarkAlbumSent(albumID) after a successful scheduled send.
-		GetScheduledAlbumImages(ctx context.Context, excludeN, limit int) (imgs []entity.Image, albumID int, err error)
+		// GetScheduledAlbum picks a random album while avoiding the excludeN most
+		// recently sent albums. When all albums fall within the history window it
+		// resets and picks fully at random. Call MarkAlbumSent after a successful send.
+		GetScheduledAlbum(ctx context.Context, excludeN int) (entity.Album, error)
+		// GetAlbumByID returns the album with the given id.
+		GetAlbumByID(ctx context.Context, id int) (entity.Album, error)
+		// GetAlbumBatch returns up to limit images for album using cover-first rules:
+		// cover first (when present), then random non-cover images.
+		GetAlbumBatch(ctx context.Context, album entity.Album, limit int) ([]entity.Image, error)
+		// GetComicPages returns the album's images in reading order: cover first (when
+		// present), then remaining images sorted by natural filename order.
+		GetComicPages(ctx context.Context, album entity.Album) ([]entity.Image, error)
+		// GetRandomVideo returns one random video from the album.
+		// Returns (image, true, nil) when a video exists, (zero, false, nil) when none.
+		GetRandomVideo(ctx context.Context, albumID int) (entity.Image, bool, error)
+		// SetAlbumMode updates the named album's send mode (preserving name and
+		// send-config JSON) and returns the updated album.
+		SetAlbumMode(ctx context.Context, albumName string, mode entity.AlbumSendMode) (entity.Album, error)
 		// MarkAlbumSent stamps last_sent_at = NOW() for albumID so future scheduled sends
 		// avoid it for the next excludeN rounds.
 		MarkAlbumSent(ctx context.Context, albumID int) error

@@ -30,6 +30,11 @@ const (
 	// Discord's hard cap is 25 MB; we use 24 MB to leave room for JSON overhead.
 	discordMsgLimit = 24 * 1024 * 1024
 
+	// videoUploadLimit is a conservative default bot attachment cap for
+	// non-boosted guilds. Videos larger than this (or of unknown size) are
+	// delivered as a temporary streaming link instead of a file attachment.
+	videoUploadLimit = 10 * 1024 * 1024
+
 	// downloadTimeout is used for both pCloud downloads and Discord uploads.
 	// Large albums can have multi-MB images; give plenty of headroom.
 	downloadTimeout = 5 * time.Minute
@@ -59,8 +64,8 @@ func (f fileEntry) size() int { return len(f.data) }
 //     – Condition 1: selected == targetCount and total size ≤ maxBytes.
 //     – Condition 2: total size ≤ maxBytes but pool exhausted (sends what we have).
 //     – Condition 3: pool exhausted with nothing fitting — logs a warning and returns nil.
-//  Within the loop: if over limit, remove the largest non-cover then refill with the
-//  next shuffled candidate; repeat until within limit or conditions above are met.
+//     Within the loop: if over limit, remove the largest non-cover then refill with the
+//     next shuffled candidate; repeat until within limit or conditions above are met.
 func fitToLimit(l logger.Interface, pool []fileEntry, targetCount, maxBytes int) []fileEntry {
 	if len(pool) == 0 {
 		return nil
@@ -142,6 +147,33 @@ func fitToLimit(l logger.Interface, pool []fileEntry, targetCount, maxBytes int)
 	}
 
 	return selected
+}
+
+// chunkOrdered packs pool into sequential chunks WITHOUT reordering or shuffling.
+// A new chunk begins when adding the next file would exceed maxCount files or
+// maxBytes total bytes. A single file larger than maxBytes on its own cannot fit
+// any chunk and is skipped with a warning. Input order is always preserved.
+func chunkOrdered(l logger.Interface, pool []fileEntry, maxCount, maxBytes int) [][]fileEntry {
+	var chunks [][]fileEntry
+	var cur []fileEntry
+	curBytes := 0
+	for _, fe := range pool {
+		if fe.size() > maxBytes {
+			l.Warn("chunkOrdered: file %q (%d bytes) exceeds Discord size limit, skipping", fe.name, fe.size())
+			continue
+		}
+		if len(cur) > 0 && (len(cur) >= maxCount || curBytes+fe.size() > maxBytes) {
+			chunks = append(chunks, cur)
+			cur = nil
+			curBytes = 0
+		}
+		cur = append(cur, fe)
+		curBytes += fe.size()
+	}
+	if len(cur) > 0 {
+		chunks = append(chunks, cur)
+	}
+	return chunks
 }
 
 // entriesToFiles converts fileEntry slice to discordgo.File slice.
@@ -417,6 +449,151 @@ func (b *Bot) downloadAndFit(ctx context.Context, imgs []entity.Image) ([]*disco
 // Send helpers
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Typed album delivery
+// ---------------------------------------------------------------------------
+
+// deliverAlbum sends album to channelID according to album.SendMode and returns
+// the root Discord message (nil on failure). captionPrefix is prepended to the
+// album name in captions (e.g. "[TEST] "). Delivery formats:
+//   - Random/Custom/default: a size-fitted batch of random images (cover-first).
+//   - Single: exactly one image.
+//   - Order: an ordered comic; first chunk to the channel, rest to a thread.
+//   - Video: one random video as an attachment (small) or streaming link (large).
+func (b *Bot) deliverAlbum(ctx context.Context, channelID string, album entity.Album, captionPrefix string) *discordgo.Message {
+	switch album.SendMode {
+	case entity.AlbumSendModeSingle:
+		return b.deliverSingle(ctx, channelID, album, captionPrefix)
+	case entity.AlbumSendModeOrder:
+		return b.deliverComic(ctx, channelID, album, captionPrefix)
+	case entity.AlbumSendModeVideo:
+		return b.deliverVideo(ctx, channelID, album, captionPrefix)
+	case entity.AlbumSendModeRandom, entity.AlbumSendModeCustom:
+		return b.deliverRandom(ctx, channelID, album, captionPrefix)
+	default:
+		return b.deliverRandom(ctx, channelID, album, captionPrefix)
+	}
+}
+
+// deliverRandom sends a size-fitted batch of random images (cover-first).
+func (b *Bot) deliverRandom(ctx context.Context, channelID string, album entity.Album, captionPrefix string) *discordgo.Message {
+	imgs, err := b.imagesUC.GetAlbumBatch(ctx, album, albumPoolSize)
+	if err != nil {
+		b.l.Error(fmt.Errorf("deliverAlbum random GetAlbumBatch %q: %w", album.Name, err))
+		return nil
+	}
+	return b.sendAlbumToChannel(ctx, b.session, channelID, captionPrefix+album.Name, imgs)
+}
+
+// deliverSingle sends exactly one image from the album (cover when present).
+func (b *Bot) deliverSingle(ctx context.Context, channelID string, album entity.Album, captionPrefix string) *discordgo.Message {
+	imgs, err := b.imagesUC.GetAlbumBatch(ctx, album, 1)
+	if err != nil {
+		b.l.Error(fmt.Errorf("deliverAlbum single GetAlbumBatch %q: %w", album.Name, err))
+		return nil
+	}
+	files, err := b.downloadImages(ctx, imgs)
+	if err != nil {
+		b.l.Error(fmt.Errorf("deliverAlbum single download %q: %w", album.Name, err))
+		return nil
+	}
+	return b.channelSendFiles(b.session, channelID, captionPrefix+album.Name, files)
+}
+
+// deliverComic sends the album as an ordered comic. The first chunk (with a
+// page-count caption) goes to the channel; any remaining chunks are posted to a
+// public thread off that root message, falling back to the channel if the thread
+// cannot be created. Page order is never shuffled.
+func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.Album, captionPrefix string) *discordgo.Message {
+	pages, err := b.imagesUC.GetComicPages(ctx, album)
+	if err != nil {
+		b.l.Error(fmt.Errorf("deliverAlbum comic GetComicPages %q: %w", album.Name, err))
+		return nil
+	}
+	pool, err := b.downloadPool(ctx, pages)
+	if err != nil {
+		b.l.Error(fmt.Errorf("deliverAlbum comic downloadPool %q: %w", album.Name, err))
+		return nil
+	}
+	chunks := chunkOrdered(b.l, pool, albumBatchSize, discordMsgLimit)
+	if len(chunks) == 0 {
+		b.l.Warn("deliverAlbum comic: no pages fit within Discord size limit (album %q)", album.Name)
+		return nil
+	}
+
+	totalPages := 0
+	for _, ch := range chunks {
+		totalPages += len(ch)
+	}
+
+	rootContent := fmt.Sprintf("**%s%s** (%d pages)", captionPrefix, album.Name, totalPages)
+	root := b.channelSendFilesContent(channelID, rootContent, entriesToFiles(chunks[0]))
+	if root == nil || len(chunks) == 1 {
+		return root
+	}
+
+	targetID := channelID
+	thread, terr := b.session.MessageThreadStartComplex(channelID, root.ID, &discordgo.ThreadStart{
+		Name:                fmt.Sprintf("Album: %s", album.Name),
+		AutoArchiveDuration: 60,
+		Type:                discordgo.ChannelTypeGuildPublicThread,
+	})
+	if terr != nil {
+		b.l.Error(fmt.Errorf("deliverAlbum comic ThreadStart %q: %w", album.Name, terr))
+	} else {
+		targetID = thread.ID
+	}
+
+	sentSoFar := len(chunks[0])
+	for _, chunk := range chunks[1:] {
+		start := sentSoFar + 1
+		end := sentSoFar + len(chunk)
+		b.channelSendFilesContent(targetID, fmt.Sprintf("pages %d–%d", start, end), entriesToFiles(chunk))
+		sentSoFar = end
+	}
+	return root
+}
+
+// deliverVideo posts one random video from the album. Videos within
+// videoUploadLimit are uploaded as attachments; larger or unknown-size videos are
+// posted as a temporary streaming link. Returns nil (sending nothing) when the
+// album has no videos.
+func (b *Bot) deliverVideo(ctx context.Context, channelID string, album entity.Album, captionPrefix string) *discordgo.Message {
+	video, found, err := b.imagesUC.GetRandomVideo(ctx, album.ID)
+	if err != nil {
+		b.l.Error(fmt.Errorf("deliverAlbum video GetRandomVideo %q: %w", album.Name, err))
+		return nil
+	}
+	if !found {
+		b.l.Warn("deliverAlbum video: album %q has no videos", album.Name)
+		return nil
+	}
+
+	caption := captionPrefix + album.Name
+	if video.SizeBytes > 0 && video.SizeBytes <= videoUploadLimit {
+		files, derr := b.downloadImages(ctx, []entity.Image{video})
+		if derr != nil {
+			b.l.Error(fmt.Errorf("deliverAlbum video download %q: %w", album.Name, derr))
+			return nil
+		}
+		return b.channelSendFiles(b.session, channelID, caption, files)
+	}
+
+	// Over the upload limit or unknown size: fall back to a streaming link.
+	url, rerr := b.imagesUC.ResolveURL(ctx, video)
+	if rerr != nil {
+		b.l.Error(fmt.Errorf("deliverAlbum video ResolveURL %q: %w", album.Name, rerr))
+		return nil
+	}
+	content := fmt.Sprintf("**%s**\n%s\n_(streaming link — expires after a few hours)_", caption, url)
+	msg, serr := b.session.ChannelMessageSend(channelID, content)
+	if serr != nil {
+		b.l.Error(fmt.Errorf("deliverAlbum video ChannelMessageSend %q: %w", album.Name, serr))
+		return nil
+	}
+	return msg
+}
+
 // sendAlbumToChannel downloads imgs with pool fitting and sends to channel.
 // Returns the sent Discord message (nil on failure) so callers can track it.
 func (b *Bot) sendAlbumToChannel(ctx context.Context, s *discordgo.Session, channelID, caption string, imgs []entity.Image) *discordgo.Message {
@@ -442,6 +619,24 @@ func (b *Bot) channelSendFiles(s *discordgo.Session, channelID, caption string, 
 	msg, err := s.ChannelMessageSendComplex(channelID, payload)
 	if err != nil {
 		b.l.Error(fmt.Errorf("channelSendFiles: %w", err))
+		return nil
+	}
+	return msg
+}
+
+// channelSendFilesContent sends file attachments with a raw, already-formatted
+// content string. Unlike channelSendFiles it does not wrap the content in bold,
+// so callers control the exact markdown. Returns the sent message (nil on failure).
+func (b *Bot) channelSendFilesContent(channelID, content string, files []*discordgo.File) *discordgo.Message {
+	if len(files) == 0 {
+		return nil
+	}
+	msg, err := b.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+		Files:   files,
+		Content: content,
+	})
+	if err != nil {
+		b.l.Error(fmt.Errorf("channelSendFilesContent: %w", err))
 		return nil
 	}
 	return msg
@@ -546,35 +741,21 @@ func (b *Bot) SendAlbumTest(ctx context.Context, guildID string, albumID int) (e
 	if ch == "" {
 		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("send channel is not configured (schedule send_channel_id or DISCORD_CHANNEL_ID)")
 	}
-	imgs, album, err := b.imagesUC.GetAlbumImagesByID(ctx, albumID, albumPoolSize)
+	album, err := b.imagesUC.GetAlbumByID(ctx, albumID)
 	if err != nil {
 		return entity.ManualScheduleTriggerResult{}, err
 	}
-	result := entity.ManualScheduleTriggerResult{
+	msg := b.deliverAlbum(ctx, ch, album, "[TEST] ")
+	if msg == nil {
+		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("failed to send test preview (see server logs)")
+	}
+	return entity.ManualScheduleTriggerResult{
+		Triggered: true,
 		AlbumID:   album.ID,
 		AlbumName: album.Name,
 		ChannelID: ch,
-	}
-	caption := "[TEST] " + album.Name
-	if len(imgs) == 0 {
-		content := "**" + caption + "**\n_(no images in this album)_"
-		msg, sendErr := b.session.ChannelMessageSend(ch, content)
-		if sendErr != nil {
-			return entity.ManualScheduleTriggerResult{}, fmt.Errorf("discord SendAlbumTest text: %w", sendErr)
-		}
-		if msg != nil {
-			result.Triggered = true
-			result.MessageID = msg.ID
-		}
-		return result, nil
-	}
-	msg := b.sendAlbumToChannel(ctx, b.session, ch, caption, imgs)
-	if msg == nil {
-		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("failed to send test attachments (see server logs)")
-	}
-	result.Triggered = true
-	result.MessageID = msg.ID
-	return result, nil
+		MessageID: msg.ID,
+	}, nil
 }
 
 // GetDiscordStatus returns current session online status and username.

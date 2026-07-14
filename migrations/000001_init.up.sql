@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS albums (
 
 ALTER TABLE albums
     ADD CONSTRAINT albums_send_mode_check
-    CHECK (send_mode IN ('Order', 'Random', 'Single', 'Custom'));
+    CHECK (send_mode IN ('Order', 'Random', 'Single', 'Video', 'Custom'));
 
 CREATE TABLE IF NOT EXISTS images (
     id          serial      PRIMARY KEY,
@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS images (
     guild_id    text,
     album_id    int         REFERENCES albums (id),
     file_id     bigint,
+    kind        text        NOT NULL DEFAULT 'image' CHECK (kind IN ('image', 'video')),
+    size_bytes  bigint,
     created_at  timestamptz NOT NULL DEFAULT now()
 );
 

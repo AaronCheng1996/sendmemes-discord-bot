@@ -14,6 +14,7 @@ import (
 	reflect "reflect"
 
 	entity "github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
+	repo "github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -69,4 +70,677 @@ func (m *MockTranslation) Translate(arg0 context.Context, arg1 entity.Translatio
 func (mr *MockTranslationMockRecorder) Translate(arg0, arg1 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Translate", reflect.TypeOf((*MockTranslation)(nil).Translate), arg0, arg1)
+}
+
+// MockImages is a mock of Images interface.
+type MockImages struct {
+	ctrl     *gomock.Controller
+	recorder *MockImagesMockRecorder
+	isgomock struct{}
+}
+
+// MockImagesMockRecorder is the mock recorder for MockImages.
+type MockImagesMockRecorder struct {
+	mock *MockImages
+}
+
+// NewMockImages creates a new mock instance.
+func NewMockImages(ctrl *gomock.Controller) *MockImages {
+	mock := &MockImages{ctrl: ctrl}
+	mock.recorder = &MockImagesMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockImages) EXPECT() *MockImagesMockRecorder {
+	return m.recorder
+}
+
+// GetAlbumBatch mocks base method.
+func (m *MockImages) GetAlbumBatch(ctx context.Context, album entity.Album, limit int) ([]entity.Image, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAlbumBatch", ctx, album, limit)
+	ret0, _ := ret[0].([]entity.Image)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetAlbumBatch indicates an expected call of GetAlbumBatch.
+func (mr *MockImagesMockRecorder) GetAlbumBatch(ctx, album, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAlbumBatch", reflect.TypeOf((*MockImages)(nil).GetAlbumBatch), ctx, album, limit)
+}
+
+// GetAlbumByID mocks base method.
+func (m *MockImages) GetAlbumByID(ctx context.Context, id int) (entity.Album, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAlbumByID", ctx, id)
+	ret0, _ := ret[0].(entity.Album)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetAlbumByID indicates an expected call of GetAlbumByID.
+func (mr *MockImagesMockRecorder) GetAlbumByID(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAlbumByID", reflect.TypeOf((*MockImages)(nil).GetAlbumByID), ctx, id)
+}
+
+// GetAlbumCover mocks base method.
+func (m *MockImages) GetAlbumCover(ctx context.Context, albumName string) (entity.Image, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAlbumCover", ctx, albumName)
+	ret0, _ := ret[0].(entity.Image)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// GetAlbumCover indicates an expected call of GetAlbumCover.
+func (mr *MockImagesMockRecorder) GetAlbumCover(ctx, albumName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAlbumCover", reflect.TypeOf((*MockImages)(nil).GetAlbumCover), ctx, albumName)
+}
+
+// GetAlbumImages mocks base method.
+func (m *MockImages) GetAlbumImages(ctx context.Context, albumName string, limit int) ([]entity.Image, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAlbumImages", ctx, albumName, limit)
+	ret0, _ := ret[0].([]entity.Image)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetAlbumImages indicates an expected call of GetAlbumImages.
+func (mr *MockImagesMockRecorder) GetAlbumImages(ctx, albumName, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAlbumImages", reflect.TypeOf((*MockImages)(nil).GetAlbumImages), ctx, albumName, limit)
+}
+
+// GetComicPages mocks base method.
+func (m *MockImages) GetComicPages(ctx context.Context, album entity.Album) ([]entity.Image, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetComicPages", ctx, album)
+	ret0, _ := ret[0].([]entity.Image)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetComicPages indicates an expected call of GetComicPages.
+func (mr *MockImagesMockRecorder) GetComicPages(ctx, album any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetComicPages", reflect.TypeOf((*MockImages)(nil).GetComicPages), ctx, album)
+}
+
+// GetFullAlbum mocks base method.
+func (m *MockImages) GetFullAlbum(ctx context.Context, albumName string) ([]entity.Image, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetFullAlbum", ctx, albumName)
+	ret0, _ := ret[0].([]entity.Image)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetFullAlbum indicates an expected call of GetFullAlbum.
+func (mr *MockImagesMockRecorder) GetFullAlbum(ctx, albumName any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFullAlbum", reflect.TypeOf((*MockImages)(nil).GetFullAlbum), ctx, albumName)
+}
+
+// GetImage mocks base method.
+func (m *MockImages) GetImage(ctx context.Context) (entity.Image, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetImage", ctx)
+	ret0, _ := ret[0].(entity.Image)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetImage indicates an expected call of GetImage.
+func (mr *MockImagesMockRecorder) GetImage(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetImage", reflect.TypeOf((*MockImages)(nil).GetImage), ctx)
+}
+
+// GetRandom mocks base method.
+func (m *MockImages) GetRandom(ctx context.Context) (entity.Image, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetRandom", ctx)
+	ret0, _ := ret[0].(entity.Image)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetRandom indicates an expected call of GetRandom.
+func (mr *MockImagesMockRecorder) GetRandom(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRandom", reflect.TypeOf((*MockImages)(nil).GetRandom), ctx)
+}
+
+// GetRandomAlbumImages mocks base method.
+func (m *MockImages) GetRandomAlbumImages(ctx context.Context, limit int) ([]entity.Image, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetRandomAlbumImages", ctx, limit)
+	ret0, _ := ret[0].([]entity.Image)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetRandomAlbumImages indicates an expected call of GetRandomAlbumImages.
+func (mr *MockImagesMockRecorder) GetRandomAlbumImages(ctx, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRandomAlbumImages", reflect.TypeOf((*MockImages)(nil).GetRandomAlbumImages), ctx, limit)
+}
+
+// GetRandomVideo mocks base method.
+func (m *MockImages) GetRandomVideo(ctx context.Context, albumID int) (entity.Image, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetRandomVideo", ctx, albumID)
+	ret0, _ := ret[0].(entity.Image)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// GetRandomVideo indicates an expected call of GetRandomVideo.
+func (mr *MockImagesMockRecorder) GetRandomVideo(ctx, albumID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRandomVideo", reflect.TypeOf((*MockImages)(nil).GetRandomVideo), ctx, albumID)
+}
+
+// GetScheduledAlbum mocks base method.
+func (m *MockImages) GetScheduledAlbum(ctx context.Context, excludeN int) (entity.Album, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetScheduledAlbum", ctx, excludeN)
+	ret0, _ := ret[0].(entity.Album)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetScheduledAlbum indicates an expected call of GetScheduledAlbum.
+func (mr *MockImagesMockRecorder) GetScheduledAlbum(ctx, excludeN any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetScheduledAlbum", reflect.TypeOf((*MockImages)(nil).GetScheduledAlbum), ctx, excludeN)
+}
+
+// IncrAlbumRating mocks base method.
+func (m *MockImages) IncrAlbumRating(ctx context.Context, albumID int) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IncrAlbumRating", ctx, albumID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// IncrAlbumRating indicates an expected call of IncrAlbumRating.
+func (mr *MockImagesMockRecorder) IncrAlbumRating(ctx, albumID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IncrAlbumRating", reflect.TypeOf((*MockImages)(nil).IncrAlbumRating), ctx, albumID)
+}
+
+// MarkAlbumSent mocks base method.
+func (m *MockImages) MarkAlbumSent(ctx context.Context, albumID int) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MarkAlbumSent", ctx, albumID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// MarkAlbumSent indicates an expected call of MarkAlbumSent.
+func (mr *MockImagesMockRecorder) MarkAlbumSent(ctx, albumID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkAlbumSent", reflect.TypeOf((*MockImages)(nil).MarkAlbumSent), ctx, albumID)
+}
+
+// ResolveURL mocks base method.
+func (m *MockImages) ResolveURL(ctx context.Context, img entity.Image) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolveURL", ctx, img)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolveURL indicates an expected call of ResolveURL.
+func (mr *MockImagesMockRecorder) ResolveURL(ctx, img any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveURL", reflect.TypeOf((*MockImages)(nil).ResolveURL), ctx, img)
+}
+
+// SetAlbumMode mocks base method.
+func (m *MockImages) SetAlbumMode(ctx context.Context, albumName string, mode entity.AlbumSendMode) (entity.Album, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetAlbumMode", ctx, albumName, mode)
+	ret0, _ := ret[0].(entity.Album)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetAlbumMode indicates an expected call of SetAlbumMode.
+func (mr *MockImagesMockRecorder) SetAlbumMode(ctx, albumName, mode any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetAlbumMode", reflect.TypeOf((*MockImages)(nil).SetAlbumMode), ctx, albumName, mode)
+}
+
+// MockSync is a mock of Sync interface.
+type MockSync struct {
+	ctrl     *gomock.Controller
+	recorder *MockSyncMockRecorder
+	isgomock struct{}
+}
+
+// MockSyncMockRecorder is the mock recorder for MockSync.
+type MockSyncMockRecorder struct {
+	mock *MockSync
+}
+
+// NewMockSync creates a new mock instance.
+func NewMockSync(ctrl *gomock.Controller) *MockSync {
+	mock := &MockSync{ctrl: ctrl}
+	mock.recorder = &MockSyncMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockSync) EXPECT() *MockSyncMockRecorder {
+	return m.recorder
+}
+
+// SyncImages mocks base method.
+func (m *MockSync) SyncImages(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SyncImages", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SyncImages indicates an expected call of SyncImages.
+func (mr *MockSyncMockRecorder) SyncImages(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SyncImages", reflect.TypeOf((*MockSync)(nil).SyncImages), ctx)
+}
+
+// MockSettings is a mock of Settings interface.
+type MockSettings struct {
+	ctrl     *gomock.Controller
+	recorder *MockSettingsMockRecorder
+	isgomock struct{}
+}
+
+// MockSettingsMockRecorder is the mock recorder for MockSettings.
+type MockSettingsMockRecorder struct {
+	mock *MockSettings
+}
+
+// NewMockSettings creates a new mock instance.
+func NewMockSettings(ctrl *gomock.Controller) *MockSettings {
+	mock := &MockSettings{ctrl: ctrl}
+	mock.recorder = &MockSettingsMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockSettings) EXPECT() *MockSettingsMockRecorder {
+	return m.recorder
+}
+
+// GetEffectiveSchedule mocks base method.
+func (m *MockSettings) GetEffectiveSchedule(ctx context.Context, guildID string) (entity.EffectiveScheduleSettings, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetEffectiveSchedule", ctx, guildID)
+	ret0, _ := ret[0].(entity.EffectiveScheduleSettings)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetEffectiveSchedule indicates an expected call of GetEffectiveSchedule.
+func (mr *MockSettingsMockRecorder) GetEffectiveSchedule(ctx, guildID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetEffectiveSchedule", reflect.TypeOf((*MockSettings)(nil).GetEffectiveSchedule), ctx, guildID)
+}
+
+// UpsertSchedule mocks base method.
+func (m *MockSettings) UpsertSchedule(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertSchedule", ctx, cfg)
+	ret0, _ := ret[0].(entity.DiscordScheduleSettings)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpsertSchedule indicates an expected call of UpsertSchedule.
+func (mr *MockSettingsMockRecorder) UpsertSchedule(ctx, cfg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertSchedule", reflect.TypeOf((*MockSettings)(nil).UpsertSchedule), ctx, cfg)
+}
+
+// MockAdminRuntime is a mock of AdminRuntime interface.
+type MockAdminRuntime struct {
+	ctrl     *gomock.Controller
+	recorder *MockAdminRuntimeMockRecorder
+	isgomock struct{}
+}
+
+// MockAdminRuntimeMockRecorder is the mock recorder for MockAdminRuntime.
+type MockAdminRuntimeMockRecorder struct {
+	mock *MockAdminRuntime
+}
+
+// NewMockAdminRuntime creates a new mock instance.
+func NewMockAdminRuntime(ctrl *gomock.Controller) *MockAdminRuntime {
+	mock := &MockAdminRuntime{ctrl: ctrl}
+	mock.recorder = &MockAdminRuntimeMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockAdminRuntime) EXPECT() *MockAdminRuntimeMockRecorder {
+	return m.recorder
+}
+
+// GetDiscordStatus mocks base method.
+func (m *MockAdminRuntime) GetDiscordStatus(ctx context.Context) (bool, string) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetDiscordStatus", ctx)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(string)
+	return ret0, ret1
+}
+
+// GetDiscordStatus indicates an expected call of GetDiscordStatus.
+func (mr *MockAdminRuntimeMockRecorder) GetDiscordStatus(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDiscordStatus", reflect.TypeOf((*MockAdminRuntime)(nil).GetDiscordStatus), ctx)
+}
+
+// SendAlbumTest mocks base method.
+func (m *MockAdminRuntime) SendAlbumTest(ctx context.Context, guildID string, albumID int) (entity.ManualScheduleTriggerResult, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SendAlbumTest", ctx, guildID, albumID)
+	ret0, _ := ret[0].(entity.ManualScheduleTriggerResult)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SendAlbumTest indicates an expected call of SendAlbumTest.
+func (mr *MockAdminRuntimeMockRecorder) SendAlbumTest(ctx, guildID, albumID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendAlbumTest", reflect.TypeOf((*MockAdminRuntime)(nil).SendAlbumTest), ctx, guildID, albumID)
+}
+
+// TriggerScheduleNow mocks base method.
+func (m *MockAdminRuntime) TriggerScheduleNow(ctx context.Context, guildID string) (entity.ManualScheduleTriggerResult, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TriggerScheduleNow", ctx, guildID)
+	ret0, _ := ret[0].(entity.ManualScheduleTriggerResult)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TriggerScheduleNow indicates an expected call of TriggerScheduleNow.
+func (mr *MockAdminRuntimeMockRecorder) TriggerScheduleNow(ctx, guildID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TriggerScheduleNow", reflect.TypeOf((*MockAdminRuntime)(nil).TriggerScheduleNow), ctx, guildID)
+}
+
+// MockAdmin is a mock of Admin interface.
+type MockAdmin struct {
+	ctrl     *gomock.Controller
+	recorder *MockAdminMockRecorder
+	isgomock struct{}
+}
+
+// MockAdminMockRecorder is the mock recorder for MockAdmin.
+type MockAdminMockRecorder struct {
+	mock *MockAdmin
+}
+
+// NewMockAdmin creates a new mock instance.
+func NewMockAdmin(ctrl *gomock.Controller) *MockAdmin {
+	mock := &MockAdmin{ctrl: ctrl}
+	mock.recorder = &MockAdminMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockAdmin) EXPECT() *MockAdminMockRecorder {
+	return m.recorder
+}
+
+// CreateAlbum mocks base method.
+func (m *MockAdmin) CreateAlbum(ctx context.Context, name string, sendMode entity.AlbumSendMode, sendConfigJSON string) (entity.Album, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateAlbum", ctx, name, sendMode, sendConfigJSON)
+	ret0, _ := ret[0].(entity.Album)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateAlbum indicates an expected call of CreateAlbum.
+func (mr *MockAdminMockRecorder) CreateAlbum(ctx, name, sendMode, sendConfigJSON any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateAlbum", reflect.TypeOf((*MockAdmin)(nil).CreateAlbum), ctx, name, sendMode, sendConfigJSON)
+}
+
+// CreateImage mocks base method.
+func (m *MockAdmin) CreateImage(ctx context.Context, img entity.Image) (entity.Image, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateImage", ctx, img)
+	ret0, _ := ret[0].(entity.Image)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateImage indicates an expected call of CreateImage.
+func (mr *MockAdminMockRecorder) CreateImage(ctx, img any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateImage", reflect.TypeOf((*MockAdmin)(nil).CreateImage), ctx, img)
+}
+
+// DeleteAlbum mocks base method.
+func (m *MockAdmin) DeleteAlbum(ctx context.Context, id int) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteAlbum", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteAlbum indicates an expected call of DeleteAlbum.
+func (mr *MockAdminMockRecorder) DeleteAlbum(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteAlbum", reflect.TypeOf((*MockAdmin)(nil).DeleteAlbum), ctx, id)
+}
+
+// DeleteImage mocks base method.
+func (m *MockAdmin) DeleteImage(ctx context.Context, id int) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteImage", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteImage indicates an expected call of DeleteImage.
+func (mr *MockAdminMockRecorder) DeleteImage(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteImage", reflect.TypeOf((*MockAdmin)(nil).DeleteImage), ctx, id)
+}
+
+// GetAlbum mocks base method.
+func (m *MockAdmin) GetAlbum(ctx context.Context, id int) (entity.Album, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAlbum", ctx, id)
+	ret0, _ := ret[0].(entity.Album)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetAlbum indicates an expected call of GetAlbum.
+func (mr *MockAdminMockRecorder) GetAlbum(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAlbum", reflect.TypeOf((*MockAdmin)(nil).GetAlbum), ctx, id)
+}
+
+// GetEffectiveSchedule mocks base method.
+func (m *MockAdmin) GetEffectiveSchedule(ctx context.Context, guildID string) (entity.EffectiveScheduleSettings, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetEffectiveSchedule", ctx, guildID)
+	ret0, _ := ret[0].(entity.EffectiveScheduleSettings)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetEffectiveSchedule indicates an expected call of GetEffectiveSchedule.
+func (mr *MockAdminMockRecorder) GetEffectiveSchedule(ctx, guildID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetEffectiveSchedule", reflect.TypeOf((*MockAdmin)(nil).GetEffectiveSchedule), ctx, guildID)
+}
+
+// GetImage mocks base method.
+func (m *MockAdmin) GetImage(ctx context.Context, id int) (entity.Image, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetImage", ctx, id)
+	ret0, _ := ret[0].(entity.Image)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetImage indicates an expected call of GetImage.
+func (mr *MockAdminMockRecorder) GetImage(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetImage", reflect.TypeOf((*MockAdmin)(nil).GetImage), ctx, id)
+}
+
+// GetSystemStatus mocks base method.
+func (m *MockAdmin) GetSystemStatus(ctx context.Context, guildID string) (entity.SystemStatus, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetSystemStatus", ctx, guildID)
+	ret0, _ := ret[0].(entity.SystemStatus)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetSystemStatus indicates an expected call of GetSystemStatus.
+func (mr *MockAdminMockRecorder) GetSystemStatus(ctx, guildID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSystemStatus", reflect.TypeOf((*MockAdmin)(nil).GetSystemStatus), ctx, guildID)
+}
+
+// ListAlbums mocks base method.
+func (m *MockAdmin) ListAlbums(ctx context.Context, q repo.AlbumAdminListQuery, offset, limit int) ([]entity.Album, int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListAlbums", ctx, q, offset, limit)
+	ret0, _ := ret[0].([]entity.Album)
+	ret1, _ := ret[1].(int)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// ListAlbums indicates an expected call of ListAlbums.
+func (mr *MockAdminMockRecorder) ListAlbums(ctx, q, offset, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAlbums", reflect.TypeOf((*MockAdmin)(nil).ListAlbums), ctx, q, offset, limit)
+}
+
+// ListImages mocks base method.
+func (m *MockAdmin) ListImages(ctx context.Context, q repo.ImageAdminListQuery, offset, limit int) ([]entity.Image, int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListImages", ctx, q, offset, limit)
+	ret0, _ := ret[0].([]entity.Image)
+	ret1, _ := ret[1].(int)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// ListImages indicates an expected call of ListImages.
+func (mr *MockAdminMockRecorder) ListImages(ctx, q, offset, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListImages", reflect.TypeOf((*MockAdmin)(nil).ListImages), ctx, q, offset, limit)
+}
+
+// RecordAudit mocks base method.
+func (m *MockAdmin) RecordAudit(ctx context.Context, actor, action, targetType, targetID string, metadata map[string]any) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RecordAudit", ctx, actor, action, targetType, targetID, metadata)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RecordAudit indicates an expected call of RecordAudit.
+func (mr *MockAdminMockRecorder) RecordAudit(ctx, actor, action, targetType, targetID, metadata any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordAudit", reflect.TypeOf((*MockAdmin)(nil).RecordAudit), ctx, actor, action, targetType, targetID, metadata)
+}
+
+// SendAlbumTest mocks base method.
+func (m *MockAdmin) SendAlbumTest(ctx context.Context, guildID string, albumID int, actor string) (entity.ManualScheduleTriggerResult, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SendAlbumTest", ctx, guildID, albumID, actor)
+	ret0, _ := ret[0].(entity.ManualScheduleTriggerResult)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SendAlbumTest indicates an expected call of SendAlbumTest.
+func (mr *MockAdminMockRecorder) SendAlbumTest(ctx, guildID, albumID, actor any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendAlbumTest", reflect.TypeOf((*MockAdmin)(nil).SendAlbumTest), ctx, guildID, albumID, actor)
+}
+
+// TriggerScheduleNow mocks base method.
+func (m *MockAdmin) TriggerScheduleNow(ctx context.Context, guildID, actor string) (entity.ManualScheduleTriggerResult, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TriggerScheduleNow", ctx, guildID, actor)
+	ret0, _ := ret[0].(entity.ManualScheduleTriggerResult)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TriggerScheduleNow indicates an expected call of TriggerScheduleNow.
+func (mr *MockAdminMockRecorder) TriggerScheduleNow(ctx, guildID, actor any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TriggerScheduleNow", reflect.TypeOf((*MockAdmin)(nil).TriggerScheduleNow), ctx, guildID, actor)
+}
+
+// UpdateAlbum mocks base method.
+func (m *MockAdmin) UpdateAlbum(ctx context.Context, id int, name string, sendMode entity.AlbumSendMode, sendConfigJSON string) (entity.Album, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateAlbum", ctx, id, name, sendMode, sendConfigJSON)
+	ret0, _ := ret[0].(entity.Album)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateAlbum indicates an expected call of UpdateAlbum.
+func (mr *MockAdminMockRecorder) UpdateAlbum(ctx, id, name, sendMode, sendConfigJSON any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateAlbum", reflect.TypeOf((*MockAdmin)(nil).UpdateAlbum), ctx, id, name, sendMode, sendConfigJSON)
+}
+
+// UpdateImage mocks base method.
+func (m *MockAdmin) UpdateImage(ctx context.Context, img entity.Image) (entity.Image, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateImage", ctx, img)
+	ret0, _ := ret[0].(entity.Image)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateImage indicates an expected call of UpdateImage.
+func (mr *MockAdminMockRecorder) UpdateImage(ctx, img any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateImage", reflect.TypeOf((*MockAdmin)(nil).UpdateImage), ctx, img)
+}
+
+// UpsertSchedule mocks base method.
+func (m *MockAdmin) UpsertSchedule(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertSchedule", ctx, cfg)
+	ret0, _ := ret[0].(entity.DiscordScheduleSettings)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpsertSchedule indicates an expected call of UpsertSchedule.
+func (mr *MockAdminMockRecorder) UpsertSchedule(ctx, cfg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertSchedule", reflect.TypeOf((*MockAdmin)(nil).UpsertSchedule), ctx, cfg)
 }

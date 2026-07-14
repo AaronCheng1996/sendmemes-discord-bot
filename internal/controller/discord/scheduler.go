@@ -78,26 +78,27 @@ func (b *Bot) runSendScheduler() {
 func (b *Bot) doScheduledSend(channelID string, historySize int) (entity.ManualScheduleTriggerResult, error) {
 	ctx := context.Background()
 	b.vlog("scheduled send: selecting album (history=%d)", historySize)
-	imgs, albumID, err := b.imagesUC.GetScheduledAlbumImages(ctx, historySize, albumPoolSize)
+	album, err := b.imagesUC.GetScheduledAlbum(ctx, historySize)
 	if err != nil {
-		b.l.Error(fmt.Errorf("doScheduledSend GetScheduledAlbumImages: %w", err))
+		b.l.Error(fmt.Errorf("doScheduledSend GetScheduledAlbum: %w", err))
 		return entity.ManualScheduleTriggerResult{}, err
 	}
-	albumName := albumNameFrom(imgs)
-	b.vlog("scheduled send: album=%q id=%d sending to channel %s", albumName, albumID, channelID)
-	msg := b.sendAlbumToChannel(ctx, b.session, channelID, albumName, imgs)
+	b.vlog("scheduled send: album=%q id=%d mode=%s sending to channel %s", album.Name, album.ID, album.SendMode, channelID)
+	msg := b.deliverAlbum(ctx, channelID, album, "")
 	result := entity.ManualScheduleTriggerResult{
 		Triggered: msg != nil,
-		AlbumID:   albumID,
-		AlbumName: albumName,
+		AlbumID:   album.ID,
+		AlbumName: album.Name,
 		ChannelID: channelID,
 	}
 	if msg != nil {
-		b.trackScheduledMsg(msg.ID, albumID)
-		b.vlog("scheduled send: completed album=%q messageID=%s", albumName, msg.ID)
+		b.trackScheduledMsg(msg.ID, album.ID)
+		b.vlog("scheduled send: completed album=%q messageID=%s", album.Name, msg.ID)
 		result.MessageID = msg.ID
 	}
-	if err := b.imagesUC.MarkAlbumSent(ctx, albumID); err != nil {
+	// Mark sent regardless of delivery outcome so a broken album is not re-picked
+	// on every tick.
+	if err := b.imagesUC.MarkAlbumSent(ctx, album.ID); err != nil {
 		b.l.Error(fmt.Errorf("doScheduledSend MarkAlbumSent: %w", err))
 		return result, err
 	}

@@ -1,16 +1,26 @@
 // Package entity defines main entities for business logic.
 package entity
 
-// Image represents an image (URL and optional metadata).
+// Media kind values for Image.Kind (also enforced by the images.kind DB CHECK).
+const (
+	MediaKindImage = "image"
+	MediaKindVideo = "video"
+)
+
+// Image represents an image or video (URL and optional metadata).
 type Image struct {
 	ID        int    `json:"id"`
-	URL       string `json:"url"`      // pCloud path or local path
+	URL       string `json:"url"` // pCloud path or local path
 	Source    string `json:"source,omitempty"`
 	GuildID   string `json:"guild_id,omitempty"`
 	AlbumID   int    `json:"album_id,omitempty"`
 	AlbumName string `json:"album_name,omitempty"`
-	FileID    int64  `json:"file_id,omitempty"`     // pCloud file ID for link generation
-	IsCover   bool   `json:"is_cover,omitempty"`    // set by use case when image is the album cover
+	FileID    int64  `json:"file_id,omitempty"`  // pCloud file ID for link generation
+	IsCover   bool   `json:"is_cover,omitempty"` // set by use case when image is the album cover
+	// Kind is "image" or "video" (see MediaKind* constants).
+	Kind string `json:"kind"`
+	// SizeBytes is the file size in bytes when known (0 when unknown).
+	SizeBytes int64 `json:"size_bytes,omitempty"`
 	// PreviewURL is resolved on demand by the admin list endpoint and is not persisted.
 	// pCloud links are temporary; the caller is expected to re-fetch when needed.
 	PreviewURL string `json:"preview_url,omitempty"`

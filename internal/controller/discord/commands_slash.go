@@ -32,6 +32,27 @@ var slashCommands = []*discordgo.ApplicationCommand{
 		}},
 	},
 	{
+		Name:        "album_mode",
+		Description: "Set an album's delivery type",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type: discordgo.ApplicationCommandOptionString, Name: "name",
+				Description: "Album name", Required: true,
+			},
+			{
+				Type: discordgo.ApplicationCommandOptionString, Name: "mode",
+				Description: "Delivery type", Required: true,
+				Choices: []*discordgo.ApplicationCommandOptionChoice{
+					{Name: "Random", Value: "Random"},
+					{Name: "Order", Value: "Order"},
+					{Name: "Single", Value: "Single"},
+					{Name: "Video", Value: "Video"},
+					{Name: "Custom", Value: "Custom"},
+				},
+			},
+		},
+	},
+	{
 		Name:        "schedule",
 		Description: "Show or update scheduled send settings",
 		Options: []*discordgo.ApplicationCommandOption{
@@ -87,6 +108,8 @@ func (b *Bot) handleInteractionCreate(s *discordgo.Session, i *discordgo.Interac
 		b.cmdAlbum(s, i)
 	case "full_album":
 		b.cmdFullAlbum(s, i)
+	case "album_mode":
+		b.cmdAlbumMode(s, i)
 	case "schedule":
 		b.cmdSchedule(s, i)
 	}
@@ -237,6 +260,42 @@ func (b *Bot) cmdFullAlbum(s *discordgo.Session, i *discordgo.InteractionCreate)
 		b.editInteractionContent(s, i,
 			fmt.Sprintf("Full album **%s** — %d images posted in <#%s>.", albumName, total, thread.ID))
 		b.vlog("/full_album completed for %s: album=%q total=%d", user, albumName, total)
+	}()
+}
+
+func (b *Bot) cmdAlbumMode(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	user := interactionUser(i)
+	b.vlog("/album_mode received from %s", user)
+	b.deferInteraction(s, i)
+	go func() {
+		ctx := context.Background()
+		if !b.hasSchedulePermission(i.Member) {
+			b.editInteractionContent(s, i, "You need Manage Channels permission to change album mode.")
+			return
+		}
+		albumName := ""
+		modeStr := ""
+		for _, opt := range i.ApplicationCommandData().Options {
+			switch opt.Name {
+			case "name":
+				albumName = strings.TrimSpace(opt.StringValue())
+			case "mode":
+				modeStr = strings.TrimSpace(opt.StringValue())
+			}
+		}
+		mode, err := entity.ParseAlbumSendMode(modeStr)
+		if err != nil {
+			b.editInteractionContent(s, i, fmt.Sprintf("Invalid mode %q. Choose Random, Order, Single, Video, or Custom.", modeStr))
+			return
+		}
+		album, err := b.imagesUC.SetAlbumMode(ctx, albumName, mode)
+		if err != nil {
+			b.l.Error(fmt.Errorf("cmdAlbumMode SetAlbumMode %q: %w", albumName, err))
+			b.editInteractionContent(s, i, fmt.Sprintf("Failed to set mode for album **%s** (not found?).", albumName))
+			return
+		}
+		b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** mode set to %s.", album.Name, album.SendMode))
+		b.vlog("/album_mode completed for %s: album=%q mode=%s", user, album.Name, album.SendMode)
 	}()
 }
 
