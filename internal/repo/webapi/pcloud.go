@@ -114,7 +114,8 @@ type fileLinkCacheEntry struct {
 type PCloudClient struct {
 	mu          sync.RWMutex
 	token       string // current token value
-	tokenParam  string // always "auth" for both pre-set and session tokens
+	tokenParam  string // "auth" for session tokens, "access_token" for OAuth tokens
+	oauth       bool   // true when the pre-set token is an OAuth2 access token
 	username    string
 	password    string
 	apiEndpoint string
@@ -137,9 +138,13 @@ type PCloudClient struct {
 }
 
 // NewPCloudClient creates a new pCloud API client.
-// If accessToken is non-empty it is used directly as an OAuth token (access_token param).
-// Otherwise call Login(ctx) once at startup to exchange username/password for a session token (auth param).
-func NewPCloudClient(accessToken, username, password, apiEndpoint string) *PCloudClient {
+//
+// If accessToken is non-empty it is used directly and tokenType decides how it
+// is sent to pCloud: "oauth" → access_token= (token from a registered pCloud
+// OAuth app), anything else → auth= (a session token, e.g. the pcauth cookie).
+// When accessToken is empty, call Login(ctx) once at startup to exchange
+// username/password for a session token (sent as auth=).
+func NewPCloudClient(accessToken, tokenType, username, password, apiEndpoint string) *PCloudClient {
 	c := &PCloudClient{
 		username:      username,
 		password:      password,
@@ -150,7 +155,12 @@ func NewPCloudClient(accessToken, username, password, apiEndpoint string) *PClou
 	}
 	if accessToken != "" {
 		c.token = accessToken
-		c.tokenParam = "auth" // pre-obtained session tokens use "auth" param
+		if strings.EqualFold(strings.TrimSpace(tokenType), "oauth") {
+			c.tokenParam = "access_token"
+			c.oauth = true
+		} else {
+			c.tokenParam = "auth" // session tokens (pcauth cookie / userinfo getauth) use auth=
+		}
 	}
 	return c
 }
@@ -245,6 +255,13 @@ func (c *PCloudClient) doLogin(ctx context.Context) error {
 // If another goroutine already re-logged in while this one was waiting, the
 // cached token is used directly without making another API call.
 func (c *PCloudClient) relogin(ctx context.Context) error {
+	// OAuth access tokens are permanent (until revoked) and have no
+	// username/password refresh path. Falling back to username/password here
+	// would both be wrong and surface a misleading verification-code error, so
+	// fail clearly instead.
+	if c.oauth {
+		return fmt.Errorf("PCloudClient - relogin: OAuth access token rejected (revoked or wrong region); re-authorize the pCloud app for a new PCLOUD_ACCESS_TOKEN")
+	}
 	if c.username == "" {
 		return fmt.Errorf("PCloudClient - relogin: no username/password configured for token refresh")
 	}

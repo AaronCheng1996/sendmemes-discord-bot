@@ -51,6 +51,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	// pCloud client + sync use case
 	pcloudClient := webapi.NewPCloudClient(
 		cfg.PCloud.AccessToken,
+		cfg.PCloud.TokenType,
 		cfg.PCloud.Username,
 		cfg.PCloud.Password,
 		cfg.PCloud.APIEndpoint,
