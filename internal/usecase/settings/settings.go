@@ -44,6 +44,18 @@ func (uc *UseCase) GetEffectiveSchedule(ctx context.Context, guildID string) (en
 	return EffectiveSchedule(uc.cfg, row), nil
 }
 
+// GetScheduleRow returns the raw per-guild settings row without env merging.
+// Callers that update a subset of fields (e.g. the /schedule slash command)
+// use it to preserve values they do not set.
+func (uc *UseCase) GetScheduleRow(ctx context.Context, guildID string) (entity.DiscordScheduleSettings, bool, error) {
+	guildID = NormalizeGuildID(guildID)
+	row, found, err := uc.repo.GetByGuild(ctx, guildID)
+	if err != nil {
+		return entity.DiscordScheduleSettings{}, false, fmt.Errorf("SettingsUseCase - GetScheduleRow - repo.GetByGuild: %w", err)
+	}
+	return row, found, nil
+}
+
 // UpsertSchedule updates per-guild schedule settings.
 func (uc *UseCase) UpsertSchedule(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error) {
 	cfg.GuildID = NormalizeGuildID(cfg.GuildID)
@@ -61,9 +73,11 @@ func EffectiveSchedule(cfg *config.Config, db entity.DiscordScheduleSettings) en
 		SendChannelID:         cfg.Discord.SendChannelID,
 		SendInterval:          cfg.Discord.SendInterval,
 		SendHistorySize:       cfg.Discord.SendHistorySize,
+		NotifyChannelID:       cfg.Discord.NotifyChannelID,
 		SourceSendChannelID:   "env",
 		SourceSendInterval:    "env",
 		SourceSendHistorySize: "env",
+		SourceNotifyChannelID: "env",
 	}
 	if db.SendChannelID != "" {
 		out.SendChannelID = db.SendChannelID
@@ -76,6 +90,10 @@ func EffectiveSchedule(cfg *config.Config, db entity.DiscordScheduleSettings) en
 	if db.SendHistorySize > 0 {
 		out.SendHistorySize = db.SendHistorySize
 		out.SourceSendHistorySize = "db"
+	}
+	if db.NotifyChannelID != "" {
+		out.NotifyChannelID = db.NotifyChannelID
+		out.SourceNotifyChannelID = "db"
 	}
 	if d, err := time.ParseDuration(out.SendInterval); err == nil {
 		out.SendIntervalDuration = d

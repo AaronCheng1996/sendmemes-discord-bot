@@ -63,12 +63,16 @@ type (
 	}
 
 	Sync interface {
-		// SyncImages fetches the pCloud folder tree and reconciles it with the database.
-		SyncImages(ctx context.Context) error
+		// SyncImages fetches the pCloud folder tree and reconciles it with the
+		// database, returning a report of newly discovered albums and files.
+		SyncImages(ctx context.Context) (entity.SyncReport, error)
 	}
 
 	Settings interface {
 		GetEffectiveSchedule(ctx context.Context, guildID string) (entity.EffectiveScheduleSettings, error)
+		// GetScheduleRow returns the raw per-guild settings row without env
+		// merging, so partial updaters can preserve fields they do not set.
+		GetScheduleRow(ctx context.Context, guildID string) (entity.DiscordScheduleSettings, bool, error)
 		UpsertSchedule(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error)
 	}
 
@@ -97,6 +101,8 @@ type (
 		GetEffectiveSchedule(ctx context.Context, guildID string) (entity.EffectiveScheduleSettings, error)
 		UpsertSchedule(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error)
 		RecordAudit(ctx context.Context, actor, action, targetType, targetID string, metadata map[string]any) error
+		// ListSyncEvents returns paginated sync discovery events, newest first.
+		ListSyncEvents(ctx context.Context, offset, limit int) ([]entity.SyncEvent, int, error)
 		GetSystemStatus(ctx context.Context, guildID string) (entity.SystemStatus, error)
 		TriggerScheduleNow(ctx context.Context, guildID, actor string) (entity.ManualScheduleTriggerResult, error)
 		// SendAlbumTest delivers a one-off preview for albumID to the configured send channel (see schedule / env).

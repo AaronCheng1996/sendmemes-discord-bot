@@ -346,11 +346,12 @@ func (m *MockSync) EXPECT() *MockSyncMockRecorder {
 }
 
 // SyncImages mocks base method.
-func (m *MockSync) SyncImages(ctx context.Context) error {
+func (m *MockSync) SyncImages(ctx context.Context) (entity.SyncReport, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "SyncImages", ctx)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(entity.SyncReport)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // SyncImages indicates an expected call of SyncImages.
@@ -396,6 +397,22 @@ func (m *MockSettings) GetEffectiveSchedule(ctx context.Context, guildID string)
 func (mr *MockSettingsMockRecorder) GetEffectiveSchedule(ctx, guildID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetEffectiveSchedule", reflect.TypeOf((*MockSettings)(nil).GetEffectiveSchedule), ctx, guildID)
+}
+
+// GetScheduleRow mocks base method.
+func (m *MockSettings) GetScheduleRow(ctx context.Context, guildID string) (entity.DiscordScheduleSettings, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetScheduleRow", ctx, guildID)
+	ret0, _ := ret[0].(entity.DiscordScheduleSettings)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// GetScheduleRow indicates an expected call of GetScheduleRow.
+func (mr *MockSettingsMockRecorder) GetScheduleRow(ctx, guildID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetScheduleRow", reflect.TypeOf((*MockSettings)(nil).GetScheduleRow), ctx, guildID)
 }
 
 // UpsertSchedule mocks base method.
@@ -654,6 +671,22 @@ func (m *MockAdmin) ListImages(ctx context.Context, q repo.ImageAdminListQuery, 
 func (mr *MockAdminMockRecorder) ListImages(ctx, q, offset, limit any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListImages", reflect.TypeOf((*MockAdmin)(nil).ListImages), ctx, q, offset, limit)
+}
+
+// ListSyncEvents mocks base method.
+func (m *MockAdmin) ListSyncEvents(ctx context.Context, offset, limit int) ([]entity.SyncEvent, int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListSyncEvents", ctx, offset, limit)
+	ret0, _ := ret[0].([]entity.SyncEvent)
+	ret1, _ := ret[1].(int)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// ListSyncEvents indicates an expected call of ListSyncEvents.
+func (mr *MockAdminMockRecorder) ListSyncEvents(ctx, offset, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListSyncEvents", reflect.TypeOf((*MockAdmin)(nil).ListSyncEvents), ctx, offset, limit)
 }
 
 // RecordAudit mocks base method.

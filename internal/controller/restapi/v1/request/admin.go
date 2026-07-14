@@ -33,6 +33,7 @@ type SchedulePut struct {
 	SendChannelID   string `json:"send_channel_id"`
 	SendInterval    string `json:"send_interval"`
 	SendHistorySize int    `json:"send_history_size"`
+	NotifyChannelID string `json:"notify_channel_id"`
 }
 
 type ScheduleTriggerNow struct {

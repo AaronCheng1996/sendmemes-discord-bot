@@ -300,6 +300,7 @@ func (r *V1) putSchedule(ctx *fiber.Ctx) error {
 		SendChannelID:   strings.TrimSpace(body.SendChannelID),
 		SendInterval:    strings.TrimSpace(body.SendInterval),
 		SendHistorySize: body.SendHistorySize,
+		NotifyChannelID: strings.TrimSpace(body.NotifyChannelID),
 	})
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - putSchedule")
@@ -309,8 +310,27 @@ func (r *V1) putSchedule(ctx *fiber.Ctx) error {
 		"send_channel_id":   body.SendChannelID,
 		"send_interval":     body.SendInterval,
 		"send_history_size": body.SendHistorySize,
+		"notify_channel_id": body.NotifyChannelID,
 	})
 	return ctx.Status(http.StatusOK).JSON(out)
+}
+
+func (r *V1) listSyncEvents(ctx *fiber.Ctx) error {
+	offset, limit := clampPagination(parseIntQuery(ctx, "offset", 0), parseIntQuery(ctx, "limit", defaultListLimit))
+	items, total, err := r.a.ListSyncEvents(ctx.UserContext(), offset, limit)
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - listSyncEvents")
+		return errorResponse(ctx, http.StatusInternalServerError, "failed to list sync events")
+	}
+	if items == nil {
+		items = []entity.SyncEvent{}
+	}
+	return ctx.Status(http.StatusOK).JSON(response.Page[entity.SyncEvent]{
+		Items:  items,
+		Total:  total,
+		Offset: offset,
+		Limit:  limit,
+	})
 }
 
 func (r *V1) getSystemStatus(ctx *fiber.Ctx) error {

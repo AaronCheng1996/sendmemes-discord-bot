@@ -365,7 +365,9 @@ func (r *ImagesRepo) Delete(ctx context.Context, id int) error {
 }
 
 // UpsertByFileID inserts or updates an image record keyed on file_id.
-func (r *ImagesRepo) UpsertByFileID(ctx context.Context, img entity.Image) error {
+// The returned bool reports whether a new row was inserted (vs. updated);
+// (xmax = 0) is true only for rows created by this statement.
+func (r *ImagesRepo) UpsertByFileID(ctx context.Context, img entity.Image) (bool, error) {
 	kind := img.Kind
 	if kind == "" {
 		kind = entity.MediaKindImage // satisfy the images.kind CHECK constraint
@@ -374,17 +376,17 @@ func (r *ImagesRepo) UpsertByFileID(ctx context.Context, img entity.Image) error
 		Insert("images").
 		Columns("file_id", "url", "source", "album_id", "kind", "size_bytes").
 		Values(img.FileID, img.URL, img.Source, img.AlbumID, kind, nullableInt64(img.SizeBytes)).
-		Suffix("ON CONFLICT (file_id) WHERE file_id IS NOT NULL DO UPDATE SET url = EXCLUDED.url, album_id = EXCLUDED.album_id, kind = EXCLUDED.kind, size_bytes = EXCLUDED.size_bytes").
+		Suffix("ON CONFLICT (file_id) WHERE file_id IS NOT NULL DO UPDATE SET url = EXCLUDED.url, album_id = EXCLUDED.album_id, kind = EXCLUDED.kind, size_bytes = EXCLUDED.size_bytes RETURNING (xmax = 0)").
 		ToSql()
 	if err != nil {
-		return fmt.Errorf("ImagesRepo - UpsertByFileID - r.Builder: %w", err)
+		return false, fmt.Errorf("ImagesRepo - UpsertByFileID - r.Builder: %w", err)
 	}
 
-	_, err = r.Pool.Exec(ctx, sql, args...)
-	if err != nil {
-		return fmt.Errorf("ImagesRepo - UpsertByFileID - Exec: %w", err)
+	var inserted bool
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&inserted); err != nil {
+		return false, fmt.Errorf("ImagesRepo - UpsertByFileID - QueryRow: %w", err)
 	}
-	return nil
+	return inserted, nil
 }
 
 // DeleteByAlbumNotInFileIDs removes pCloud images in albumID whose file_id is not in fileIDs.

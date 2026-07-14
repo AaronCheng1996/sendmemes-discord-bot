@@ -15,13 +15,14 @@ import (
 
 // UseCase provides admin CRUD and settings operations.
 type UseCase struct {
-	albums   repo.AlbumsRepo
-	images   repo.ImagesRepo
-	imagesUC usecase.Images
-	settings usecase.Settings
-	audit    repo.AdminAuditRepo
-	system   repo.SystemRepo
-	runtime  usecase.AdminRuntime
+	albums     repo.AlbumsRepo
+	images     repo.ImagesRepo
+	imagesUC   usecase.Images
+	settings   usecase.Settings
+	audit      repo.AdminAuditRepo
+	syncEvents repo.SyncEventsRepo
+	system     repo.SystemRepo
+	runtime    usecase.AdminRuntime
 }
 
 // New creates admin usecase.
@@ -31,17 +32,19 @@ func New(
 	imagesUC usecase.Images,
 	settings usecase.Settings,
 	audit repo.AdminAuditRepo,
+	syncEvents repo.SyncEventsRepo,
 	system repo.SystemRepo,
 	runtime usecase.AdminRuntime,
 ) *UseCase {
 	return &UseCase{
-		albums:   albums,
-		images:   images,
-		imagesUC: imagesUC,
-		settings: settings,
-		audit:    audit,
-		system:   system,
-		runtime:  runtime,
+		albums:     albums,
+		images:     images,
+		imagesUC:   imagesUC,
+		settings:   settings,
+		audit:      audit,
+		syncEvents: syncEvents,
+		system:     system,
+		runtime:    runtime,
 	}
 }
 
@@ -219,6 +222,19 @@ func (uc *UseCase) RecordAudit(ctx context.Context, actor, action, targetType, t
 		TargetID:   targetID,
 		Metadata:   metadata,
 	})
+}
+
+// ListSyncEvents returns paginated sync discovery events, newest first.
+func (uc *UseCase) ListSyncEvents(ctx context.Context, offset, limit int) ([]entity.SyncEvent, int, error) {
+	items, err := uc.syncEvents.List(ctx, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := uc.syncEvents.Count(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
 }
 
 func (uc *UseCase) GetSystemStatus(ctx context.Context, guildID string) (entity.SystemStatus, error) {

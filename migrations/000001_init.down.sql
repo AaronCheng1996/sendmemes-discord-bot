@@ -1,4 +1,6 @@
 DROP TABLE IF EXISTS history;
+DROP INDEX IF EXISTS sync_events_created_at_idx;
+DROP TABLE IF EXISTS sync_events;
 DROP INDEX IF EXISTS admin_audit_logs_created_at_idx;
 DROP TABLE IF EXISTS admin_audit_logs;
 DROP TABLE IF EXISTS discord_schedule_settings;

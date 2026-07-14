@@ -69,6 +69,7 @@ var slashCommands = []*discordgo.ApplicationCommand{
 					{Type: discordgo.ApplicationCommandOptionChannel, Name: "channel", Description: "Target channel", Required: true},
 					{Type: discordgo.ApplicationCommandOptionString, Name: "interval", Description: `Go duration, e.g. "6h"`, Required: true},
 					{Type: discordgo.ApplicationCommandOptionInteger, Name: "history_size", Description: "Exclude this many recent albums", Required: true},
+					{Type: discordgo.ApplicationCommandOptionChannel, Name: "notify_channel", Description: "Channel for new-content sync notifications"},
 				},
 			},
 		},
@@ -327,6 +328,8 @@ func (b *Bot) cmdSchedule(s *discordgo.Session, i *discordgo.InteractionCreate) 
 			channelID := ""
 			interval := ""
 			historySize := 0
+			notifyChannelID := ""
+			notifyProvided := false
 			for _, opt := range sub.Options {
 				switch opt.Name {
 				case "channel":
@@ -335,6 +338,9 @@ func (b *Bot) cmdSchedule(s *discordgo.Session, i *discordgo.InteractionCreate) 
 					interval = strings.TrimSpace(opt.StringValue())
 				case "history_size":
 					historySize = int(opt.IntValue())
+				case "notify_channel":
+					notifyChannelID = strings.TrimSpace(fmt.Sprintf("%v", opt.Value))
+					notifyProvided = true
 				}
 			}
 			if _, err := timeParseDuration(interval); err != nil {
@@ -345,11 +351,21 @@ func (b *Bot) cmdSchedule(s *discordgo.Session, i *discordgo.InteractionCreate) 
 				b.editInteractionContent(s, i, "history_size must be > 0.")
 				return
 			}
+			// notify_channel is optional: when omitted, preserve the stored value
+			// instead of clobbering it with an empty string.
+			if !notifyProvided {
+				if row, found, rerr := b.settingsUC.GetScheduleRow(ctx, guildID); rerr != nil {
+					b.l.Error(fmt.Errorf("cmdSchedule set GetScheduleRow: %w", rerr))
+				} else if found {
+					notifyChannelID = row.NotifyChannelID
+				}
+			}
 			if _, err := b.settingsUC.UpsertSchedule(ctx, entity.DiscordScheduleSettings{
 				GuildID:         guildID,
 				SendChannelID:   channelID,
 				SendInterval:    interval,
 				SendHistorySize: historySize,
+				NotifyChannelID: notifyChannelID,
 			}); err != nil {
 				b.l.Error(fmt.Errorf("cmdSchedule set: %w", err))
 				b.editInteractionContent(s, i, "Failed to update schedule settings.")
@@ -387,9 +403,14 @@ func (b *Bot) guildIDFromInteraction(i *discordgo.InteractionCreate) string {
 }
 
 func (b *Bot) scheduleDisplay(e entity.EffectiveScheduleSettings) string {
+	notify := "`(disabled)`"
+	if e.NotifyChannelID != "" {
+		notify = "`<#" + e.NotifyChannelID + ">`"
+	}
 	return "Schedule settings\n" +
 		"- guild: `" + e.GuildID + "`\n" +
 		"- channel: `<#" + e.SendChannelID + ">` (" + e.SourceSendChannelID + ")\n" +
 		"- interval: `" + e.SendInterval + "` (" + e.SourceSendInterval + ")\n" +
-		"- history_size: `" + strconv.Itoa(e.SendHistorySize) + "` (" + e.SourceSendHistorySize + ")"
+		"- history_size: `" + strconv.Itoa(e.SendHistorySize) + "` (" + e.SourceSendHistorySize + ")\n" +
+		"- notify_channel: " + notify + " (" + e.SourceNotifyChannelID + ")"
 }

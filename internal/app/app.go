@@ -45,6 +45,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	albumsRepo := persistent.NewAlbumsRepo(pg)
 	scheduleSettingsRepo := persistent.NewScheduleSettingsRepo(pg)
 	adminAuditRepo := persistent.NewAdminAuditRepo(pg)
+	syncEventsRepo := persistent.NewSyncEventsRepo(pg)
 	systemRepo := persistent.NewSystemRepo(pg)
 
 	// pCloud client + sync use case
@@ -58,7 +59,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	if err = pcloudClient.Login(context.Background()); err != nil {
 		l.Fatal(fmt.Errorf("app - Run - pcloudClient.Login: %w", err))
 	}
-	syncUseCase := syncuc.New(pcloudClient, albumsRepo, imagesRepo, cfg.PCloud.RootFolderIDs)
+	syncUseCase := syncuc.New(pcloudClient, albumsRepo, imagesRepo, syncEventsRepo, cfg.PCloud.RootFolderIDs)
 
 	// Use-Case: images
 	imagesUseCase := images.New(imagesRepo, albumsRepo, pcloudClient, cfg.HTTP.PublicURL)
@@ -70,7 +71,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		l.Fatal(fmt.Errorf("app - Run - discord.NewBot: %w", err))
 	}
 	discordBot.Start()
-	adminUseCase := adminuc.New(albumsRepo, imagesRepo, imagesUseCase, settingsUseCase, adminAuditRepo, systemRepo, discordBot)
+	adminUseCase := adminuc.New(albumsRepo, imagesRepo, imagesUseCase, settingsUseCase, adminAuditRepo, syncEventsRepo, systemRepo, discordBot)
 
 	// HTTP Server (REST API)
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))

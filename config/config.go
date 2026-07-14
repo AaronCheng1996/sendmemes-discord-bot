@@ -58,6 +58,10 @@ type (
 		GuildID       string `env:"DISCORD_GUILD_ID"`
 		// SendChannelID is the channel for scheduled periodic album sends.
 		SendChannelID string `env:"DISCORD_CHANNEL_ID"`
+		// NotifyChannelID is the channel for "new content discovered" sync
+		// notifications. Empty disables them. Per-guild DB override lives in
+		// discord_schedule_settings.notify_channel_id.
+		NotifyChannelID string `env:"DISCORD_NOTIFY_CHANNEL_ID"`
 		// SendInterval is how often to push a random album (Go duration string, e.g. "6h").
 		SendInterval string `env:"DISCORD_SEND_INTERVAL" envDefault:"6h"`
 		// SendHistorySize is the number of most-recently-sent albums to exclude from

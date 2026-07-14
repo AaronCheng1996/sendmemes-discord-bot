@@ -220,23 +220,38 @@ func (r *AlbumsRepo) Create(ctx context.Context, name string, sendMode entity.Al
 	return a, nil
 }
 
-// GetOrCreate returns the album with the given name, creating it if it does not exist.
-func (r *AlbumsRepo) GetOrCreate(ctx context.Context, name string) (entity.Album, error) {
+// GetOrCreate returns the album with the given name, creating it if it does not
+// exist. The returned bool reports whether a new row was created; (xmax = 0) is
+// true only for rows created by this statement.
+func (r *AlbumsRepo) GetOrCreate(ctx context.Context, name string) (entity.Album, bool, error) {
 	sql, args, err := r.Builder.
 		Insert("albums").
 		Columns("name", "send_mode", "send_config_json").
 		Values(name, entity.AlbumSendModeRandom, sq.Expr("'{}'::jsonb")).
-		Suffix("ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id, name, has_cover, COALESCE(cover_image_id, 0), send_mode, COALESCE(send_config_json::text, ''), last_sent_at, COALESCE(positive_rating, 0)").
+		Suffix("ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id, name, has_cover, COALESCE(cover_image_id, 0), send_mode, COALESCE(send_config_json::text, ''), last_sent_at, COALESCE(positive_rating, 0), (xmax = 0)").
 		ToSql()
 	if err != nil {
-		return entity.Album{}, fmt.Errorf("AlbumsRepo - GetOrCreate - r.Builder: %w", err)
+		return entity.Album{}, false, fmt.Errorf("AlbumsRepo - GetOrCreate - r.Builder: %w", err)
 	}
 
-	a, err := scanAlbumRow(r.Pool.QueryRow(ctx, sql, args...))
-	if err != nil {
-		return entity.Album{}, fmt.Errorf("AlbumsRepo - GetOrCreate - QueryRow: %w", err)
+	var a entity.Album
+	var lastSentAt *time.Time
+	var created bool
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(
+		&a.ID,
+		&a.Name,
+		&a.HasCover,
+		&a.CoverImageID,
+		&a.SendMode,
+		&a.SendConfigJSON,
+		&lastSentAt,
+		&a.PositiveRating,
+		&created,
+	); err != nil {
+		return entity.Album{}, false, fmt.Errorf("AlbumsRepo - GetOrCreate - QueryRow: %w", err)
 	}
-	return a, nil
+	a.LastSentAt = lastSentAt
+	return a, created, nil
 }
 
 // GetByName returns the album with the given name.

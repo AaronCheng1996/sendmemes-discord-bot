@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS discord_schedule_settings (
     send_channel_id   text,
     send_interval     text,
     send_history_size int,
+    notify_channel_id text,
     updated_at        timestamptz NOT NULL DEFAULT now()
 );
 
@@ -61,6 +62,22 @@ CREATE TABLE IF NOT EXISTS admin_audit_logs (
 
 CREATE INDEX IF NOT EXISTS admin_audit_logs_created_at_idx
     ON admin_audit_logs (created_at DESC);
+
+-- Per-album discovery events recorded by pCloud sync runs; surfaced in the
+-- admin UI Activity page and used for Discord "new content" notifications.
+CREATE TABLE IF NOT EXISTS sync_events (
+    id          bigserial   PRIMARY KEY,
+    event_type  text        NOT NULL CHECK (event_type IN ('album_created', 'files_added')),
+    album_id    int         REFERENCES albums (id) ON DELETE SET NULL,
+    album_name  text        NOT NULL,
+    new_images  int         NOT NULL DEFAULT 0,
+    new_videos  int         NOT NULL DEFAULT 0,
+    file_names  jsonb       NOT NULL DEFAULT '[]'::jsonb,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS sync_events_created_at_idx
+    ON sync_events (created_at DESC);
 
 -- Translation history table is retained because the legacy /v1/translation
 -- routes still wire it up. Remove with the rest of the translation feature

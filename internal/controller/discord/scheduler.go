@@ -3,10 +3,15 @@ package discord
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 )
+
+// maxSyncNotifyMessages caps how many per-album notification messages one sync
+// run may post; the remainder is summarized in a single extra message.
+const maxSyncNotifyMessages = 20
 
 func (b *Bot) runSyncScheduler() {
 	interval := parseDuration(b.cfg.PCloud.SyncInterval, time.Hour)
@@ -31,11 +36,82 @@ func (b *Bot) runSyncScheduler() {
 func (b *Bot) doSync() {
 	ctx := context.Background()
 	b.l.Info("pCloud sync started")
-	if err := b.syncUC.SyncImages(ctx); err != nil {
+	report, err := b.syncUC.SyncImages(ctx)
+	if err != nil {
 		b.l.Error(fmt.Errorf("doSync: %w", err))
-	} else {
-		b.l.Info("pCloud sync completed")
+		return
 	}
+	b.l.Info("pCloud sync completed")
+	b.notifySyncEvents(ctx, report)
+}
+
+// notifySyncEvents posts one Discord message per album with newly discovered
+// content to the configured notify channel. Nothing is sent when no channel is
+// configured or when the run was the initial import (avoids flooding).
+func (b *Bot) notifySyncEvents(ctx context.Context, report entity.SyncReport) {
+	if len(report.Events) == 0 {
+		return
+	}
+	if report.InitialImport {
+		b.vlog("sync notify: initial import (%d albums), skipping Discord notifications", len(report.Events))
+		return
+	}
+	effective, err := b.settingsUC.GetEffectiveSchedule(ctx, b.cfg.Discord.GuildID)
+	if err != nil {
+		b.l.Error(fmt.Errorf("notifySyncEvents GetEffectiveSchedule: %w", err))
+		return
+	}
+	channelID := strings.TrimSpace(effective.NotifyChannelID)
+	if channelID == "" {
+		return
+	}
+
+	for i, ev := range report.Events {
+		if i >= maxSyncNotifyMessages {
+			rest := len(report.Events) - maxSyncNotifyMessages
+			if _, serr := b.session.ChannelMessageSend(channelID, fmt.Sprintf("…and %d more album(s) with new content.", rest)); serr != nil {
+				b.l.Error(fmt.Errorf("notifySyncEvents summary send: %w", serr))
+			}
+			break
+		}
+		if _, serr := b.session.ChannelMessageSend(channelID, formatSyncEventMessage(ev)); serr != nil {
+			b.l.Error(fmt.Errorf("notifySyncEvents send album %q: %w", ev.AlbumName, serr))
+		}
+	}
+	b.vlog("sync notify: posted %d notification(s) to channel %s", min(len(report.Events), maxSyncNotifyMessages), channelID)
+}
+
+// formatSyncEventMessage renders one sync event as a Discord message line, e.g.
+// "🆕 **Name** — new album: 3 images, 1 video" or "📥 **Name** — +2 images".
+func formatSyncEventMessage(ev entity.SyncEvent) string {
+	var counts []string
+	if ev.NewImages > 0 {
+		counts = append(counts, countPhrase(ev.NewImages, "image"))
+	}
+	if ev.NewVideos > 0 {
+		counts = append(counts, countPhrase(ev.NewVideos, "video"))
+	}
+
+	if ev.EventType == entity.SyncEventAlbumCreated {
+		detail := strings.Join(counts, ", ")
+		if detail == "" {
+			detail = "empty"
+		}
+		return fmt.Sprintf("🆕 **%s** — new album: %s", ev.AlbumName, detail)
+	}
+
+	for i := range counts {
+		counts[i] = "+" + counts[i]
+	}
+	return fmt.Sprintf("📥 **%s** — %s", ev.AlbumName, strings.Join(counts, ", "))
+}
+
+// countPhrase renders a count with a naively pluralized noun ("1 image", "3 videos").
+func countPhrase(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 func (b *Bot) runSendScheduler() {

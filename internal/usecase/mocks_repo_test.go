@@ -223,12 +223,13 @@ func (mr *MockAlbumsRepoMockRecorder) GetByName(ctx, name any) *gomock.Call {
 }
 
 // GetOrCreate mocks base method.
-func (m *MockAlbumsRepo) GetOrCreate(ctx context.Context, name string) (entity.Album, error) {
+func (m *MockAlbumsRepo) GetOrCreate(ctx context.Context, name string) (entity.Album, bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetOrCreate", ctx, name)
 	ret0, _ := ret[0].(entity.Album)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
 }
 
 // GetOrCreate indicates an expected call of GetOrCreate.
@@ -575,11 +576,12 @@ func (mr *MockImagesRepoMockRecorder) Update(ctx, img any) *gomock.Call {
 }
 
 // UpsertByFileID mocks base method.
-func (m *MockImagesRepo) UpsertByFileID(ctx context.Context, img entity.Image) error {
+func (m *MockImagesRepo) UpsertByFileID(ctx context.Context, img entity.Image) (bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "UpsertByFileID", ctx, img)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // UpsertByFileID indicates an expected call of UpsertByFileID.
@@ -679,6 +681,75 @@ func (m *MockAdminAuditRepo) Insert(ctx context.Context, log entity.AdminAuditLo
 func (mr *MockAdminAuditRepoMockRecorder) Insert(ctx, log any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Insert", reflect.TypeOf((*MockAdminAuditRepo)(nil).Insert), ctx, log)
+}
+
+// MockSyncEventsRepo is a mock of SyncEventsRepo interface.
+type MockSyncEventsRepo struct {
+	ctrl     *gomock.Controller
+	recorder *MockSyncEventsRepoMockRecorder
+	isgomock struct{}
+}
+
+// MockSyncEventsRepoMockRecorder is the mock recorder for MockSyncEventsRepo.
+type MockSyncEventsRepoMockRecorder struct {
+	mock *MockSyncEventsRepo
+}
+
+// NewMockSyncEventsRepo creates a new mock instance.
+func NewMockSyncEventsRepo(ctrl *gomock.Controller) *MockSyncEventsRepo {
+	mock := &MockSyncEventsRepo{ctrl: ctrl}
+	mock.recorder = &MockSyncEventsRepoMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockSyncEventsRepo) EXPECT() *MockSyncEventsRepoMockRecorder {
+	return m.recorder
+}
+
+// Count mocks base method.
+func (m *MockSyncEventsRepo) Count(ctx context.Context) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Count", ctx)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Count indicates an expected call of Count.
+func (mr *MockSyncEventsRepoMockRecorder) Count(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Count", reflect.TypeOf((*MockSyncEventsRepo)(nil).Count), ctx)
+}
+
+// Insert mocks base method.
+func (m *MockSyncEventsRepo) Insert(ctx context.Context, ev entity.SyncEvent) (entity.SyncEvent, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Insert", ctx, ev)
+	ret0, _ := ret[0].(entity.SyncEvent)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Insert indicates an expected call of Insert.
+func (mr *MockSyncEventsRepoMockRecorder) Insert(ctx, ev any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Insert", reflect.TypeOf((*MockSyncEventsRepo)(nil).Insert), ctx, ev)
+}
+
+// List mocks base method.
+func (m *MockSyncEventsRepo) List(ctx context.Context, offset, limit int) ([]entity.SyncEvent, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "List", ctx, offset, limit)
+	ret0, _ := ret[0].([]entity.SyncEvent)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// List indicates an expected call of List.
+func (mr *MockSyncEventsRepoMockRecorder) List(ctx, offset, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockSyncEventsRepo)(nil).List), ctx, offset, limit)
 }
 
 // MockSystemRepo is a mock of SystemRepo interface.

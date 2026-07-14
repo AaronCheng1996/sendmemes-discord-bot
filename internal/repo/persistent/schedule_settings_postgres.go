@@ -24,7 +24,7 @@ func NewScheduleSettingsRepo(pg *postgres.Postgres) *ScheduleSettingsRepo {
 // GetByGuild returns schedule settings for guildID.
 func (r *ScheduleSettingsRepo) GetByGuild(ctx context.Context, guildID string) (entity.DiscordScheduleSettings, bool, error) {
 	sql, args, err := r.Builder.
-		Select("guild_id", "COALESCE(send_channel_id, '')", "COALESCE(send_interval, '')", "COALESCE(send_history_size, 0)", "updated_at").
+		Select("guild_id", "COALESCE(send_channel_id, '')", "COALESCE(send_interval, '')", "COALESCE(send_history_size, 0)", "COALESCE(notify_channel_id, '')", "updated_at").
 		From("discord_schedule_settings").
 		Where("guild_id = ?", guildID).
 		Limit(1).
@@ -35,7 +35,7 @@ func (r *ScheduleSettingsRepo) GetByGuild(ctx context.Context, guildID string) (
 
 	var cfg entity.DiscordScheduleSettings
 	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(
-		&cfg.GuildID, &cfg.SendChannelID, &cfg.SendInterval, &cfg.SendHistorySize, &cfg.UpdatedAt,
+		&cfg.GuildID, &cfg.SendChannelID, &cfg.SendInterval, &cfg.SendHistorySize, &cfg.NotifyChannelID, &cfg.UpdatedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return entity.DiscordScheduleSettings{}, false, nil
@@ -50,9 +50,9 @@ func (r *ScheduleSettingsRepo) GetByGuild(ctx context.Context, guildID string) (
 func (r *ScheduleSettingsRepo) Upsert(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error) {
 	sql, args, err := r.Builder.
 		Insert("discord_schedule_settings").
-		Columns("guild_id", "send_channel_id", "send_interval", "send_history_size").
-		Values(cfg.GuildID, cfg.SendChannelID, cfg.SendInterval, cfg.SendHistorySize).
-		Suffix("ON CONFLICT (guild_id) DO UPDATE SET send_channel_id = EXCLUDED.send_channel_id, send_interval = EXCLUDED.send_interval, send_history_size = EXCLUDED.send_history_size, updated_at = NOW() RETURNING guild_id, COALESCE(send_channel_id, ''), COALESCE(send_interval, ''), COALESCE(send_history_size, 0), updated_at").
+		Columns("guild_id", "send_channel_id", "send_interval", "send_history_size", "notify_channel_id").
+		Values(cfg.GuildID, cfg.SendChannelID, cfg.SendInterval, cfg.SendHistorySize, cfg.NotifyChannelID).
+		Suffix("ON CONFLICT (guild_id) DO UPDATE SET send_channel_id = EXCLUDED.send_channel_id, send_interval = EXCLUDED.send_interval, send_history_size = EXCLUDED.send_history_size, notify_channel_id = EXCLUDED.notify_channel_id, updated_at = NOW() RETURNING guild_id, COALESCE(send_channel_id, ''), COALESCE(send_interval, ''), COALESCE(send_history_size, 0), COALESCE(notify_channel_id, ''), updated_at").
 		ToSql()
 	if err != nil {
 		return entity.DiscordScheduleSettings{}, fmt.Errorf("ScheduleSettingsRepo - Upsert - r.Builder: %w", err)
@@ -60,7 +60,7 @@ func (r *ScheduleSettingsRepo) Upsert(ctx context.Context, cfg entity.DiscordSch
 
 	var out entity.DiscordScheduleSettings
 	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(
-		&out.GuildID, &out.SendChannelID, &out.SendInterval, &out.SendHistorySize, &out.UpdatedAt,
+		&out.GuildID, &out.SendChannelID, &out.SendInterval, &out.SendHistorySize, &out.NotifyChannelID, &out.UpdatedAt,
 	); err != nil {
 		return entity.DiscordScheduleSettings{}, fmt.Errorf("ScheduleSettingsRepo - Upsert - QueryRow: %w", err)
 	}

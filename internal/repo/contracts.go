@@ -36,7 +36,9 @@ type (
 		Count(ctx context.Context, q AlbumAdminListQuery) (int, error)
 		GetByID(ctx context.Context, id int) (entity.Album, error)
 		Create(ctx context.Context, name string, sendMode entity.AlbumSendMode, sendConfigJSON string) (entity.Album, error)
-		GetOrCreate(ctx context.Context, name string) (entity.Album, error)
+		// GetOrCreate returns the album with the given name, creating it when
+		// missing. The bool reports whether a new row was created.
+		GetOrCreate(ctx context.Context, name string) (entity.Album, bool, error)
 		GetByName(ctx context.Context, name string) (entity.Album, error)
 		GetRandom(ctx context.Context) (entity.Album, error)
 		Update(ctx context.Context, id int, name string, sendMode entity.AlbumSendMode, sendConfigJSON string) (entity.Album, error)
@@ -76,7 +78,9 @@ type (
 		// GetRandomVideoByAlbum returns one random video (kind='video') from albumID.
 		// Returns (zero, false, nil) when the album has no videos.
 		GetRandomVideoByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error)
-		UpsertByFileID(ctx context.Context, img entity.Image) error
+		// UpsertByFileID inserts or updates an image record keyed on file_id.
+		// The bool reports whether a new row was inserted (vs. updated).
+		UpsertByFileID(ctx context.Context, img entity.Image) (bool, error)
 		DeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, fileIDs []int64) error
 		// FindCoverByAlbum returns the image in albumID whose filename matches
 		// the cover convention (cover.* or _cover.*), case-insensitive.
@@ -92,6 +96,15 @@ type (
 	// AdminAuditRepo stores admin action audit logs.
 	AdminAuditRepo interface {
 		Insert(ctx context.Context, log entity.AdminAuditLog) error
+	}
+
+	// SyncEventsRepo stores per-album discovery events from pCloud sync runs.
+	SyncEventsRepo interface {
+		// Insert stores one event and returns it with ID and CreatedAt filled in.
+		Insert(ctx context.Context, ev entity.SyncEvent) (entity.SyncEvent, error)
+		// List returns events newest-first with offset/limit pagination.
+		List(ctx context.Context, offset, limit int) ([]entity.SyncEvent, error)
+		Count(ctx context.Context) (int, error)
 	}
 
 	// SystemRepo provides system-level checks.
