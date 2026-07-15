@@ -3,7 +3,9 @@ DROP INDEX IF EXISTS sync_events_created_at_idx;
 DROP TABLE IF EXISTS sync_events;
 DROP INDEX IF EXISTS admin_audit_logs_created_at_idx;
 DROP TABLE IF EXISTS admin_audit_logs;
-DROP TABLE IF EXISTS discord_schedule_settings;
+DROP TABLE IF EXISTS app_settings;
+DROP INDEX IF EXISTS delivery_rules_trigger_enabled_idx;
+DROP TABLE IF EXISTS delivery_rules;
 DROP INDEX IF EXISTS albums_last_sent_at_idx;
 DROP INDEX IF EXISTS images_file_id_idx;
 

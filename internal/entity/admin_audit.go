@@ -15,11 +15,14 @@ type AdminAuditLog struct {
 
 // SystemStatus summarizes runtime status for admin dashboard.
 type SystemStatus struct {
-	ServerTime       time.Time                 `json:"server_time"`
-	DatabaseStatus   string                    `json:"database_status"`
-	DiscordConnected bool                      `json:"discord_connected"`
-	DiscordUser      string                    `json:"discord_user,omitempty"`
-	EffectiveSchedule EffectiveScheduleSettings `json:"effective_schedule"`
+	ServerTime       time.Time `json:"server_time"`
+	DatabaseStatus   string    `json:"database_status"`
+	DiscordConnected bool      `json:"discord_connected"`
+	DiscordUser      string    `json:"discord_user,omitempty"`
+	// SyncInterval is the effective pCloud sync cadence.
+	SyncInterval string `json:"sync_interval"`
+	// RuleCount is the number of configured delivery rules.
+	RuleCount int `json:"rule_count"`
 }
 
 // ManualScheduleTriggerResult represents one immediate scheduled send run.

@@ -41,13 +41,31 @@ CREATE UNIQUE INDEX IF NOT EXISTS images_file_id_idx
 CREATE INDEX IF NOT EXISTS albums_last_sent_at_idx
     ON albums (last_sent_at DESC NULLS LAST);
 
-CREATE TABLE IF NOT EXISTS discord_schedule_settings (
-    guild_id          text        PRIMARY KEY,
-    send_channel_id   text,
-    send_interval     text,
-    send_history_size int,
-    notify_channel_id text,
-    updated_at        timestamptz NOT NULL DEFAULT now()
+-- Delivery rules drive both scheduled album sends and "new content" posts.
+-- trigger_type: 'scheduled' fires every interval; 'new_album' / 'new_files'
+-- fire when a pCloud sync discovers a new album / new files in an album.
+-- interval and history_size only apply to 'scheduled' rules.
+CREATE TABLE IF NOT EXISTS delivery_rules (
+    id           bigserial   PRIMARY KEY,
+    name         text        NOT NULL DEFAULT '',
+    guild_id     text        NOT NULL DEFAULT '',
+    trigger_type text        NOT NULL CHECK (trigger_type IN ('new_album', 'new_files', 'scheduled')),
+    channel_id   text        NOT NULL,
+    send_interval text,
+    history_size int         NOT NULL DEFAULT 10,
+    enabled      boolean     NOT NULL DEFAULT true,
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    updated_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS delivery_rules_trigger_enabled_idx
+    ON delivery_rules (trigger_type, enabled);
+
+-- Singleton table (id can only be true) for global runtime settings.
+CREATE TABLE IF NOT EXISTS app_settings (
+    id            boolean     PRIMARY KEY DEFAULT true CHECK (id),
+    sync_interval text,
+    updated_at    timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS admin_audit_logs (

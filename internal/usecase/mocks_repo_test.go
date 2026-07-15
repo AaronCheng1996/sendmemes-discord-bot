@@ -590,59 +590,187 @@ func (mr *MockImagesRepoMockRecorder) UpsertByFileID(ctx, img any) *gomock.Call 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertByFileID", reflect.TypeOf((*MockImagesRepo)(nil).UpsertByFileID), ctx, img)
 }
 
-// MockScheduleSettingsRepo is a mock of ScheduleSettingsRepo interface.
-type MockScheduleSettingsRepo struct {
+// MockDeliveryRulesRepo is a mock of DeliveryRulesRepo interface.
+type MockDeliveryRulesRepo struct {
 	ctrl     *gomock.Controller
-	recorder *MockScheduleSettingsRepoMockRecorder
+	recorder *MockDeliveryRulesRepoMockRecorder
 	isgomock struct{}
 }
 
-// MockScheduleSettingsRepoMockRecorder is the mock recorder for MockScheduleSettingsRepo.
-type MockScheduleSettingsRepoMockRecorder struct {
-	mock *MockScheduleSettingsRepo
+// MockDeliveryRulesRepoMockRecorder is the mock recorder for MockDeliveryRulesRepo.
+type MockDeliveryRulesRepoMockRecorder struct {
+	mock *MockDeliveryRulesRepo
 }
 
-// NewMockScheduleSettingsRepo creates a new mock instance.
-func NewMockScheduleSettingsRepo(ctrl *gomock.Controller) *MockScheduleSettingsRepo {
-	mock := &MockScheduleSettingsRepo{ctrl: ctrl}
-	mock.recorder = &MockScheduleSettingsRepoMockRecorder{mock}
+// NewMockDeliveryRulesRepo creates a new mock instance.
+func NewMockDeliveryRulesRepo(ctrl *gomock.Controller) *MockDeliveryRulesRepo {
+	mock := &MockDeliveryRulesRepo{ctrl: ctrl}
+	mock.recorder = &MockDeliveryRulesRepoMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockScheduleSettingsRepo) EXPECT() *MockScheduleSettingsRepoMockRecorder {
+func (m *MockDeliveryRulesRepo) EXPECT() *MockDeliveryRulesRepoMockRecorder {
 	return m.recorder
 }
 
-// GetByGuild mocks base method.
-func (m *MockScheduleSettingsRepo) GetByGuild(ctx context.Context, guildID string) (entity.DiscordScheduleSettings, bool, error) {
+// Count mocks base method.
+func (m *MockDeliveryRulesRepo) Count(ctx context.Context) (int, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetByGuild", ctx, guildID)
-	ret0, _ := ret[0].(entity.DiscordScheduleSettings)
+	ret := m.ctrl.Call(m, "Count", ctx)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Count indicates an expected call of Count.
+func (mr *MockDeliveryRulesRepoMockRecorder) Count(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Count", reflect.TypeOf((*MockDeliveryRulesRepo)(nil).Count), ctx)
+}
+
+// Create mocks base method.
+func (m *MockDeliveryRulesRepo) Create(ctx context.Context, rule entity.DeliveryRule) (entity.DeliveryRule, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Create", ctx, rule)
+	ret0, _ := ret[0].(entity.DeliveryRule)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Create indicates an expected call of Create.
+func (mr *MockDeliveryRulesRepoMockRecorder) Create(ctx, rule any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Create", reflect.TypeOf((*MockDeliveryRulesRepo)(nil).Create), ctx, rule)
+}
+
+// Delete mocks base method.
+func (m *MockDeliveryRulesRepo) Delete(ctx context.Context, id int64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Delete", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Delete indicates an expected call of Delete.
+func (mr *MockDeliveryRulesRepoMockRecorder) Delete(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockDeliveryRulesRepo)(nil).Delete), ctx, id)
+}
+
+// GetByID mocks base method.
+func (m *MockDeliveryRulesRepo) GetByID(ctx context.Context, id int64) (entity.DeliveryRule, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetByID", ctx, id)
+	ret0, _ := ret[0].(entity.DeliveryRule)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetByID indicates an expected call of GetByID.
+func (mr *MockDeliveryRulesRepoMockRecorder) GetByID(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByID", reflect.TypeOf((*MockDeliveryRulesRepo)(nil).GetByID), ctx, id)
+}
+
+// List mocks base method.
+func (m *MockDeliveryRulesRepo) List(ctx context.Context) ([]entity.DeliveryRule, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "List", ctx)
+	ret0, _ := ret[0].([]entity.DeliveryRule)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// List indicates an expected call of List.
+func (mr *MockDeliveryRulesRepoMockRecorder) List(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockDeliveryRulesRepo)(nil).List), ctx)
+}
+
+// ListActiveByTrigger mocks base method.
+func (m *MockDeliveryRulesRepo) ListActiveByTrigger(ctx context.Context, triggerType string) ([]entity.DeliveryRule, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListActiveByTrigger", ctx, triggerType)
+	ret0, _ := ret[0].([]entity.DeliveryRule)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListActiveByTrigger indicates an expected call of ListActiveByTrigger.
+func (mr *MockDeliveryRulesRepoMockRecorder) ListActiveByTrigger(ctx, triggerType any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListActiveByTrigger", reflect.TypeOf((*MockDeliveryRulesRepo)(nil).ListActiveByTrigger), ctx, triggerType)
+}
+
+// Update mocks base method.
+func (m *MockDeliveryRulesRepo) Update(ctx context.Context, rule entity.DeliveryRule) (entity.DeliveryRule, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Update", ctx, rule)
+	ret0, _ := ret[0].(entity.DeliveryRule)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Update indicates an expected call of Update.
+func (mr *MockDeliveryRulesRepoMockRecorder) Update(ctx, rule any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockDeliveryRulesRepo)(nil).Update), ctx, rule)
+}
+
+// MockAppSettingsRepo is a mock of AppSettingsRepo interface.
+type MockAppSettingsRepo struct {
+	ctrl     *gomock.Controller
+	recorder *MockAppSettingsRepoMockRecorder
+	isgomock struct{}
+}
+
+// MockAppSettingsRepoMockRecorder is the mock recorder for MockAppSettingsRepo.
+type MockAppSettingsRepoMockRecorder struct {
+	mock *MockAppSettingsRepo
+}
+
+// NewMockAppSettingsRepo creates a new mock instance.
+func NewMockAppSettingsRepo(ctrl *gomock.Controller) *MockAppSettingsRepo {
+	mock := &MockAppSettingsRepo{ctrl: ctrl}
+	mock.recorder = &MockAppSettingsRepoMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockAppSettingsRepo) EXPECT() *MockAppSettingsRepoMockRecorder {
+	return m.recorder
+}
+
+// Get mocks base method.
+func (m *MockAppSettingsRepo) Get(ctx context.Context) (entity.AppSettings, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Get", ctx)
+	ret0, _ := ret[0].(entity.AppSettings)
 	ret1, _ := ret[1].(bool)
 	ret2, _ := ret[2].(error)
 	return ret0, ret1, ret2
 }
 
-// GetByGuild indicates an expected call of GetByGuild.
-func (mr *MockScheduleSettingsRepoMockRecorder) GetByGuild(ctx, guildID any) *gomock.Call {
+// Get indicates an expected call of Get.
+func (mr *MockAppSettingsRepoMockRecorder) Get(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByGuild", reflect.TypeOf((*MockScheduleSettingsRepo)(nil).GetByGuild), ctx, guildID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockAppSettingsRepo)(nil).Get), ctx)
 }
 
 // Upsert mocks base method.
-func (m *MockScheduleSettingsRepo) Upsert(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error) {
+func (m *MockAppSettingsRepo) Upsert(ctx context.Context, s entity.AppSettings) (entity.AppSettings, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Upsert", ctx, cfg)
-	ret0, _ := ret[0].(entity.DiscordScheduleSettings)
+	ret := m.ctrl.Call(m, "Upsert", ctx, s)
+	ret0, _ := ret[0].(entity.AppSettings)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Upsert indicates an expected call of Upsert.
-func (mr *MockScheduleSettingsRepoMockRecorder) Upsert(ctx, cfg any) *gomock.Call {
+func (mr *MockAppSettingsRepoMockRecorder) Upsert(ctx, s any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Upsert", reflect.TypeOf((*MockScheduleSettingsRepo)(nil).Upsert), ctx, cfg)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Upsert", reflect.TypeOf((*MockAppSettingsRepo)(nil).Upsert), ctx, s)
 }
 
 // MockAdminAuditRepo is a mock of AdminAuditRepo interface.

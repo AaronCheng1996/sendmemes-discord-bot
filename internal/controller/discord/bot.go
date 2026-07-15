@@ -194,17 +194,18 @@ func entriesToFiles(entries []fileEntry) []*discordgo.File {
 
 // Bot holds Discord session and dependencies for graceful start/stop.
 type Bot struct {
-	cfg        *config.Config
-	l          logger.Interface
-	uc         usecase.Translation
-	imagesUC   usecase.Images
-	syncUC     usecase.Sync
-	settingsUC usecase.Settings
-	session    *discordgo.Session
-	httpClient *http.Client
-	mu         sync.Mutex
-	closed     bool
-	stopCh     chan struct{}
+	cfg           *config.Config
+	l             logger.Interface
+	uc            usecase.Translation
+	imagesUC      usecase.Images
+	syncUC        usecase.Sync
+	rulesUC       usecase.Rules
+	appSettingsUC usecase.AppSettings
+	session       *discordgo.Session
+	httpClient    *http.Client
+	mu            sync.Mutex
+	closed        bool
+	stopCh        chan struct{}
 
 	// Reaction-feedback tracking for scheduled-send messages.
 	// reactMap holds messageID → albumID for the most recent reactMapMaxSize sends.
@@ -221,7 +222,8 @@ func NewBot(
 	uc usecase.Translation,
 	imagesUC usecase.Images,
 	syncUC usecase.Sync,
-	settingsUC usecase.Settings,
+	rulesUC usecase.Rules,
+	appSettingsUC usecase.AppSettings,
 ) (*Bot, error) {
 	s, err := discordgo.New("Bot " + cfg.Discord.Token)
 	if err != nil {
@@ -235,13 +237,14 @@ func NewBot(
 	s.Client = &http.Client{Timeout: downloadTimeout}
 
 	b := &Bot{
-		cfg:        cfg,
-		l:          l,
-		uc:         uc,
-		imagesUC:   imagesUC,
-		syncUC:     syncUC,
-		settingsUC: settingsUC,
-		session:    s,
+		cfg:           cfg,
+		l:             l,
+		uc:            uc,
+		imagesUC:      imagesUC,
+		syncUC:        syncUC,
+		rulesUC:       rulesUC,
+		appSettingsUC: appSettingsUC,
+		session:       s,
 		// Separate client for pCloud downloads (same generous timeout).
 		httpClient: &http.Client{Timeout: downloadTimeout},
 		stopCh:     make(chan struct{}),
@@ -273,7 +276,7 @@ func (b *Bot) Start() {
 		}
 	}()
 	go b.runSyncScheduler()
-	go b.runSendScheduler()
+	go b.runScheduleManager()
 }
 
 // Close shuts down the bot and stops all schedulers.
@@ -717,29 +720,22 @@ func parseDuration(s string, fallback time.Duration) time.Duration {
 	return d
 }
 
-func timeParseDuration(s string) (time.Duration, error) {
-	return time.ParseDuration(s)
-}
-
-// TriggerScheduleNow triggers one immediate scheduled-send cycle.
-func (b *Bot) TriggerScheduleNow(ctx context.Context, guildID string) (entity.ManualScheduleTriggerResult, error) {
-	effective, err := b.settingsUC.GetEffectiveSchedule(ctx, guildID)
-	if err != nil {
-		return entity.ManualScheduleTriggerResult{}, err
-	}
-	return b.doScheduledSend(effective.SendChannelID, effective.SendHistorySize)
-}
-
-// SendAlbumTest posts a one-off preview of albumID to the effective schedule send channel.
-// It does not call MarkAlbumSent and does not affect anti-repeat scheduling.
-func (b *Bot) SendAlbumTest(ctx context.Context, guildID string, albumID int) (entity.ManualScheduleTriggerResult, error) {
-	effective, err := b.settingsUC.GetEffectiveSchedule(ctx, guildID)
-	if err != nil {
-		return entity.ManualScheduleTriggerResult{}, err
-	}
-	ch := strings.TrimSpace(effective.SendChannelID)
+// TriggerScheduleNow sends a random album immediately to channelID.
+func (b *Bot) TriggerScheduleNow(ctx context.Context, channelID string, historySize int) (entity.ManualScheduleTriggerResult, error) {
+	_ = ctx
+	ch := strings.TrimSpace(channelID)
 	if ch == "" {
-		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("send channel is not configured (schedule send_channel_id or DISCORD_CHANNEL_ID)")
+		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("send channel is not configured")
+	}
+	return b.doScheduledSend(ch, historySize)
+}
+
+// SendAlbumTest posts a one-off preview of albumID to channelID.
+// It does not call MarkAlbumSent and does not affect anti-repeat scheduling.
+func (b *Bot) SendAlbumTest(ctx context.Context, channelID string, albumID int) (entity.ManualScheduleTriggerResult, error) {
+	ch := strings.TrimSpace(channelID)
+	if ch == "" {
+		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("send channel is not configured")
 	}
 	album, err := b.imagesUC.GetAlbumByID(ctx, albumID)
 	if err != nil {
@@ -756,6 +752,16 @@ func (b *Bot) SendAlbumTest(ctx context.Context, guildID string, albumID int) (e
 		ChannelID: ch,
 		MessageID: msg.ID,
 	}, nil
+}
+
+// TriggerSyncNow runs a pCloud sync immediately and posts notifications.
+func (b *Bot) TriggerSyncNow(ctx context.Context) (entity.SyncReport, error) {
+	report, err := b.syncUC.SyncImages(ctx)
+	if err != nil {
+		return entity.SyncReport{}, err
+	}
+	b.notifySyncEvents(ctx, report)
+	return report, nil
 }
 
 // GetDiscordStatus returns current session online status and username.

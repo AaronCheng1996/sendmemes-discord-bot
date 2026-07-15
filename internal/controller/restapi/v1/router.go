@@ -35,9 +35,17 @@ func NewAdminRoutes(adminGroup fiber.Router, a usecase.Admin, l logger.Interface
 	adminGroup.Patch("/images/:id", r.updateImage)
 	adminGroup.Delete("/images/:id", r.deleteImage)
 
-	adminGroup.Get("/schedule", r.getSchedule)
-	adminGroup.Put("/schedule", r.putSchedule)
+	adminGroup.Get("/delivery-rules", r.listRules)
+	adminGroup.Post("/delivery-rules", r.createRule)
+	adminGroup.Get("/delivery-rules/:id", r.getRule)
+	adminGroup.Patch("/delivery-rules/:id", r.updateRule)
+	adminGroup.Delete("/delivery-rules/:id", r.deleteRule)
+
 	adminGroup.Post("/schedule/trigger-now", r.triggerScheduleNow)
+
+	adminGroup.Get("/sync-settings", r.getSyncSettings)
+	adminGroup.Put("/sync-settings", r.putSyncSettings)
+	adminGroup.Post("/sync/trigger-now", r.triggerSyncNow)
 	adminGroup.Get("/sync-events", r.listSyncEvents)
 	adminGroup.Get("/system/status", r.getSystemStatus)
 }

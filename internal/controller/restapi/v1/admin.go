@@ -55,6 +55,10 @@ func parseIDParam(ctx *fiber.Ctx) (int, error) {
 	return strconv.Atoi(strings.TrimSpace(ctx.Params("id")))
 }
 
+func parseID64Param(ctx *fiber.Ctx) (int64, error) {
+	return strconv.ParseInt(strings.TrimSpace(ctx.Params("id")), 10, 64)
+}
+
 func parseAlbumListQuery(ctx *fiber.Ctx) repo.AlbumAdminListQuery {
 	q := repo.AlbumAdminListQuery{
 		SortBy:    strings.TrimSpace(ctx.Query("sort_by")),
@@ -280,39 +284,126 @@ func (r *V1) deleteImage(ctx *fiber.Ctx) error {
 	return ctx.SendStatus(http.StatusNoContent)
 }
 
-func (r *V1) getSchedule(ctx *fiber.Ctx) error {
-	guildID := strings.TrimSpace(ctx.Query("guild_id"))
-	out, err := r.a.GetEffectiveSchedule(ctx.UserContext(), guildID)
+func ruleFromBody(body request.DeliveryRuleWrite) entity.DeliveryRule {
+	enabled := true
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
+	return entity.DeliveryRule{
+		Name:         strings.TrimSpace(body.Name),
+		GuildID:      strings.TrimSpace(body.GuildID),
+		TriggerType:  strings.TrimSpace(body.TriggerType),
+		ChannelID:    strings.TrimSpace(body.ChannelID),
+		SendInterval: strings.TrimSpace(body.SendInterval),
+		HistorySize:  body.HistorySize,
+		Enabled:      enabled,
+	}
+}
+
+func (r *V1) listRules(ctx *fiber.Ctx) error {
+	rules, err := r.a.ListRules(ctx.UserContext())
 	if err != nil {
-		r.l.Error(err, "restapi - v1 - getSchedule")
-		return errorResponse(ctx, http.StatusInternalServerError, "failed to resolve schedule")
+		r.l.Error(err, "restapi - v1 - listRules")
+		return errorResponse(ctx, http.StatusInternalServerError, "failed to list rules")
+	}
+	if rules == nil {
+		rules = []entity.DeliveryRule{}
+	}
+	return ctx.Status(http.StatusOK).JSON(rules)
+}
+
+func (r *V1) createRule(ctx *fiber.Ctx) error {
+	var body request.DeliveryRuleWrite
+	if err := ctx.BodyParser(&body); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
+	}
+	if err := r.v.Struct(body); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
+	}
+	out, err := r.a.CreateRule(ctx.UserContext(), ruleFromBody(body), actorFromCtx(ctx))
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - createRule")
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+	return ctx.Status(http.StatusCreated).JSON(out)
+}
+
+func (r *V1) getRule(ctx *fiber.Ctx) error {
+	id, err := parseID64Param(ctx)
+	if err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid id")
+	}
+	out, err := r.a.GetRule(ctx.UserContext(), id)
+	if err != nil {
+		return errorResponse(ctx, http.StatusNotFound, "rule not found")
 	}
 	return ctx.Status(http.StatusOK).JSON(out)
 }
 
-func (r *V1) putSchedule(ctx *fiber.Ctx) error {
-	var body request.SchedulePut
+func (r *V1) updateRule(ctx *fiber.Ctx) error {
+	id, err := parseID64Param(ctx)
+	if err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid id")
+	}
+	var body request.DeliveryRuleWrite
+	if err = ctx.BodyParser(&body); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
+	}
+	if err = r.v.Struct(body); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
+	}
+	out, err := r.a.UpdateRule(ctx.UserContext(), id, ruleFromBody(body), actorFromCtx(ctx))
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - updateRule")
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+	return ctx.Status(http.StatusOK).JSON(out)
+}
+
+func (r *V1) deleteRule(ctx *fiber.Ctx) error {
+	id, err := parseID64Param(ctx)
+	if err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid id")
+	}
+	if err = r.a.DeleteRule(ctx.UserContext(), id, actorFromCtx(ctx)); err != nil {
+		r.l.Error(err, "restapi - v1 - deleteRule")
+		return errorResponse(ctx, http.StatusBadRequest, "failed to delete rule")
+	}
+	return ctx.SendStatus(http.StatusNoContent)
+}
+
+func (r *V1) getSyncSettings(ctx *fiber.Ctx) error {
+	out, err := r.a.GetSyncSettings(ctx.UserContext())
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - getSyncSettings")
+		return errorResponse(ctx, http.StatusInternalServerError, "failed to get sync settings")
+	}
+	return ctx.Status(http.StatusOK).JSON(out)
+}
+
+func (r *V1) putSyncSettings(ctx *fiber.Ctx) error {
+	var body request.SyncSettingsPut
 	if err := ctx.BodyParser(&body); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
 	}
-	out, err := r.a.UpsertSchedule(ctx.UserContext(), entity.DiscordScheduleSettings{
-		GuildID:         strings.TrimSpace(body.GuildID),
-		SendChannelID:   strings.TrimSpace(body.SendChannelID),
-		SendInterval:    strings.TrimSpace(body.SendInterval),
-		SendHistorySize: body.SendHistorySize,
-		NotifyChannelID: strings.TrimSpace(body.NotifyChannelID),
-	})
+	if err := r.v.Struct(body); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
+	}
+	out, err := r.a.UpdateSyncSettings(ctx.UserContext(), body.SyncInterval, actorFromCtx(ctx))
 	if err != nil {
-		r.l.Error(err, "restapi - v1 - putSchedule")
+		r.l.Error(err, "restapi - v1 - putSyncSettings")
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
-	_ = r.a.RecordAudit(ctx.UserContext(), actorFromCtx(ctx), "schedule.update", "schedule", strings.TrimSpace(body.GuildID), map[string]any{
-		"send_channel_id":   body.SendChannelID,
-		"send_interval":     body.SendInterval,
-		"send_history_size": body.SendHistorySize,
-		"notify_channel_id": body.NotifyChannelID,
-	})
 	return ctx.Status(http.StatusOK).JSON(out)
+}
+
+func (r *V1) triggerSyncNow(ctx *fiber.Ctx) error {
+	report, err := r.a.TriggerSyncNow(ctx.UserContext(), actorFromCtx(ctx))
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - triggerSyncNow")
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+	return ctx.Status(http.StatusOK).JSON(report)
 }
 
 func (r *V1) listSyncEvents(ctx *fiber.Ctx) error {
@@ -334,8 +425,7 @@ func (r *V1) listSyncEvents(ctx *fiber.Ctx) error {
 }
 
 func (r *V1) getSystemStatus(ctx *fiber.Ctx) error {
-	guildID := strings.TrimSpace(ctx.Query("guild_id"))
-	out, err := r.a.GetSystemStatus(ctx.UserContext(), guildID)
+	out, err := r.a.GetSystemStatus(ctx.UserContext())
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - getSystemStatus")
 		return errorResponse(ctx, http.StatusInternalServerError, "failed to get system status")
@@ -346,9 +436,9 @@ func (r *V1) getSystemStatus(ctx *fiber.Ctx) error {
 func (r *V1) triggerScheduleNow(ctx *fiber.Ctx) error {
 	var body request.ScheduleTriggerNow
 	if err := ctx.BodyParser(&body); err != nil {
-		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
+		body = request.ScheduleTriggerNow{}
 	}
-	res, err := r.a.TriggerScheduleNow(ctx.UserContext(), strings.TrimSpace(body.GuildID), actorFromCtx(ctx))
+	res, err := r.a.TriggerScheduleNow(ctx.UserContext(), strings.TrimSpace(body.ChannelID), actorFromCtx(ctx))
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - triggerScheduleNow")
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
@@ -365,7 +455,7 @@ func (r *V1) sendAlbumTest(ctx *fiber.Ctx) error {
 	if err := ctx.BodyParser(&body); err != nil {
 		body = request.AlbumSendTest{}
 	}
-	res, err := r.a.SendAlbumTest(ctx.UserContext(), strings.TrimSpace(body.GuildID), id, actorFromCtx(ctx))
+	res, err := r.a.SendAlbumTest(ctx.UserContext(), id, strings.TrimSpace(body.ChannelID), actorFromCtx(ctx))
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - sendAlbumTest")
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())

@@ -52,56 +52,68 @@ func (b *Bot) handleMessageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 
 func (b *Bot) msgSchedule(ctx context.Context, s *discordgo.Session, m *discordgo.MessageCreate, arg string) {
 	args := strings.Fields(arg)
-	if len(args) == 0 || strings.EqualFold(args[0], "show") {
-		effective, err := b.settingsUC.GetEffectiveSchedule(ctx, m.GuildID)
+	if len(args) == 0 || strings.EqualFold(args[0], "list") {
+		rules, err := b.rulesUC.List(ctx)
 		if err != nil {
-			b.l.Error(fmt.Errorf("msgSchedule show: %w", err))
-			_, _ = s.ChannelMessageSend(m.ChannelID, "Failed to load schedule settings.")
+			b.l.Error(fmt.Errorf("msgSchedule list: %w", err))
+			_, _ = s.ChannelMessageSend(m.ChannelID, "Failed to load delivery rules.")
 			return
 		}
-		_, _ = s.ChannelMessageSend(m.ChannelID, b.scheduleDisplay(effective))
+		_, _ = s.ChannelMessageSend(m.ChannelID, formatRulesList(rules))
 		return
 	}
 
 	if !b.hasMessageSchedulePermission(s, m) {
-		_, _ = s.ChannelMessageSend(m.ChannelID, "You need Manage Channels permission to update schedule.")
-		return
-	}
-	if !strings.EqualFold(args[0], "set") || len(args) < 4 {
-		_, _ = s.ChannelMessageSend(m.ChannelID, "Usage: `!schedule set <channel_id|#channel> <interval> <history_size>`")
+		_, _ = s.ChannelMessageSend(m.ChannelID, "You need Manage Channels permission to manage rules.")
 		return
 	}
 
-	channelID := normalizeChannelArg(args[1])
-	interval := strings.TrimSpace(args[2])
-	historySize, err := strconv.Atoi(args[3])
-	if err != nil || historySize <= 0 {
-		_, _ = s.ChannelMessageSend(m.ChannelID, "history_size must be a positive integer.")
-		return
+	switch strings.ToLower(args[0]) {
+	case "add":
+		// !schedule add <trigger> <channel> [interval] [history_size]
+		if len(args) < 3 {
+			_, _ = s.ChannelMessageSend(m.ChannelID, "Usage: `!schedule add <scheduled|new_album|new_files> <channel_id|#channel> [interval] [history_size]`")
+			return
+		}
+		rule := entity.DeliveryRule{
+			GuildID:     m.GuildID,
+			TriggerType: strings.TrimSpace(args[1]),
+			ChannelID:   normalizeChannelArg(args[2]),
+			Enabled:     true,
+		}
+		if len(args) >= 4 {
+			rule.SendInterval = strings.TrimSpace(args[3])
+		}
+		if len(args) >= 5 {
+			if h, err := strconv.Atoi(args[4]); err == nil {
+				rule.HistorySize = h
+			}
+		}
+		created, err := b.rulesUC.Create(ctx, rule)
+		if err != nil {
+			_, _ = s.ChannelMessageSend(m.ChannelID, "Failed to add rule: "+err.Error())
+			return
+		}
+		_, _ = s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Added rule #%d.\n%s", created.ID, formatRuleLine(created)))
+	case "remove":
+		if len(args) < 2 {
+			_, _ = s.ChannelMessageSend(m.ChannelID, "Usage: `!schedule remove <id>`")
+			return
+		}
+		id, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil {
+			_, _ = s.ChannelMessageSend(m.ChannelID, "id must be a number (see `!schedule list`).")
+			return
+		}
+		if err := b.rulesUC.Delete(ctx, id); err != nil {
+			b.l.Error(fmt.Errorf("msgSchedule remove %d: %w", id, err))
+			_, _ = s.ChannelMessageSend(m.ChannelID, "Failed to remove rule.")
+			return
+		}
+		_, _ = s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Removed rule #%d.", id))
+	default:
+		_, _ = s.ChannelMessageSend(m.ChannelID, "Usage: `!schedule list | add <trigger> <channel> [interval] [history] | remove <id>`")
 	}
-	if _, err = timeParseDuration(interval); err != nil {
-		_, _ = s.ChannelMessageSend(m.ChannelID, "Invalid interval. Example: 6h, 30m, 24h.")
-		return
-	}
-
-	if _, err = b.settingsUC.UpsertSchedule(ctx, entity.DiscordScheduleSettings{
-		GuildID:         m.GuildID,
-		SendChannelID:   channelID,
-		SendInterval:    interval,
-		SendHistorySize: historySize,
-	}); err != nil {
-		b.l.Error(fmt.Errorf("msgSchedule set: %w", err))
-		_, _ = s.ChannelMessageSend(m.ChannelID, "Failed to update schedule settings.")
-		return
-	}
-
-	effective, err := b.settingsUC.GetEffectiveSchedule(ctx, m.GuildID)
-	if err != nil {
-		b.l.Error(fmt.Errorf("msgSchedule set effective: %w", err))
-		_, _ = s.ChannelMessageSend(m.ChannelID, "Updated, but failed to reload effective settings.")
-		return
-	}
-	_, _ = s.ChannelMessageSend(m.ChannelID, "Schedule updated.\n"+b.scheduleDisplay(effective))
 }
 
 func (b *Bot) hasMessageSchedulePermission(s *discordgo.Session, m *discordgo.MessageCreate) bool {

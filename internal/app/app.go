@@ -6,16 +6,19 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/AaronCheng1996/sendmemes-discord-bot/config"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/controller/discord"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/controller/restapi"
+	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo/persistent"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo/webapi"
 	adminuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/admin"
+	appsettingsuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/appsettings"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/images"
-	settingsuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/settings"
+	rulesuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/rules"
 	syncuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/sync"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/translation"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/httpserver"
@@ -43,7 +46,8 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	// Repos: images & albums
 	imagesRepo := persistent.NewImagesRepo(pg)
 	albumsRepo := persistent.NewAlbumsRepo(pg)
-	scheduleSettingsRepo := persistent.NewScheduleSettingsRepo(pg)
+	deliveryRulesRepo := persistent.NewDeliveryRulesRepo(pg)
+	appSettingsRepo := persistent.NewAppSettingsRepo(pg)
 	adminAuditRepo := persistent.NewAdminAuditRepo(pg)
 	syncEventsRepo := persistent.NewSyncEventsRepo(pg)
 	systemRepo := persistent.NewSystemRepo(pg)
@@ -62,17 +66,27 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	}
 	syncUseCase := syncuc.New(pcloudClient, albumsRepo, imagesRepo, syncEventsRepo, cfg.PCloud.RootFolderIDs)
 
-	// Use-Case: images
+	// Use-Case: images, delivery rules, app settings
 	imagesUseCase := images.New(imagesRepo, albumsRepo, pcloudClient, cfg.HTTP.PublicURL)
-	settingsUseCase := settingsuc.New(cfg, scheduleSettingsRepo)
+	rulesUseCase := rulesuc.New(deliveryRulesRepo)
+	appSettingsUseCase := appsettingsuc.New(appSettingsRepo, cfg.PCloud.SyncInterval)
+
+	// Seed env-derived defaults once (no-op when rows already exist).
+	seedCtx := context.Background()
+	if err = appSettingsUseCase.EnsureSeeded(seedCtx); err != nil {
+		l.Error(fmt.Errorf("app - Run - appSettings seed: %w", err))
+	}
+	if err = rulesUseCase.EnsureSeeded(seedCtx, defaultRulesFromEnv(cfg)); err != nil {
+		l.Error(fmt.Errorf("app - Run - rules seed: %w", err))
+	}
 
 	// Discord Bot
-	discordBot, err := discord.NewBot(cfg, l, translationUseCase, imagesUseCase, syncUseCase, settingsUseCase)
+	discordBot, err := discord.NewBot(cfg, l, translationUseCase, imagesUseCase, syncUseCase, rulesUseCase, appSettingsUseCase)
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - discord.NewBot: %w", err))
 	}
 	discordBot.Start()
-	adminUseCase := adminuc.New(albumsRepo, imagesRepo, imagesUseCase, settingsUseCase, adminAuditRepo, syncEventsRepo, systemRepo, discordBot)
+	adminUseCase := adminuc.New(albumsRepo, imagesRepo, imagesUseCase, rulesUseCase, appSettingsUseCase, adminAuditRepo, syncEventsRepo, systemRepo, discordBot)
 
 	// HTTP Server (REST API)
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
@@ -97,4 +111,35 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	if err = httpServer.Shutdown(); err != nil {
 		l.Error(fmt.Errorf("app - Run - httpServer.Shutdown: %w", err))
 	}
+}
+
+// defaultRulesFromEnv builds the seed delivery rules from env configuration:
+// a scheduled rule from DISCORD_CHANNEL_ID and new_album/new_files rules from
+// DISCORD_NOTIFY_CHANNEL_ID. Only seeded once, when no rules exist yet.
+func defaultRulesFromEnv(cfg *config.Config) []entity.DeliveryRule {
+	var rules []entity.DeliveryRule
+	if strings.TrimSpace(cfg.Discord.SendChannelID) != "" {
+		rules = append(rules, entity.DeliveryRule{
+			Name:         "Scheduled (env)",
+			GuildID:      cfg.Discord.GuildID,
+			TriggerType:  entity.TriggerScheduled,
+			ChannelID:    cfg.Discord.SendChannelID,
+			SendInterval: cfg.Discord.SendInterval,
+			HistorySize:  cfg.Discord.SendHistorySize,
+			Enabled:      true,
+		})
+	}
+	if strings.TrimSpace(cfg.Discord.NotifyChannelID) != "" {
+		rules = append(rules,
+			entity.DeliveryRule{
+				Name: "New albums (env)", GuildID: cfg.Discord.GuildID,
+				TriggerType: entity.TriggerNewAlbum, ChannelID: cfg.Discord.NotifyChannelID, Enabled: true,
+			},
+			entity.DeliveryRule{
+				Name: "New files (env)", GuildID: cfg.Discord.GuildID,
+				TriggerType: entity.TriggerNewFiles, ChannelID: cfg.Discord.NotifyChannelID, Enabled: true,
+			},
+		)
+	}
+	return rules
 }

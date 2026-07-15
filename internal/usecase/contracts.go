@@ -68,19 +68,36 @@ type (
 		SyncImages(ctx context.Context) (entity.SyncReport, error)
 	}
 
-	Settings interface {
-		GetEffectiveSchedule(ctx context.Context, guildID string) (entity.EffectiveScheduleSettings, error)
-		// GetScheduleRow returns the raw per-guild settings row without env
-		// merging, so partial updaters can preserve fields they do not set.
-		GetScheduleRow(ctx context.Context, guildID string) (entity.DiscordScheduleSettings, bool, error)
-		UpsertSchedule(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error)
+	// Rules manages configurable Discord delivery rules.
+	Rules interface {
+		List(ctx context.Context) ([]entity.DeliveryRule, error)
+		// ListActiveByTrigger returns enabled rules of the given trigger type.
+		ListActiveByTrigger(ctx context.Context, triggerType string) ([]entity.DeliveryRule, error)
+		Get(ctx context.Context, id int64) (entity.DeliveryRule, error)
+		Create(ctx context.Context, rule entity.DeliveryRule) (entity.DeliveryRule, error)
+		Update(ctx context.Context, id int64, rule entity.DeliveryRule) (entity.DeliveryRule, error)
+		Delete(ctx context.Context, id int64) error
+		Count(ctx context.Context) (int, error)
+		// FirstScheduledChannel returns the channel and history size of the first
+		// enabled scheduled rule, used as a default target for manual triggers.
+		FirstScheduledChannel(ctx context.Context) (channelID string, historySize int, found bool, err error)
+	}
+
+	// AppSettings exposes global runtime settings.
+	AppSettings interface {
+		// GetSyncInterval returns the effective sync cadence (stored value or env default).
+		GetSyncInterval(ctx context.Context) (string, error)
+		SetSyncInterval(ctx context.Context, interval string) (entity.AppSettings, error)
 	}
 
 	AdminRuntime interface {
-		TriggerScheduleNow(ctx context.Context, guildID string) (entity.ManualScheduleTriggerResult, error)
-		// SendAlbumTest posts a preview of one album to the effective schedule channel.
+		// TriggerScheduleNow sends a random album immediately to channelID.
+		TriggerScheduleNow(ctx context.Context, channelID string, historySize int) (entity.ManualScheduleTriggerResult, error)
+		// SendAlbumTest posts a preview of albumID to channelID.
 		// It does not update last_sent_at or anti-repeat history.
-		SendAlbumTest(ctx context.Context, guildID string, albumID int) (entity.ManualScheduleTriggerResult, error)
+		SendAlbumTest(ctx context.Context, channelID string, albumID int) (entity.ManualScheduleTriggerResult, error)
+		// TriggerSyncNow runs a pCloud sync immediately and posts notifications.
+		TriggerSyncNow(ctx context.Context) (entity.SyncReport, error)
 		GetDiscordStatus(ctx context.Context) (connected bool, user string)
 	}
 
@@ -98,14 +115,25 @@ type (
 		CreateImage(ctx context.Context, img entity.Image) (entity.Image, error)
 		UpdateImage(ctx context.Context, img entity.Image) (entity.Image, error)
 		DeleteImage(ctx context.Context, id int) error
-		GetEffectiveSchedule(ctx context.Context, guildID string) (entity.EffectiveScheduleSettings, error)
-		UpsertSchedule(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error)
+		// Delivery rules CRUD.
+		ListRules(ctx context.Context) ([]entity.DeliveryRule, error)
+		GetRule(ctx context.Context, id int64) (entity.DeliveryRule, error)
+		CreateRule(ctx context.Context, rule entity.DeliveryRule, actor string) (entity.DeliveryRule, error)
+		UpdateRule(ctx context.Context, id int64, rule entity.DeliveryRule, actor string) (entity.DeliveryRule, error)
+		DeleteRule(ctx context.Context, id int64, actor string) error
+		// Sync settings + manual trigger.
+		GetSyncSettings(ctx context.Context) (entity.AppSettings, error)
+		UpdateSyncSettings(ctx context.Context, interval, actor string) (entity.AppSettings, error)
+		TriggerSyncNow(ctx context.Context, actor string) (entity.SyncReport, error)
 		RecordAudit(ctx context.Context, actor, action, targetType, targetID string, metadata map[string]any) error
 		// ListSyncEvents returns paginated sync discovery events, newest first.
 		ListSyncEvents(ctx context.Context, offset, limit int) ([]entity.SyncEvent, int, error)
-		GetSystemStatus(ctx context.Context, guildID string) (entity.SystemStatus, error)
-		TriggerScheduleNow(ctx context.Context, guildID, actor string) (entity.ManualScheduleTriggerResult, error)
-		// SendAlbumTest delivers a one-off preview for albumID to the configured send channel (see schedule / env).
-		SendAlbumTest(ctx context.Context, guildID string, albumID int, actor string) (entity.ManualScheduleTriggerResult, error)
+		GetSystemStatus(ctx context.Context) (entity.SystemStatus, error)
+		// TriggerScheduleNow sends a random album now to channelID (empty = first
+		// enabled scheduled rule's channel).
+		TriggerScheduleNow(ctx context.Context, channelID, actor string) (entity.ManualScheduleTriggerResult, error)
+		// SendAlbumTest delivers a one-off preview for albumID to channelID (empty =
+		// first enabled scheduled rule's channel).
+		SendAlbumTest(ctx context.Context, albumID int, channelID, actor string) (entity.ManualScheduleTriggerResult, error)
 	}
 )

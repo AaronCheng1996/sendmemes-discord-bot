@@ -28,19 +28,30 @@ type ImageUpdate struct {
 	FileID  int64  `json:"file_id"`
 }
 
-type SchedulePut struct {
-	GuildID         string `json:"guild_id"`
-	SendChannelID   string `json:"send_channel_id"`
-	SendInterval    string `json:"send_interval"`
-	SendHistorySize int    `json:"send_history_size"`
-	NotifyChannelID string `json:"notify_channel_id"`
+// DeliveryRuleWrite is the create/update body for a delivery rule. Enabled is a
+// pointer so an omitted value defaults to true on create instead of false.
+type DeliveryRuleWrite struct {
+	Name         string `json:"name"`
+	GuildID      string `json:"guild_id"`
+	TriggerType  string `json:"trigger_type" validate:"required"`
+	ChannelID    string `json:"channel_id" validate:"required"`
+	SendInterval string `json:"send_interval"`
+	HistorySize  int    `json:"history_size"`
+	Enabled      *bool  `json:"enabled"`
 }
 
+// SyncSettingsPut updates the global sync cadence.
+type SyncSettingsPut struct {
+	SyncInterval string `json:"sync_interval" validate:"required"`
+}
+
+// ScheduleTriggerNow sends a random album now; empty channel_id falls back to
+// the first enabled scheduled rule.
 type ScheduleTriggerNow struct {
-	GuildID string `json:"guild_id"`
+	ChannelID string `json:"channel_id"`
 }
 
 // AlbumSendTest triggers a one-off preview send for the album in the URL path.
 type AlbumSendTest struct {
-	GuildID string `json:"guild_id"`
+	ChannelID string `json:"channel_id"`
 }

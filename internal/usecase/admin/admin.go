@@ -15,14 +15,15 @@ import (
 
 // UseCase provides admin CRUD and settings operations.
 type UseCase struct {
-	albums     repo.AlbumsRepo
-	images     repo.ImagesRepo
-	imagesUC   usecase.Images
-	settings   usecase.Settings
-	audit      repo.AdminAuditRepo
-	syncEvents repo.SyncEventsRepo
-	system     repo.SystemRepo
-	runtime    usecase.AdminRuntime
+	albums      repo.AlbumsRepo
+	images      repo.ImagesRepo
+	imagesUC    usecase.Images
+	rules       usecase.Rules
+	appSettings usecase.AppSettings
+	audit       repo.AdminAuditRepo
+	syncEvents  repo.SyncEventsRepo
+	system      repo.SystemRepo
+	runtime     usecase.AdminRuntime
 }
 
 // New creates admin usecase.
@@ -30,21 +31,23 @@ func New(
 	albums repo.AlbumsRepo,
 	images repo.ImagesRepo,
 	imagesUC usecase.Images,
-	settings usecase.Settings,
+	rules usecase.Rules,
+	appSettings usecase.AppSettings,
 	audit repo.AdminAuditRepo,
 	syncEvents repo.SyncEventsRepo,
 	system repo.SystemRepo,
 	runtime usecase.AdminRuntime,
 ) *UseCase {
 	return &UseCase{
-		albums:     albums,
-		images:     images,
-		imagesUC:   imagesUC,
-		settings:   settings,
-		audit:      audit,
-		syncEvents: syncEvents,
-		system:     system,
-		runtime:    runtime,
+		albums:      albums,
+		images:      images,
+		imagesUC:    imagesUC,
+		rules:       rules,
+		appSettings: appSettings,
+		audit:       audit,
+		syncEvents:  syncEvents,
+		system:      system,
+		runtime:     runtime,
 	}
 }
 
@@ -200,12 +203,80 @@ func (uc *UseCase) DeleteImage(ctx context.Context, id int) error {
 	return uc.images.Delete(ctx, id)
 }
 
-func (uc *UseCase) GetEffectiveSchedule(ctx context.Context, guildID string) (entity.EffectiveScheduleSettings, error) {
-	return uc.settings.GetEffectiveSchedule(ctx, guildID)
+// --- Delivery rules -------------------------------------------------------
+
+func (uc *UseCase) ListRules(ctx context.Context) ([]entity.DeliveryRule, error) {
+	return uc.rules.List(ctx)
 }
 
-func (uc *UseCase) UpsertSchedule(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error) {
-	return uc.settings.UpsertSchedule(ctx, cfg)
+func (uc *UseCase) GetRule(ctx context.Context, id int64) (entity.DeliveryRule, error) {
+	return uc.rules.Get(ctx, id)
+}
+
+func (uc *UseCase) CreateRule(ctx context.Context, rule entity.DeliveryRule, actor string) (entity.DeliveryRule, error) {
+	out, err := uc.rules.Create(ctx, rule)
+	if err != nil {
+		return entity.DeliveryRule{}, err
+	}
+	_ = uc.RecordAudit(ctx, actor, "rule.create", "delivery_rule", strconv.FormatInt(out.ID, 10), map[string]any{
+		"trigger_type": out.TriggerType, "channel_id": out.ChannelID, "name": out.Name,
+	})
+	return out, nil
+}
+
+func (uc *UseCase) UpdateRule(ctx context.Context, id int64, rule entity.DeliveryRule, actor string) (entity.DeliveryRule, error) {
+	out, err := uc.rules.Update(ctx, id, rule)
+	if err != nil {
+		return entity.DeliveryRule{}, err
+	}
+	_ = uc.RecordAudit(ctx, actor, "rule.update", "delivery_rule", strconv.FormatInt(id, 10), map[string]any{
+		"trigger_type": out.TriggerType, "channel_id": out.ChannelID, "enabled": out.Enabled,
+	})
+	return out, nil
+}
+
+func (uc *UseCase) DeleteRule(ctx context.Context, id int64, actor string) error {
+	if err := uc.rules.Delete(ctx, id); err != nil {
+		return err
+	}
+	_ = uc.RecordAudit(ctx, actor, "rule.delete", "delivery_rule", strconv.FormatInt(id, 10), nil)
+	return nil
+}
+
+// --- Sync settings + manual trigger ---------------------------------------
+
+func (uc *UseCase) GetSyncSettings(ctx context.Context) (entity.AppSettings, error) {
+	interval, err := uc.appSettings.GetSyncInterval(ctx)
+	if err != nil {
+		return entity.AppSettings{}, err
+	}
+	return entity.AppSettings{SyncInterval: interval}, nil
+}
+
+func (uc *UseCase) UpdateSyncSettings(ctx context.Context, interval, actor string) (entity.AppSettings, error) {
+	out, err := uc.appSettings.SetSyncInterval(ctx, interval)
+	if err != nil {
+		return entity.AppSettings{}, err
+	}
+	_ = uc.RecordAudit(ctx, actor, "sync.settings_update", "app_settings", "sync_interval", map[string]any{
+		"sync_interval": out.SyncInterval,
+	})
+	return out, nil
+}
+
+func (uc *UseCase) TriggerSyncNow(ctx context.Context, actor string) (entity.SyncReport, error) {
+	if uc.runtime == nil {
+		return entity.SyncReport{}, fmt.Errorf("runtime trigger is not available")
+	}
+	report, err := uc.runtime.TriggerSyncNow(ctx)
+	if err != nil {
+		return entity.SyncReport{}, err
+	}
+	_ = uc.RecordAudit(ctx, actor, "sync.trigger_now", "sync", "", map[string]any{
+		"events":         len(report.Events),
+		"initial_import": report.InitialImport,
+	})
+	return report, nil
 }
 
 func (uc *UseCase) RecordAudit(ctx context.Context, actor, action, targetType, targetID string, metadata map[string]any) error {
@@ -237,8 +308,12 @@ func (uc *UseCase) ListSyncEvents(ctx context.Context, offset, limit int) ([]ent
 	return items, total, nil
 }
 
-func (uc *UseCase) GetSystemStatus(ctx context.Context, guildID string) (entity.SystemStatus, error) {
-	effective, err := uc.settings.GetEffectiveSchedule(ctx, guildID)
+func (uc *UseCase) GetSystemStatus(ctx context.Context) (entity.SystemStatus, error) {
+	interval, err := uc.appSettings.GetSyncInterval(ctx)
+	if err != nil {
+		return entity.SystemStatus{}, err
+	}
+	ruleCount, err := uc.rules.Count(ctx)
 	if err != nil {
 		return entity.SystemStatus{}, err
 	}
@@ -253,23 +328,45 @@ func (uc *UseCase) GetSystemStatus(ctx context.Context, guildID string) (entity.
 		connected, user = uc.runtime.GetDiscordStatus(ctx)
 	}
 	return entity.SystemStatus{
-		ServerTime:        time.Now().UTC(),
-		DatabaseStatus:    dbStatus,
-		DiscordConnected:  connected,
-		DiscordUser:       user,
-		EffectiveSchedule: effective,
+		ServerTime:       time.Now().UTC(),
+		DatabaseStatus:   dbStatus,
+		DiscordConnected: connected,
+		DiscordUser:      user,
+		SyncInterval:     interval,
+		RuleCount:        ruleCount,
 	}, nil
 }
 
-func (uc *UseCase) TriggerScheduleNow(ctx context.Context, guildID, actor string) (entity.ManualScheduleTriggerResult, error) {
+// resolveTargetChannel returns channelID when non-empty, otherwise the first
+// enabled scheduled rule's channel and history size.
+func (uc *UseCase) resolveTargetChannel(ctx context.Context, channelID string) (string, int, error) {
+	channelID = strings.TrimSpace(channelID)
+	if channelID != "" {
+		return channelID, 0, nil
+	}
+	ch, history, found, err := uc.rules.FirstScheduledChannel(ctx)
+	if err != nil {
+		return "", 0, err
+	}
+	if !found {
+		return "", 0, fmt.Errorf("no channel specified and no enabled scheduled rule to fall back to")
+	}
+	return ch, history, nil
+}
+
+func (uc *UseCase) TriggerScheduleNow(ctx context.Context, channelID, actor string) (entity.ManualScheduleTriggerResult, error) {
 	if uc.runtime == nil {
 		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("runtime trigger is not available")
 	}
-	res, err := uc.runtime.TriggerScheduleNow(ctx, guildID)
+	ch, history, err := uc.resolveTargetChannel(ctx, channelID)
 	if err != nil {
 		return entity.ManualScheduleTriggerResult{}, err
 	}
-	_ = uc.RecordAudit(ctx, actor, "schedule.trigger_now", "schedule", guildID, map[string]any{
+	res, err := uc.runtime.TriggerScheduleNow(ctx, ch, history)
+	if err != nil {
+		return entity.ManualScheduleTriggerResult{}, err
+	}
+	_ = uc.RecordAudit(ctx, actor, "schedule.trigger_now", "schedule", ch, map[string]any{
 		"triggered":  res.Triggered,
 		"album_id":   res.AlbumID,
 		"album_name": res.AlbumName,
@@ -279,19 +376,22 @@ func (uc *UseCase) TriggerScheduleNow(ctx context.Context, guildID, actor string
 	return res, nil
 }
 
-func (uc *UseCase) SendAlbumTest(ctx context.Context, guildID string, albumID int, actor string) (entity.ManualScheduleTriggerResult, error) {
+func (uc *UseCase) SendAlbumTest(ctx context.Context, albumID int, channelID, actor string) (entity.ManualScheduleTriggerResult, error) {
 	if uc.runtime == nil {
 		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("runtime trigger is not available")
 	}
-	res, err := uc.runtime.SendAlbumTest(ctx, guildID, albumID)
+	ch, _, err := uc.resolveTargetChannel(ctx, channelID)
+	if err != nil {
+		return entity.ManualScheduleTriggerResult{}, err
+	}
+	res, err := uc.runtime.SendAlbumTest(ctx, ch, albumID)
 	if err != nil {
 		return entity.ManualScheduleTriggerResult{}, err
 	}
 	_ = uc.RecordAudit(ctx, actor, "album.send_test", "album", strconv.Itoa(albumID), map[string]any{
-		"guild_id":   guildID,
+		"channel_id": res.ChannelID,
 		"album_id":   res.AlbumID,
 		"album_name": res.AlbumName,
-		"channel_id": res.ChannelID,
 		"message_id": res.MessageID,
 	})
 	return res, nil

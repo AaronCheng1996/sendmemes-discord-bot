@@ -9,23 +9,35 @@ import (
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 )
 
-// maxSyncNotifyMessages caps how many per-album notification messages one sync
-// run may post; the remainder is summarized in a single extra message.
-const maxSyncNotifyMessages = 20
+const (
+	// maxSyncNotifyMessages caps how many discovery events one sync run notifies
+	// about, guarding against a flood when many albums change at once.
+	maxSyncNotifyMessages = 20
+	// scheduleReconcileInterval is how often the manager reloads scheduled rules
+	// from the DB so UI/slash changes take effect without a restart.
+	scheduleReconcileInterval = 30 * time.Second
+)
+
+// ---------------------------------------------------------------------------
+// pCloud sync scheduler
+// ---------------------------------------------------------------------------
 
 func (b *Bot) runSyncScheduler() {
-	interval := parseDuration(b.cfg.PCloud.SyncInterval, time.Hour)
 	hasCredentials := b.cfg.PCloud.AccessToken != "" || b.cfg.PCloud.Username != ""
-	if interval <= 0 || !hasCredentials {
-		b.l.Info("pCloud sync disabled (no credentials configured or invalid interval)")
+	if !hasCredentials {
+		b.l.Info("pCloud sync disabled (no credentials configured)")
 		return
 	}
 	b.doSync()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
 	for {
+		intervalStr, err := b.appSettingsUC.GetSyncInterval(context.Background())
+		if err != nil {
+			b.l.Error(fmt.Errorf("runSyncScheduler GetSyncInterval: %w", err))
+			intervalStr = b.cfg.PCloud.SyncInterval
+		}
+		interval := parseDuration(intervalStr, time.Hour)
 		select {
-		case <-ticker.C:
+		case <-time.After(interval):
 			b.doSync()
 		case <-b.stopCh:
 			return
@@ -45,9 +57,9 @@ func (b *Bot) doSync() {
 	b.notifySyncEvents(ctx, report)
 }
 
-// notifySyncEvents posts one Discord message per album with newly discovered
-// content to the configured notify channel. Nothing is sent when no channel is
-// configured or when the run was the initial import (avoids flooding).
+// notifySyncEvents posts discovered content to every enabled delivery rule whose
+// trigger matches each event (new_album / new_files). Nothing is sent for the
+// initial import (avoids flooding a freshly seeded database).
 func (b *Bot) notifySyncEvents(ctx context.Context, report entity.SyncReport) {
 	if len(report.Events) == 0 {
 		return
@@ -56,29 +68,23 @@ func (b *Bot) notifySyncEvents(ctx context.Context, report entity.SyncReport) {
 		b.vlog("sync notify: initial import (%d albums), skipping Discord notifications", len(report.Events))
 		return
 	}
-	effective, err := b.settingsUC.GetEffectiveSchedule(ctx, b.cfg.Discord.GuildID)
-	if err != nil {
-		b.l.Error(fmt.Errorf("notifySyncEvents GetEffectiveSchedule: %w", err))
-		return
-	}
-	channelID := strings.TrimSpace(effective.NotifyChannelID)
-	if channelID == "" {
-		return
-	}
 
 	for i, ev := range report.Events {
 		if i >= maxSyncNotifyMessages {
-			rest := len(report.Events) - maxSyncNotifyMessages
-			if _, serr := b.session.ChannelMessageSend(channelID, fmt.Sprintf("…and %d more album(s) with new content.", rest)); serr != nil {
-				b.l.Error(fmt.Errorf("notifySyncEvents summary send: %w", serr))
-			}
+			b.vlog("sync notify: reached %d-event cap, skipping the rest", maxSyncNotifyMessages)
 			break
 		}
-		if _, serr := b.session.ChannelMessageSend(channelID, formatSyncEventMessage(ev)); serr != nil {
-			b.l.Error(fmt.Errorf("notifySyncEvents send album %q: %w", ev.AlbumName, serr))
+		rules, err := b.rulesUC.ListActiveByTrigger(ctx, entity.SyncEventTriggerType(ev.EventType))
+		if err != nil {
+			b.l.Error(fmt.Errorf("notifySyncEvents ListActiveByTrigger: %w", err))
+			continue
+		}
+		for _, rule := range rules {
+			if _, serr := b.session.ChannelMessageSend(rule.ChannelID, formatSyncEventMessage(ev)); serr != nil {
+				b.l.Error(fmt.Errorf("notifySyncEvents send album %q to %s: %w", ev.AlbumName, rule.ChannelID, serr))
+			}
 		}
 	}
-	b.vlog("sync notify: posted %d notification(s) to channel %s", min(len(report.Events), maxSyncNotifyMessages), channelID)
 }
 
 // formatSyncEventMessage renders one sync event as a Discord message line, e.g.
@@ -114,37 +120,94 @@ func countPhrase(n int, noun string) string {
 	return fmt.Sprintf("%d %ss", n, noun)
 }
 
-func (b *Bot) runSendScheduler() {
-	const retryInterval = time.Minute
+// ---------------------------------------------------------------------------
+// Scheduled-send manager (one goroutine per enabled scheduled rule)
+// ---------------------------------------------------------------------------
+
+// scheduledHandle tracks a running scheduled-rule goroutine and the rule
+// signature it was started with, so the manager can detect changes.
+type scheduledHandle struct {
+	cancel context.CancelFunc
+	sig    string
+}
+
+func scheduledRuleSig(r entity.DeliveryRule) string {
+	return fmt.Sprintf("%s|%d|%v", r.SendInterval, r.HistorySize, r.ChannelID)
+}
+
+// runScheduleManager periodically reconciles the set of running scheduled-rule
+// goroutines with the enabled 'scheduled' rules in the database.
+func (b *Bot) runScheduleManager() {
+	running := make(map[int64]scheduledHandle)
+	stopAll := func() {
+		for _, h := range running {
+			h.cancel()
+		}
+	}
+	defer stopAll()
+
+	b.reconcileScheduledRules(running)
+
+	ticker := time.NewTicker(scheduleReconcileInterval)
+	defer ticker.Stop()
 	for {
-		effective, err := b.settingsUC.GetEffectiveSchedule(context.Background(), b.cfg.Discord.GuildID)
-		if err != nil {
-			b.l.Error(fmt.Errorf("runSendScheduler load effective: %w", err))
-			select {
-			case <-time.After(retryInterval):
-				continue
-			case <-b.stopCh:
-				return
-			}
-		}
-
-		interval := effective.SendIntervalDuration
-		if interval <= 0 {
-			interval = parseDuration(effective.SendInterval, 0)
-		}
-		if interval <= 0 || effective.SendChannelID == "" {
-			b.l.Info("scheduled send disabled (no channel ID or invalid interval)")
-			select {
-			case <-time.After(retryInterval):
-				continue
-			case <-b.stopCh:
-				return
-			}
-		}
-
 		select {
-		case <-time.After(interval):
-			_, _ = b.doScheduledSend(effective.SendChannelID, effective.SendHistorySize)
+		case <-ticker.C:
+			b.reconcileScheduledRules(running)
+		case <-b.stopCh:
+			return
+		}
+	}
+}
+
+func (b *Bot) reconcileScheduledRules(running map[int64]scheduledHandle) {
+	rules, err := b.rulesUC.ListActiveByTrigger(context.Background(), entity.TriggerScheduled)
+	if err != nil {
+		b.l.Error(fmt.Errorf("reconcileScheduledRules: %w", err))
+		return
+	}
+
+	seen := make(map[int64]struct{}, len(rules))
+	for _, rule := range rules {
+		seen[rule.ID] = struct{}{}
+		sig := scheduledRuleSig(rule)
+		if h, ok := running[rule.ID]; ok {
+			if h.sig == sig {
+				continue // unchanged
+			}
+			h.cancel() // interval/channel changed — restart
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		running[rule.ID] = scheduledHandle{cancel: cancel, sig: sig}
+		go b.runScheduledRule(ctx, rule)
+		b.vlog("schedule manager: started rule %d (interval=%s channel=%s)", rule.ID, rule.SendInterval, rule.ChannelID)
+	}
+
+	for id, h := range running {
+		if _, ok := seen[id]; !ok {
+			h.cancel()
+			delete(running, id)
+			b.vlog("schedule manager: stopped rule %d (removed or disabled)", id)
+		}
+	}
+}
+
+// runScheduledRule fires one scheduled rule every interval until its context or
+// the bot's stop channel is cancelled.
+func (b *Bot) runScheduledRule(ctx context.Context, rule entity.DeliveryRule) {
+	interval := parseDuration(rule.SendInterval, 0)
+	if interval <= 0 {
+		b.l.Info("schedule rule %d disabled (invalid interval %q)", rule.ID, rule.SendInterval)
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			_, _ = b.doScheduledSend(rule.ChannelID, rule.HistorySize)
+		case <-ctx.Done():
+			return
 		case <-b.stopCh:
 			return
 		}

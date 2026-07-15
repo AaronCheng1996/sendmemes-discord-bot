@@ -360,74 +360,203 @@ func (mr *MockSyncMockRecorder) SyncImages(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SyncImages", reflect.TypeOf((*MockSync)(nil).SyncImages), ctx)
 }
 
-// MockSettings is a mock of Settings interface.
-type MockSettings struct {
+// MockRules is a mock of Rules interface.
+type MockRules struct {
 	ctrl     *gomock.Controller
-	recorder *MockSettingsMockRecorder
+	recorder *MockRulesMockRecorder
 	isgomock struct{}
 }
 
-// MockSettingsMockRecorder is the mock recorder for MockSettings.
-type MockSettingsMockRecorder struct {
-	mock *MockSettings
+// MockRulesMockRecorder is the mock recorder for MockRules.
+type MockRulesMockRecorder struct {
+	mock *MockRules
 }
 
-// NewMockSettings creates a new mock instance.
-func NewMockSettings(ctrl *gomock.Controller) *MockSettings {
-	mock := &MockSettings{ctrl: ctrl}
-	mock.recorder = &MockSettingsMockRecorder{mock}
+// NewMockRules creates a new mock instance.
+func NewMockRules(ctrl *gomock.Controller) *MockRules {
+	mock := &MockRules{ctrl: ctrl}
+	mock.recorder = &MockRulesMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockSettings) EXPECT() *MockSettingsMockRecorder {
+func (m *MockRules) EXPECT() *MockRulesMockRecorder {
 	return m.recorder
 }
 
-// GetEffectiveSchedule mocks base method.
-func (m *MockSettings) GetEffectiveSchedule(ctx context.Context, guildID string) (entity.EffectiveScheduleSettings, error) {
+// Count mocks base method.
+func (m *MockRules) Count(ctx context.Context) (int, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetEffectiveSchedule", ctx, guildID)
-	ret0, _ := ret[0].(entity.EffectiveScheduleSettings)
+	ret := m.ctrl.Call(m, "Count", ctx)
+	ret0, _ := ret[0].(int)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// GetEffectiveSchedule indicates an expected call of GetEffectiveSchedule.
-func (mr *MockSettingsMockRecorder) GetEffectiveSchedule(ctx, guildID any) *gomock.Call {
+// Count indicates an expected call of Count.
+func (mr *MockRulesMockRecorder) Count(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetEffectiveSchedule", reflect.TypeOf((*MockSettings)(nil).GetEffectiveSchedule), ctx, guildID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Count", reflect.TypeOf((*MockRules)(nil).Count), ctx)
 }
 
-// GetScheduleRow mocks base method.
-func (m *MockSettings) GetScheduleRow(ctx context.Context, guildID string) (entity.DiscordScheduleSettings, bool, error) {
+// Create mocks base method.
+func (m *MockRules) Create(ctx context.Context, rule entity.DeliveryRule) (entity.DeliveryRule, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetScheduleRow", ctx, guildID)
-	ret0, _ := ret[0].(entity.DiscordScheduleSettings)
-	ret1, _ := ret[1].(bool)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
-}
-
-// GetScheduleRow indicates an expected call of GetScheduleRow.
-func (mr *MockSettingsMockRecorder) GetScheduleRow(ctx, guildID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetScheduleRow", reflect.TypeOf((*MockSettings)(nil).GetScheduleRow), ctx, guildID)
-}
-
-// UpsertSchedule mocks base method.
-func (m *MockSettings) UpsertSchedule(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UpsertSchedule", ctx, cfg)
-	ret0, _ := ret[0].(entity.DiscordScheduleSettings)
+	ret := m.ctrl.Call(m, "Create", ctx, rule)
+	ret0, _ := ret[0].(entity.DeliveryRule)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// UpsertSchedule indicates an expected call of UpsertSchedule.
-func (mr *MockSettingsMockRecorder) UpsertSchedule(ctx, cfg any) *gomock.Call {
+// Create indicates an expected call of Create.
+func (mr *MockRulesMockRecorder) Create(ctx, rule any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertSchedule", reflect.TypeOf((*MockSettings)(nil).UpsertSchedule), ctx, cfg)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Create", reflect.TypeOf((*MockRules)(nil).Create), ctx, rule)
+}
+
+// Delete mocks base method.
+func (m *MockRules) Delete(ctx context.Context, id int64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Delete", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Delete indicates an expected call of Delete.
+func (mr *MockRulesMockRecorder) Delete(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockRules)(nil).Delete), ctx, id)
+}
+
+// FirstScheduledChannel mocks base method.
+func (m *MockRules) FirstScheduledChannel(ctx context.Context) (string, int, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FirstScheduledChannel", ctx)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(int)
+	ret2, _ := ret[2].(bool)
+	ret3, _ := ret[3].(error)
+	return ret0, ret1, ret2, ret3
+}
+
+// FirstScheduledChannel indicates an expected call of FirstScheduledChannel.
+func (mr *MockRulesMockRecorder) FirstScheduledChannel(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FirstScheduledChannel", reflect.TypeOf((*MockRules)(nil).FirstScheduledChannel), ctx)
+}
+
+// Get mocks base method.
+func (m *MockRules) Get(ctx context.Context, id int64) (entity.DeliveryRule, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Get", ctx, id)
+	ret0, _ := ret[0].(entity.DeliveryRule)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Get indicates an expected call of Get.
+func (mr *MockRulesMockRecorder) Get(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockRules)(nil).Get), ctx, id)
+}
+
+// List mocks base method.
+func (m *MockRules) List(ctx context.Context) ([]entity.DeliveryRule, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "List", ctx)
+	ret0, _ := ret[0].([]entity.DeliveryRule)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// List indicates an expected call of List.
+func (mr *MockRulesMockRecorder) List(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockRules)(nil).List), ctx)
+}
+
+// ListActiveByTrigger mocks base method.
+func (m *MockRules) ListActiveByTrigger(ctx context.Context, triggerType string) ([]entity.DeliveryRule, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListActiveByTrigger", ctx, triggerType)
+	ret0, _ := ret[0].([]entity.DeliveryRule)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListActiveByTrigger indicates an expected call of ListActiveByTrigger.
+func (mr *MockRulesMockRecorder) ListActiveByTrigger(ctx, triggerType any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListActiveByTrigger", reflect.TypeOf((*MockRules)(nil).ListActiveByTrigger), ctx, triggerType)
+}
+
+// Update mocks base method.
+func (m *MockRules) Update(ctx context.Context, id int64, rule entity.DeliveryRule) (entity.DeliveryRule, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Update", ctx, id, rule)
+	ret0, _ := ret[0].(entity.DeliveryRule)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Update indicates an expected call of Update.
+func (mr *MockRulesMockRecorder) Update(ctx, id, rule any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockRules)(nil).Update), ctx, id, rule)
+}
+
+// MockAppSettings is a mock of AppSettings interface.
+type MockAppSettings struct {
+	ctrl     *gomock.Controller
+	recorder *MockAppSettingsMockRecorder
+	isgomock struct{}
+}
+
+// MockAppSettingsMockRecorder is the mock recorder for MockAppSettings.
+type MockAppSettingsMockRecorder struct {
+	mock *MockAppSettings
+}
+
+// NewMockAppSettings creates a new mock instance.
+func NewMockAppSettings(ctrl *gomock.Controller) *MockAppSettings {
+	mock := &MockAppSettings{ctrl: ctrl}
+	mock.recorder = &MockAppSettingsMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockAppSettings) EXPECT() *MockAppSettingsMockRecorder {
+	return m.recorder
+}
+
+// GetSyncInterval mocks base method.
+func (m *MockAppSettings) GetSyncInterval(ctx context.Context) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetSyncInterval", ctx)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetSyncInterval indicates an expected call of GetSyncInterval.
+func (mr *MockAppSettingsMockRecorder) GetSyncInterval(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSyncInterval", reflect.TypeOf((*MockAppSettings)(nil).GetSyncInterval), ctx)
+}
+
+// SetSyncInterval mocks base method.
+func (m *MockAppSettings) SetSyncInterval(ctx context.Context, interval string) (entity.AppSettings, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetSyncInterval", ctx, interval)
+	ret0, _ := ret[0].(entity.AppSettings)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetSyncInterval indicates an expected call of SetSyncInterval.
+func (mr *MockAppSettingsMockRecorder) SetSyncInterval(ctx, interval any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetSyncInterval", reflect.TypeOf((*MockAppSettings)(nil).SetSyncInterval), ctx, interval)
 }
 
 // MockAdminRuntime is a mock of AdminRuntime interface.
@@ -470,33 +599,48 @@ func (mr *MockAdminRuntimeMockRecorder) GetDiscordStatus(ctx any) *gomock.Call {
 }
 
 // SendAlbumTest mocks base method.
-func (m *MockAdminRuntime) SendAlbumTest(ctx context.Context, guildID string, albumID int) (entity.ManualScheduleTriggerResult, error) {
+func (m *MockAdminRuntime) SendAlbumTest(ctx context.Context, channelID string, albumID int) (entity.ManualScheduleTriggerResult, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SendAlbumTest", ctx, guildID, albumID)
+	ret := m.ctrl.Call(m, "SendAlbumTest", ctx, channelID, albumID)
 	ret0, _ := ret[0].(entity.ManualScheduleTriggerResult)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // SendAlbumTest indicates an expected call of SendAlbumTest.
-func (mr *MockAdminRuntimeMockRecorder) SendAlbumTest(ctx, guildID, albumID any) *gomock.Call {
+func (mr *MockAdminRuntimeMockRecorder) SendAlbumTest(ctx, channelID, albumID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendAlbumTest", reflect.TypeOf((*MockAdminRuntime)(nil).SendAlbumTest), ctx, guildID, albumID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendAlbumTest", reflect.TypeOf((*MockAdminRuntime)(nil).SendAlbumTest), ctx, channelID, albumID)
 }
 
 // TriggerScheduleNow mocks base method.
-func (m *MockAdminRuntime) TriggerScheduleNow(ctx context.Context, guildID string) (entity.ManualScheduleTriggerResult, error) {
+func (m *MockAdminRuntime) TriggerScheduleNow(ctx context.Context, channelID string, historySize int) (entity.ManualScheduleTriggerResult, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "TriggerScheduleNow", ctx, guildID)
+	ret := m.ctrl.Call(m, "TriggerScheduleNow", ctx, channelID, historySize)
 	ret0, _ := ret[0].(entity.ManualScheduleTriggerResult)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // TriggerScheduleNow indicates an expected call of TriggerScheduleNow.
-func (mr *MockAdminRuntimeMockRecorder) TriggerScheduleNow(ctx, guildID any) *gomock.Call {
+func (mr *MockAdminRuntimeMockRecorder) TriggerScheduleNow(ctx, channelID, historySize any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TriggerScheduleNow", reflect.TypeOf((*MockAdminRuntime)(nil).TriggerScheduleNow), ctx, guildID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TriggerScheduleNow", reflect.TypeOf((*MockAdminRuntime)(nil).TriggerScheduleNow), ctx, channelID, historySize)
+}
+
+// TriggerSyncNow mocks base method.
+func (m *MockAdminRuntime) TriggerSyncNow(ctx context.Context) (entity.SyncReport, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TriggerSyncNow", ctx)
+	ret0, _ := ret[0].(entity.SyncReport)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TriggerSyncNow indicates an expected call of TriggerSyncNow.
+func (mr *MockAdminRuntimeMockRecorder) TriggerSyncNow(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TriggerSyncNow", reflect.TypeOf((*MockAdminRuntime)(nil).TriggerSyncNow), ctx)
 }
 
 // MockAdmin is a mock of Admin interface.
@@ -553,6 +697,21 @@ func (mr *MockAdminMockRecorder) CreateImage(ctx, img any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateImage", reflect.TypeOf((*MockAdmin)(nil).CreateImage), ctx, img)
 }
 
+// CreateRule mocks base method.
+func (m *MockAdmin) CreateRule(ctx context.Context, rule entity.DeliveryRule, actor string) (entity.DeliveryRule, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateRule", ctx, rule, actor)
+	ret0, _ := ret[0].(entity.DeliveryRule)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateRule indicates an expected call of CreateRule.
+func (mr *MockAdminMockRecorder) CreateRule(ctx, rule, actor any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateRule", reflect.TypeOf((*MockAdmin)(nil).CreateRule), ctx, rule, actor)
+}
+
 // DeleteAlbum mocks base method.
 func (m *MockAdmin) DeleteAlbum(ctx context.Context, id int) error {
 	m.ctrl.T.Helper()
@@ -581,6 +740,20 @@ func (mr *MockAdminMockRecorder) DeleteImage(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteImage", reflect.TypeOf((*MockAdmin)(nil).DeleteImage), ctx, id)
 }
 
+// DeleteRule mocks base method.
+func (m *MockAdmin) DeleteRule(ctx context.Context, id int64, actor string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteRule", ctx, id, actor)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteRule indicates an expected call of DeleteRule.
+func (mr *MockAdminMockRecorder) DeleteRule(ctx, id, actor any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteRule", reflect.TypeOf((*MockAdmin)(nil).DeleteRule), ctx, id, actor)
+}
+
 // GetAlbum mocks base method.
 func (m *MockAdmin) GetAlbum(ctx context.Context, id int) (entity.Album, error) {
 	m.ctrl.T.Helper()
@@ -594,21 +767,6 @@ func (m *MockAdmin) GetAlbum(ctx context.Context, id int) (entity.Album, error) 
 func (mr *MockAdminMockRecorder) GetAlbum(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAlbum", reflect.TypeOf((*MockAdmin)(nil).GetAlbum), ctx, id)
-}
-
-// GetEffectiveSchedule mocks base method.
-func (m *MockAdmin) GetEffectiveSchedule(ctx context.Context, guildID string) (entity.EffectiveScheduleSettings, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetEffectiveSchedule", ctx, guildID)
-	ret0, _ := ret[0].(entity.EffectiveScheduleSettings)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetEffectiveSchedule indicates an expected call of GetEffectiveSchedule.
-func (mr *MockAdminMockRecorder) GetEffectiveSchedule(ctx, guildID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetEffectiveSchedule", reflect.TypeOf((*MockAdmin)(nil).GetEffectiveSchedule), ctx, guildID)
 }
 
 // GetImage mocks base method.
@@ -626,19 +784,49 @@ func (mr *MockAdminMockRecorder) GetImage(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetImage", reflect.TypeOf((*MockAdmin)(nil).GetImage), ctx, id)
 }
 
-// GetSystemStatus mocks base method.
-func (m *MockAdmin) GetSystemStatus(ctx context.Context, guildID string) (entity.SystemStatus, error) {
+// GetRule mocks base method.
+func (m *MockAdmin) GetRule(ctx context.Context, id int64) (entity.DeliveryRule, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetSystemStatus", ctx, guildID)
+	ret := m.ctrl.Call(m, "GetRule", ctx, id)
+	ret0, _ := ret[0].(entity.DeliveryRule)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetRule indicates an expected call of GetRule.
+func (mr *MockAdminMockRecorder) GetRule(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRule", reflect.TypeOf((*MockAdmin)(nil).GetRule), ctx, id)
+}
+
+// GetSyncSettings mocks base method.
+func (m *MockAdmin) GetSyncSettings(ctx context.Context) (entity.AppSettings, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetSyncSettings", ctx)
+	ret0, _ := ret[0].(entity.AppSettings)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetSyncSettings indicates an expected call of GetSyncSettings.
+func (mr *MockAdminMockRecorder) GetSyncSettings(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSyncSettings", reflect.TypeOf((*MockAdmin)(nil).GetSyncSettings), ctx)
+}
+
+// GetSystemStatus mocks base method.
+func (m *MockAdmin) GetSystemStatus(ctx context.Context) (entity.SystemStatus, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetSystemStatus", ctx)
 	ret0, _ := ret[0].(entity.SystemStatus)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetSystemStatus indicates an expected call of GetSystemStatus.
-func (mr *MockAdminMockRecorder) GetSystemStatus(ctx, guildID any) *gomock.Call {
+func (mr *MockAdminMockRecorder) GetSystemStatus(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSystemStatus", reflect.TypeOf((*MockAdmin)(nil).GetSystemStatus), ctx, guildID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSystemStatus", reflect.TypeOf((*MockAdmin)(nil).GetSystemStatus), ctx)
 }
 
 // ListAlbums mocks base method.
@@ -673,6 +861,21 @@ func (mr *MockAdminMockRecorder) ListImages(ctx, q, offset, limit any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListImages", reflect.TypeOf((*MockAdmin)(nil).ListImages), ctx, q, offset, limit)
 }
 
+// ListRules mocks base method.
+func (m *MockAdmin) ListRules(ctx context.Context) ([]entity.DeliveryRule, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListRules", ctx)
+	ret0, _ := ret[0].([]entity.DeliveryRule)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListRules indicates an expected call of ListRules.
+func (mr *MockAdminMockRecorder) ListRules(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListRules", reflect.TypeOf((*MockAdmin)(nil).ListRules), ctx)
+}
+
 // ListSyncEvents mocks base method.
 func (m *MockAdmin) ListSyncEvents(ctx context.Context, offset, limit int) ([]entity.SyncEvent, int, error) {
 	m.ctrl.T.Helper()
@@ -704,33 +907,48 @@ func (mr *MockAdminMockRecorder) RecordAudit(ctx, actor, action, targetType, tar
 }
 
 // SendAlbumTest mocks base method.
-func (m *MockAdmin) SendAlbumTest(ctx context.Context, guildID string, albumID int, actor string) (entity.ManualScheduleTriggerResult, error) {
+func (m *MockAdmin) SendAlbumTest(ctx context.Context, albumID int, channelID, actor string) (entity.ManualScheduleTriggerResult, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SendAlbumTest", ctx, guildID, albumID, actor)
+	ret := m.ctrl.Call(m, "SendAlbumTest", ctx, albumID, channelID, actor)
 	ret0, _ := ret[0].(entity.ManualScheduleTriggerResult)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // SendAlbumTest indicates an expected call of SendAlbumTest.
-func (mr *MockAdminMockRecorder) SendAlbumTest(ctx, guildID, albumID, actor any) *gomock.Call {
+func (mr *MockAdminMockRecorder) SendAlbumTest(ctx, albumID, channelID, actor any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendAlbumTest", reflect.TypeOf((*MockAdmin)(nil).SendAlbumTest), ctx, guildID, albumID, actor)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendAlbumTest", reflect.TypeOf((*MockAdmin)(nil).SendAlbumTest), ctx, albumID, channelID, actor)
 }
 
 // TriggerScheduleNow mocks base method.
-func (m *MockAdmin) TriggerScheduleNow(ctx context.Context, guildID, actor string) (entity.ManualScheduleTriggerResult, error) {
+func (m *MockAdmin) TriggerScheduleNow(ctx context.Context, channelID, actor string) (entity.ManualScheduleTriggerResult, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "TriggerScheduleNow", ctx, guildID, actor)
+	ret := m.ctrl.Call(m, "TriggerScheduleNow", ctx, channelID, actor)
 	ret0, _ := ret[0].(entity.ManualScheduleTriggerResult)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // TriggerScheduleNow indicates an expected call of TriggerScheduleNow.
-func (mr *MockAdminMockRecorder) TriggerScheduleNow(ctx, guildID, actor any) *gomock.Call {
+func (mr *MockAdminMockRecorder) TriggerScheduleNow(ctx, channelID, actor any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TriggerScheduleNow", reflect.TypeOf((*MockAdmin)(nil).TriggerScheduleNow), ctx, guildID, actor)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TriggerScheduleNow", reflect.TypeOf((*MockAdmin)(nil).TriggerScheduleNow), ctx, channelID, actor)
+}
+
+// TriggerSyncNow mocks base method.
+func (m *MockAdmin) TriggerSyncNow(ctx context.Context, actor string) (entity.SyncReport, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TriggerSyncNow", ctx, actor)
+	ret0, _ := ret[0].(entity.SyncReport)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TriggerSyncNow indicates an expected call of TriggerSyncNow.
+func (mr *MockAdminMockRecorder) TriggerSyncNow(ctx, actor any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TriggerSyncNow", reflect.TypeOf((*MockAdmin)(nil).TriggerSyncNow), ctx, actor)
 }
 
 // UpdateAlbum mocks base method.
@@ -763,17 +981,32 @@ func (mr *MockAdminMockRecorder) UpdateImage(ctx, img any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateImage", reflect.TypeOf((*MockAdmin)(nil).UpdateImage), ctx, img)
 }
 
-// UpsertSchedule mocks base method.
-func (m *MockAdmin) UpsertSchedule(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error) {
+// UpdateRule mocks base method.
+func (m *MockAdmin) UpdateRule(ctx context.Context, id int64, rule entity.DeliveryRule, actor string) (entity.DeliveryRule, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UpsertSchedule", ctx, cfg)
-	ret0, _ := ret[0].(entity.DiscordScheduleSettings)
+	ret := m.ctrl.Call(m, "UpdateRule", ctx, id, rule, actor)
+	ret0, _ := ret[0].(entity.DeliveryRule)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// UpsertSchedule indicates an expected call of UpsertSchedule.
-func (mr *MockAdminMockRecorder) UpsertSchedule(ctx, cfg any) *gomock.Call {
+// UpdateRule indicates an expected call of UpdateRule.
+func (mr *MockAdminMockRecorder) UpdateRule(ctx, id, rule, actor any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertSchedule", reflect.TypeOf((*MockAdmin)(nil).UpsertSchedule), ctx, cfg)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateRule", reflect.TypeOf((*MockAdmin)(nil).UpdateRule), ctx, id, rule, actor)
+}
+
+// UpdateSyncSettings mocks base method.
+func (m *MockAdmin) UpdateSyncSettings(ctx context.Context, interval, actor string) (entity.AppSettings, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateSyncSettings", ctx, interval, actor)
+	ret0, _ := ret[0].(entity.AppSettings)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateSyncSettings indicates an expected call of UpdateSyncSettings.
+func (mr *MockAdminMockRecorder) UpdateSyncSettings(ctx, interval, actor any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateSyncSettings", reflect.TypeOf((*MockAdmin)(nil).UpdateSyncSettings), ctx, interval, actor)
 }

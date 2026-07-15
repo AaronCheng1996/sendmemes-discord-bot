@@ -87,10 +87,22 @@ type (
 		FindCoverByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error)
 	}
 
-	// ScheduleSettingsRepo manages runtime send scheduling per guild.
-	ScheduleSettingsRepo interface {
-		GetByGuild(ctx context.Context, guildID string) (entity.DiscordScheduleSettings, bool, error)
-		Upsert(ctx context.Context, cfg entity.DiscordScheduleSettings) (entity.DiscordScheduleSettings, error)
+	// DeliveryRulesRepo manages configurable Discord delivery rules.
+	DeliveryRulesRepo interface {
+		List(ctx context.Context) ([]entity.DeliveryRule, error)
+		// ListActiveByTrigger returns enabled rules of the given trigger type.
+		ListActiveByTrigger(ctx context.Context, triggerType string) ([]entity.DeliveryRule, error)
+		GetByID(ctx context.Context, id int64) (entity.DeliveryRule, error)
+		Create(ctx context.Context, rule entity.DeliveryRule) (entity.DeliveryRule, error)
+		Update(ctx context.Context, rule entity.DeliveryRule) (entity.DeliveryRule, error)
+		Delete(ctx context.Context, id int64) error
+		Count(ctx context.Context) (int, error)
+	}
+
+	// AppSettingsRepo persists global runtime settings (single row).
+	AppSettingsRepo interface {
+		Get(ctx context.Context) (entity.AppSettings, bool, error)
+		Upsert(ctx context.Context, s entity.AppSettings) (entity.AppSettings, error)
 	}
 
 	// AdminAuditRepo stores admin action audit logs.

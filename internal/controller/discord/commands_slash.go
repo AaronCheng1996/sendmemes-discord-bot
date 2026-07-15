@@ -3,7 +3,6 @@ package discord
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
@@ -54,22 +53,39 @@ var slashCommands = []*discordgo.ApplicationCommand{
 	},
 	{
 		Name:        "schedule",
-		Description: "Show or update scheduled send settings",
+		Description: "Manage Discord delivery rules",
 		Options: []*discordgo.ApplicationCommandOption{
 			{
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
-				Name:        "show",
-				Description: "Show current effective schedule settings",
+				Name:        "list",
+				Description: "List all delivery rules",
 			},
 			{
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
-				Name:        "set",
-				Description: "Update schedule settings (Manage Channels required)",
+				Name:        "add",
+				Description: "Add a delivery rule (Manage Channels required)",
 				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type: discordgo.ApplicationCommandOptionString, Name: "trigger",
+						Description: "When the rule fires", Required: true,
+						Choices: []*discordgo.ApplicationCommandOptionChoice{
+							{Name: "scheduled", Value: "scheduled"},
+							{Name: "new_album", Value: "new_album"},
+							{Name: "new_files", Value: "new_files"},
+						},
+					},
 					{Type: discordgo.ApplicationCommandOptionChannel, Name: "channel", Description: "Target channel", Required: true},
-					{Type: discordgo.ApplicationCommandOptionString, Name: "interval", Description: `Go duration, e.g. "6h"`, Required: true},
-					{Type: discordgo.ApplicationCommandOptionInteger, Name: "history_size", Description: "Exclude this many recent albums", Required: true},
-					{Type: discordgo.ApplicationCommandOptionChannel, Name: "notify_channel", Description: "Channel for new-content sync notifications"},
+					{Type: discordgo.ApplicationCommandOptionString, Name: "interval", Description: `Scheduled only: Go duration, e.g. "6h"`},
+					{Type: discordgo.ApplicationCommandOptionInteger, Name: "history_size", Description: "Scheduled only: exclude this many recent albums"},
+					{Type: discordgo.ApplicationCommandOptionString, Name: "name", Description: "Optional label"},
+				},
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "remove",
+				Description: "Remove a delivery rule by id (Manage Channels required)",
+				Options: []*discordgo.ApplicationCommandOption{
+					{Type: discordgo.ApplicationCommandOptionInteger, Name: "id", Description: "Rule id (see /schedule list)", Required: true},
 				},
 			},
 		},
@@ -306,82 +322,97 @@ func (b *Bot) cmdSchedule(s *discordgo.Session, i *discordgo.InteractionCreate) 
 		ctx := context.Background()
 		data := i.ApplicationCommandData()
 		if len(data.Options) == 0 {
-			b.editInteractionContent(s, i, "Usage: /schedule show or /schedule set")
+			b.editInteractionContent(s, i, "Usage: /schedule list | add | remove")
 			return
 		}
 		sub := data.Options[0]
-		guildID := b.guildIDFromInteraction(i)
 		switch sub.Name {
-		case "show":
-			effective, err := b.settingsUC.GetEffectiveSchedule(ctx, guildID)
+		case "list":
+			rules, err := b.rulesUC.List(ctx)
 			if err != nil {
-				b.l.Error(fmt.Errorf("cmdSchedule show: %w", err))
-				b.editInteractionContent(s, i, "Failed to load schedule settings.")
+				b.l.Error(fmt.Errorf("cmdSchedule list: %w", err))
+				b.editInteractionContent(s, i, "Failed to load delivery rules.")
 				return
 			}
-			b.editInteractionContent(s, i, b.scheduleDisplay(effective))
-		case "set":
+			b.editInteractionContent(s, i, formatRulesList(rules))
+		case "add":
 			if !b.hasSchedulePermission(i.Member) {
-				b.editInteractionContent(s, i, "You need Manage Channels permission to update schedule.")
+				b.editInteractionContent(s, i, "You need Manage Channels permission to add rules.")
 				return
 			}
-			channelID := ""
-			interval := ""
-			historySize := 0
-			notifyChannelID := ""
-			notifyProvided := false
+			rule := entity.DeliveryRule{GuildID: b.guildIDFromInteraction(i), Enabled: true}
 			for _, opt := range sub.Options {
 				switch opt.Name {
+				case "trigger":
+					rule.TriggerType = strings.TrimSpace(opt.StringValue())
 				case "channel":
-					channelID = strings.TrimSpace(fmt.Sprintf("%v", opt.Value))
+					rule.ChannelID = strings.TrimSpace(fmt.Sprintf("%v", opt.Value))
 				case "interval":
-					interval = strings.TrimSpace(opt.StringValue())
+					rule.SendInterval = strings.TrimSpace(opt.StringValue())
 				case "history_size":
-					historySize = int(opt.IntValue())
-				case "notify_channel":
-					notifyChannelID = strings.TrimSpace(fmt.Sprintf("%v", opt.Value))
-					notifyProvided = true
+					rule.HistorySize = int(opt.IntValue())
+				case "name":
+					rule.Name = strings.TrimSpace(opt.StringValue())
 				}
 			}
-			if _, err := timeParseDuration(interval); err != nil {
-				b.editInteractionContent(s, i, "Invalid interval. Example: 6h, 30m, 24h.")
-				return
-			}
-			if historySize <= 0 {
-				b.editInteractionContent(s, i, "history_size must be > 0.")
-				return
-			}
-			// notify_channel is optional: when omitted, preserve the stored value
-			// instead of clobbering it with an empty string.
-			if !notifyProvided {
-				if row, found, rerr := b.settingsUC.GetScheduleRow(ctx, guildID); rerr != nil {
-					b.l.Error(fmt.Errorf("cmdSchedule set GetScheduleRow: %w", rerr))
-				} else if found {
-					notifyChannelID = row.NotifyChannelID
-				}
-			}
-			if _, err := b.settingsUC.UpsertSchedule(ctx, entity.DiscordScheduleSettings{
-				GuildID:         guildID,
-				SendChannelID:   channelID,
-				SendInterval:    interval,
-				SendHistorySize: historySize,
-				NotifyChannelID: notifyChannelID,
-			}); err != nil {
-				b.l.Error(fmt.Errorf("cmdSchedule set: %w", err))
-				b.editInteractionContent(s, i, "Failed to update schedule settings.")
-				return
-			}
-			effective, err := b.settingsUC.GetEffectiveSchedule(ctx, guildID)
+			created, err := b.rulesUC.Create(ctx, rule)
 			if err != nil {
-				b.l.Error(fmt.Errorf("cmdSchedule set effective: %w", err))
-				b.editInteractionContent(s, i, "Updated, but failed to reload effective settings.")
+				b.editInteractionContent(s, i, "Failed to add rule: "+err.Error())
 				return
 			}
-			b.editInteractionContent(s, i, "Schedule updated.\n"+b.scheduleDisplay(effective))
+			b.editInteractionContent(s, i, fmt.Sprintf("Added rule #%d.\n%s", created.ID, formatRuleLine(created)))
+		case "remove":
+			if !b.hasSchedulePermission(i.Member) {
+				b.editInteractionContent(s, i, "You need Manage Channels permission to remove rules.")
+				return
+			}
+			var id int64
+			for _, opt := range sub.Options {
+				if opt.Name == "id" {
+					id = opt.IntValue()
+				}
+			}
+			if err := b.rulesUC.Delete(ctx, id); err != nil {
+				b.l.Error(fmt.Errorf("cmdSchedule remove %d: %w", id, err))
+				b.editInteractionContent(s, i, "Failed to remove rule.")
+				return
+			}
+			b.editInteractionContent(s, i, fmt.Sprintf("Removed rule #%d.", id))
 		default:
 			b.editInteractionContent(s, i, "Unknown schedule subcommand.")
 		}
 	}()
+}
+
+// formatRulesList renders all delivery rules as a Discord message.
+func formatRulesList(rules []entity.DeliveryRule) string {
+	if len(rules) == 0 {
+		return "No delivery rules configured. Use /schedule add to create one."
+	}
+	var sb strings.Builder
+	sb.WriteString("Delivery rules\n")
+	for _, r := range rules {
+		sb.WriteString(formatRuleLine(r))
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// formatRuleLine renders one delivery rule as a single line.
+func formatRuleLine(r entity.DeliveryRule) string {
+	status := "on"
+	if !r.Enabled {
+		status = "off"
+	}
+	label := r.Name
+	if label == "" {
+		label = "(unnamed)"
+	}
+	extra := ""
+	if r.TriggerType == entity.TriggerScheduled {
+		extra = fmt.Sprintf(" every %s, history %d", r.SendInterval, r.HistorySize)
+	}
+	return fmt.Sprintf("• #%d [%s] %s → <#%s>%s (%s)", r.ID, r.TriggerType, label, r.ChannelID, extra, status)
 }
 
 func (b *Bot) hasSchedulePermission(member *discordgo.Member) bool {
@@ -400,17 +431,4 @@ func (b *Bot) guildIDFromInteraction(i *discordgo.InteractionCreate) string {
 		return b.cfg.Discord.GuildID
 	}
 	return ""
-}
-
-func (b *Bot) scheduleDisplay(e entity.EffectiveScheduleSettings) string {
-	notify := "`(disabled)`"
-	if e.NotifyChannelID != "" {
-		notify = "`<#" + e.NotifyChannelID + ">`"
-	}
-	return "Schedule settings\n" +
-		"- guild: `" + e.GuildID + "`\n" +
-		"- channel: `<#" + e.SendChannelID + ">` (" + e.SourceSendChannelID + ")\n" +
-		"- interval: `" + e.SendInterval + "` (" + e.SourceSendInterval + ")\n" +
-		"- history_size: `" + strconv.Itoa(e.SendHistorySize) + "` (" + e.SourceSendHistorySize + ")\n" +
-		"- notify_channel: " + notify + " (" + e.SourceNotifyChannelID + ")"
 }
