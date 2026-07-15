@@ -13,45 +13,54 @@ keeps that structure: `cmd/`, `config/`, `internal/{app,entity,usecase,repo,cont
 
 ### Discord side
 
-- **Scheduled album sends** — picks a random album and delivers it to a
-  configured channel on a fixed interval. Recently sent albums are skipped via
-  `last_sent_at`; the exclusion window resets automatically once the bot has
-  cycled through every album.
+- **Delivery rules** — a configurable list (`delivery_rules`) drives all
+  Discord posting. Each rule has a `trigger_type`:
+  - `scheduled` — every `send_interval`, deliver a random album to the rule's
+    channel (anti-repeat via `history_size` + `last_sent_at`; the exclusion
+    window resets once every album has cycled through).
+  - `new_album` / `new_files` — when a pCloud sync discovers a new album, or
+    new files in an existing album, post the new media to the rule's channel.
+
+  Rules are managed from the admin UI or the `/schedule` slash/prefix command
+  (`list` / `add` / `remove`). A scheduled goroutine per rule is reconciled
+  from the DB every ~30s, so edits take effect without a restart. Env
+  (`DISCORD_CHANNEL_ID`, `DISCORD_NOTIFY_CHANNEL_ID`) seeds default rules once
+  when the table is empty.
 - **Typed delivery** — each album's `send_mode` controls the message format:
   `Random` (size-fitted batch of images), `Order` (comic pages in natural
   filename order; long albums continue in a thread), `Single` (one image),
   `Video` (one random video — uploaded as an attachment when ≤ 10 MB,
   otherwise posted as a temporary pCloud streaming link). Set it from the
   admin UI or the `/album_mode` slash command.
-- **Sync discovery notifications** — after each pCloud sync, the bot posts one
-  message per album with new content to a configurable notify channel
-  (`DISCORD_NOTIFY_CHANNEL_ID` env or per-guild `notify_channel_id`). The
-  first-ever import is suppressed to avoid flooding, and every event is also
-  stored for the dashboard's Activity page.
+- **Rich sync notifications** — `new_album` / `new_files` rules post the actual
+  discovered media: new images merged into one size-fitted message (up to 10),
+  new videos as pCloud streaming links. The first-ever import is suppressed to
+  avoid flooding, and every discovery is also stored for the Activity page.
 - **Reaction feedback** — any non-bot reaction on a scheduled message
   increments the album's `positive_rating` (in-memory map of the latest 200
   message → album mappings).
-- **Per-guild override** — `discord_schedule_settings` lets the channel,
-  interval, and history size be set per guild without redeploying. Env vars
-  act as fallbacks.
 - **pCloud sync** — periodically walks the configured pCloud root folders and
-  reconciles albums, images, and videos (file sizes included). Download URLs
-  are short-lived, so the bot resolves them on demand and caches them in
-  memory (~50 min TTL) to keep pCloud API usage low.
-- **Manual trigger** — admin endpoint can fire a scheduled send immediately.
+  reconciles albums, images, and videos (file sizes included). The cadence is
+  runtime-configurable (`app_settings.sync_interval`, seeded from
+  `PCLOUD_SYNC_INTERVAL`) and can be triggered on demand. Download URLs are
+  short-lived, so the bot resolves them on demand and caches them in memory
+  (~50 min TTL) to keep pCloud API usage low.
 
 ### Admin REST API (`/v1/admin/*`, gated by `X-Admin-Key`)
 
 - Albums CRUD (`/albums`) — including per-album `send_mode` (delivery type)
 - Images CRUD (`/images`, optional `album_id` scope; rows carry `kind` and
   `size_bytes`)
-- Per-guild schedule read/update (`/schedule`), including the sync
-  notification channel
-- Manual schedule trigger (`/schedule/trigger-now`)
+- Delivery rules CRUD (`/delivery-rules`)
+- Sync settings read/update (`/sync-settings`) and manual sync
+  (`/sync/trigger-now`)
+- Manual scheduled send (`/schedule/trigger-now`) and per-album test send
+  (`/albums/:id/send-test`) — both take an optional `channel_id`, falling back
+  to the first enabled scheduled rule
 - Sync activity feed (`/sync-events`) — paginated discovery events for the
   dashboard Activity page
-- Aggregated system status (DB ping + Discord session + effective schedule) at
-  `/system/status`
+- Aggregated system status (DB ping + Discord session + sync interval + rule
+  count) at `/system/status`
 - Audit trail in `admin_audit_logs` (actor from `X-Admin-Actor`, otherwise
   `api_key`)
 
@@ -79,7 +88,7 @@ internal/app            # wiring (Run) and migration init (build tag: migrate)
 internal/controller
     restapi             # Fiber HTTP router, middleware, v1 handlers
     discord             # discordgo bot, scheduler, command handlers
-internal/usecase        # business logic (admin, images, sync, settings, ...)
+internal/usecase        # business logic (admin, images, sync, rules, appsettings, ...)
 internal/repo
     persistent          # PostgreSQL implementations
     webapi              # external APIs (pCloud)
@@ -102,12 +111,12 @@ Highlights:
 | `POSTGRES_*` / `PG_URL` | PostgreSQL connection (PG_URL takes precedence) |
 | `ADMIN_API_KEY` | Required for every `/v1/admin/*` request and for the UI sign-in |
 | `DISCORD_TOKEN`, `DISCORD_APPLICATION_ID`, `DISCORD_GUILD_ID` | Discord bot identity |
-| `DISCORD_CHANNEL_ID`, `DISCORD_SEND_INTERVAL`, `DISCORD_SEND_HISTORY_SIZE` | Defaults for scheduled sends; per-guild overrides live in `discord_schedule_settings` |
-| `DISCORD_NOTIFY_CHANNEL_ID` | Channel for "new content discovered" sync notifications (empty = disabled; per-guild override in `discord_schedule_settings.notify_channel_id`) |
-| `PCLOUD_ACCESS_TOKEN` *or* `PCLOUD_USERNAME` + `PCLOUD_PASSWORD` | pCloud authentication. Token (cookie/userinfo) is preferred; pCloud's API does not support 2FA |
-| `CLOUD_MAIN_FOLDER_ID` | pCloud folder ID that holds album subfolders |
+| `DISCORD_CHANNEL_ID`, `DISCORD_SEND_INTERVAL`, `DISCORD_SEND_HISTORY_SIZE` | Seed the default **scheduled** delivery rule (once, when `delivery_rules` is empty) |
+| `DISCORD_NOTIFY_CHANNEL_ID` | Seeds default **new_album** + **new_files** rules (once, when `delivery_rules` is empty; empty = no notify rules) |
+| `PCLOUD_ACCESS_TOKEN` *or* `PCLOUD_USERNAME` + `PCLOUD_PASSWORD` | pCloud authentication. `PCLOUD_TOKEN_TYPE=session` (default, sent as `auth=`) or `oauth` (sent as `access_token=`); pCloud's API does not support 2FA |
+| `CLOUD_MAIN_FOLDER_ID` | Comma-separated pCloud folder IDs holding album subfolders |
 | `PCLOUD_API_ENDPOINT` | `https://api.pcloud.com` (US) or `https://eapi.pcloud.com` (EU) |
-| `PCLOUD_SYNC_INTERVAL` | How often the bot reconciles pCloud → DB |
+| `PCLOUD_SYNC_INTERVAL` | Seeds `app_settings.sync_interval` (once); afterwards editable at runtime from the Connection page |
 | `METRICS_ENABLED`, `SWAGGER_ENABLED` | Toggle Prometheus and Swagger handlers |
 
 ## Running locally
@@ -181,10 +190,13 @@ the browser's `sessionStorage`.
   (`ORDER BY RANDOM() * (1 + positive_rating) DESC`).
 - `/album_stats` slash command — surface top-rated albums in Discord.
 - Move in-code tunables (`albumBatchSize`, `reactMapMaxSize`,
-  `downloadTimeout`, `videoUploadLimit`, `maxSyncNotifyMessages`) to env when
-  deployments need to differ.
+  `downloadTimeout`, `videoUploadLimit`, `maxSyncNotifyMessages`,
+  `scheduleReconcileInterval`) to env when deployments need to differ.
 - `Custom` send mode semantics driven by `send_config_json` (currently falls
   back to `Random`).
+- Push scheduled-rule reconciliation on rule change instead of the ~30s poll.
+- Anti-repeat `last_sent_at` is global; consider per-rule send history if
+  multiple scheduled rules should not share exclusion state.
 - Replace the `*` CORS allow-list with an explicit dashboard origin once a
   hosted UI URL is decided.
 - Audit-log retention / API surface (currently write-only).
