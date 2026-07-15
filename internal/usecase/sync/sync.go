@@ -10,8 +10,13 @@ import (
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo"
 )
 
-// maxEventFileNames caps how many discovered file names are sampled per event.
-const maxEventFileNames = 10
+const (
+	// maxEventFileNames caps how many discovered file names are sampled per event.
+	maxEventFileNames = 10
+	// maxEventMedia caps how many new media records are carried in-memory per
+	// event for the Discord notifier (bounds message size / memory).
+	maxEventMedia = 50
+)
 
 // UseCase synchronises the pCloud folder tree with the database.
 type UseCase struct {
@@ -40,6 +45,7 @@ type albumSyncStats struct {
 	newImages int
 	newVideos int
 	fileNames []string
+	newMedia  []entity.Image
 }
 
 // SyncImages fetches the full pCloud folder tree and reconciles it with the database:
@@ -104,6 +110,16 @@ func (uc *UseCase) SyncImages(ctx context.Context) (entity.SyncReport, error) {
 			if len(st.fileNames) < maxEventFileNames {
 				st.fileNames = append(st.fileNames, entry.Name)
 			}
+			if len(st.newMedia) < maxEventMedia {
+				st.newMedia = append(st.newMedia, entity.Image{
+					FileID:    entry.FileID,
+					URL:       entry.Name,
+					Source:    "pcloud",
+					AlbumID:   st.albumID,
+					Kind:      entry.Kind,
+					SizeBytes: entry.Size,
+				})
+			}
 		}
 
 		albumFileIDs[entry.ParentFolderName] = append(albumFileIDs[entry.ParentFolderName], entry.FileID)
@@ -155,6 +171,8 @@ func (uc *UseCase) SyncImages(ctx context.Context) (entity.SyncReport, error) {
 		if err != nil {
 			return report, fmt.Errorf("SyncUseCase - SyncImages - events.Insert %q: %w", name, err)
 		}
+		// Attach the in-memory media after persistence (it is never stored).
+		saved.NewMedia = st.newMedia
 		report.Events = append(report.Events, saved)
 	}
 

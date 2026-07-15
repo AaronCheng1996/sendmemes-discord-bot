@@ -94,6 +94,8 @@ func TestSyncImagesReportsDiscoveries(t *testing.T) {
 	require.Equal(t, entity.SyncEventAlbumCreated, report.Events[0].EventType)
 	require.Equal(t, 1, report.Events[0].NewImages)
 	require.Equal(t, 1, report.Events[0].NewVideos)
+	// The in-memory report carries the new media records for the notifier.
+	require.Len(t, report.Events[0].NewMedia, 2)
 }
 
 func TestSyncImagesInitialImport(t *testing.T) {

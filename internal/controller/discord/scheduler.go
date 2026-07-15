@@ -16,6 +16,8 @@ const (
 	// scheduleReconcileInterval is how often the manager reloads scheduled rules
 	// from the DB so UI/slash changes take effect without a restart.
 	scheduleReconcileInterval = 30 * time.Second
+	// maxNotifyVideoLinks caps how many video links one discovery notification posts.
+	maxNotifyVideoLinks = 5
 )
 
 // ---------------------------------------------------------------------------
@@ -80,9 +82,86 @@ func (b *Bot) notifySyncEvents(ctx context.Context, report entity.SyncReport) {
 			continue
 		}
 		for _, rule := range rules {
-			if _, serr := b.session.ChannelMessageSend(rule.ChannelID, formatSyncEventMessage(ev)); serr != nil {
-				b.l.Error(fmt.Errorf("notifySyncEvents send album %q to %s: %w", ev.AlbumName, rule.ChannelID, serr))
+			b.postDiscoveredMedia(ctx, rule.ChannelID, ev)
+		}
+	}
+}
+
+// postDiscoveredMedia posts an event's newly discovered media to channelID: new
+// images are merged into one size-fitted attachment message (up to
+// albumBatchSize), new videos are posted as pCloud streaming links (never
+// uploaded). Falls back to a plain text summary when nothing can be resolved.
+func (b *Bot) postDiscoveredMedia(ctx context.Context, channelID string, ev entity.SyncEvent) {
+	caption := formatSyncEventMessage(ev)
+
+	var images, videos []entity.Image
+	for _, m := range ev.NewMedia {
+		if m.Kind == entity.MediaKindVideo {
+			videos = append(videos, m)
+		} else {
+			images = append(images, m)
+		}
+	}
+
+	posted := false
+
+	// New images: one merged attachment message.
+	if len(images) > 0 {
+		pool := images
+		if len(pool) > albumPoolSize {
+			pool = pool[:albumPoolSize]
+		}
+		entries, err := b.downloadPool(ctx, pool)
+		if err != nil {
+			b.l.Error(fmt.Errorf("postDiscoveredMedia downloadPool %q: %w", ev.AlbumName, err))
+		} else if selected := fitToLimit(b.l, entries, albumBatchSize, discordMsgLimit); len(selected) > 0 {
+			content := caption
+			if len(images) > len(selected) {
+				content += fmt.Sprintf(" (showing %d of %d)", len(selected), len(images))
 			}
+			if b.channelSendFilesContent(channelID, content, entriesToFiles(selected)) != nil {
+				posted = true
+			}
+		}
+	}
+
+	// New videos: streaming links only (per configuration, never uploaded).
+	if len(videos) > 0 {
+		links := make([]string, 0, maxNotifyVideoLinks)
+		for i, v := range videos {
+			if i >= maxNotifyVideoLinks {
+				break
+			}
+			url, err := b.imagesUC.ResolveURL(ctx, v)
+			if err != nil {
+				b.l.Error(fmt.Errorf("postDiscoveredMedia ResolveURL %q: %w", ev.AlbumName, err))
+				continue
+			}
+			links = append(links, url)
+		}
+		if len(links) > 0 {
+			var sb strings.Builder
+			if !posted {
+				sb.WriteString(caption)
+				sb.WriteString("\n")
+			}
+			sb.WriteString(strings.Join(links, "\n"))
+			if len(videos) > len(links) {
+				fmt.Fprintf(&sb, "\n…and %d more video(s)", len(videos)-len(links))
+			}
+			sb.WriteString("\n_(streaming links — expire after a few hours)_")
+			if _, err := b.session.ChannelMessageSend(channelID, sb.String()); err != nil {
+				b.l.Error(fmt.Errorf("postDiscoveredMedia video links %q: %w", ev.AlbumName, err))
+			} else {
+				posted = true
+			}
+		}
+	}
+
+	// Nothing resolvable (e.g. counts-only event) — post the text summary.
+	if !posted {
+		if _, err := b.session.ChannelMessageSend(channelID, caption); err != nil {
+			b.l.Error(fmt.Errorf("postDiscoveredMedia fallback %q: %w", ev.AlbumName, err))
 		}
 	}
 }

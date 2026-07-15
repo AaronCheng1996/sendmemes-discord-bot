@@ -19,6 +19,10 @@ type SyncEvent struct {
 	// FileNames is a sample of the newly discovered file names (capped, not exhaustive).
 	FileNames []string  `json:"file_names,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+	// NewMedia carries the newly discovered image/video records for this event.
+	// It is populated in-memory for the Discord notifier only — never persisted
+	// or serialized (the API surfaces counts and sampled names instead).
+	NewMedia []Image `json:"-"`
 }
 
 // SyncReport summarizes one sync run for callers (e.g. the Discord notifier).
