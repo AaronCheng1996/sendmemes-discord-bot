@@ -61,6 +61,19 @@ services:
     networks:
       - shared_net
 
+  # Vue 3 admin dashboard (static SPA served by nginx). The browser talks to the
+  # admin API directly — set the API base URL on the dashboard's Connection page.
+  ui:
+    image: aaron850130/sendmemes-ui:latest
+    container_name: sendmemes-ui
+    ports:
+      - "8091:80"
+    depends_on:
+      - app
+    restart: unless-stopped
+    networks:
+      - shared_net
+
 networks:
   shared_net:
     name: shared_net
