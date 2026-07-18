@@ -461,7 +461,7 @@ func (b *Bot) downloadAndFit(ctx context.Context, imgs []entity.Image) ([]*disco
 // album name in captions (e.g. "[TEST] "). Delivery formats:
 //   - Random/Custom/default: a size-fitted batch of random images (cover-first).
 //   - Single: exactly one image.
-//   - Order: an ordered comic; first chunk to the channel, rest to a thread.
+//   - Order: an ordered comic; first batch only, /full_album for the rest.
 //   - Video: one random video as an attachment (small) or public link (large).
 func (b *Bot) deliverAlbum(ctx context.Context, channelID string, album entity.Album, captionPrefix string) *discordgo.Message {
 	switch album.SendMode {
@@ -503,10 +503,11 @@ func (b *Bot) deliverSingle(ctx context.Context, channelID string, album entity.
 	return b.channelSendFiles(b.session, channelID, captionPrefix+album.Name, files)
 }
 
-// deliverComic sends the album as an ordered comic. The first chunk (with a
-// page-count caption) goes to the channel; any remaining chunks are posted to a
-// public thread off that root message, falling back to the channel if the thread
-// cannot be created. Page order is never shuffled.
+// deliverComic sends the album as an ordered comic: only the first ordered
+// batch (up to albumBatchSize pages within the Discord size limit) is posted to
+// the channel. When the album has more pages than fit in that batch, the caption
+// points viewers to /full_album (or the full-album button) for the rest; nothing
+// else is sent here. Page order is never shuffled.
 func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.Album, captionPrefix string) *discordgo.Message {
 	pages, err := b.imagesUC.GetComicPages(ctx, album)
 	if err != nil {
@@ -524,37 +525,15 @@ func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.A
 		return nil
 	}
 
-	totalPages := 0
-	for _, ch := range chunks {
-		totalPages += len(ch)
-	}
+	first := chunks[0]
+	totalPages := len(pages)
 
-	rootContent := fmt.Sprintf("**%s%s** (%d pages)", captionPrefix, album.Name, totalPages)
-	root := b.channelSendFilesContent(channelID, rootContent, entriesToFiles(chunks[0]))
-	if root == nil || len(chunks) == 1 {
-		return root
+	caption := fmt.Sprintf("**%s%s** (%d pages)", captionPrefix, album.Name, totalPages)
+	if len(first) < totalPages {
+		caption = fmt.Sprintf("**%s%s** (showing first %d of %d pages — use /full_album for the rest)",
+			captionPrefix, album.Name, len(first), totalPages)
 	}
-
-	targetID := channelID
-	thread, terr := b.session.MessageThreadStartComplex(channelID, root.ID, &discordgo.ThreadStart{
-		Name:                fmt.Sprintf("Album: %s", album.Name),
-		AutoArchiveDuration: 60,
-		Type:                discordgo.ChannelTypeGuildPublicThread,
-	})
-	if terr != nil {
-		b.l.Error(fmt.Errorf("deliverAlbum comic ThreadStart %q: %w", album.Name, terr))
-	} else {
-		targetID = thread.ID
-	}
-
-	sentSoFar := len(chunks[0])
-	for _, chunk := range chunks[1:] {
-		start := sentSoFar + 1
-		end := sentSoFar + len(chunk)
-		b.channelSendFilesContent(targetID, fmt.Sprintf("pages %d–%d", start, end), entriesToFiles(chunk))
-		sentSoFar = end
-	}
-	return root
+	return b.channelSendFilesContent(channelID, caption, entriesToFiles(first))
 }
 
 // deliverVideo posts one random video from the album. Videos within

@@ -28,7 +28,8 @@ keeps that structure: `cmd/`, `config/`, `internal/{app,entity,usecase,repo,cont
   when the table is empty.
 - **Typed delivery** — each album's `send_mode` controls the message format:
   `Random` (size-fitted batch of images), `Order` (comic pages in natural
-  filename order; long albums continue in a thread), `Single` (one image),
+  filename order; first batch only — `/full_album` posts the rest in a thread),
+  `Single` (one image),
   `Video` (one random video — uploaded as an attachment when ≤ 10 MB,
   otherwise posted as a permanent pCloud public link). Set it from the
   admin UI or the `/album_mode` slash command.
