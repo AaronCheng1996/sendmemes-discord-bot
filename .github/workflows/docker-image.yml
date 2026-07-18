@@ -1,0 +1,46 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  DOCKER_HUB_USERNAME: aaron850130
+  BACKEND_IMAGE: sendmemes-discord-bot
+  UI_IMAGE: sendmemes-ui
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
+
+      - name: Extract tag name
+        run: echo "IMAGE_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+
+      - name: Build and Push backend
+        run: |
+          docker build -t "$DOCKER_HUB_USERNAME/$BACKEND_IMAGE:${IMAGE_TAG}" .
+          docker push "$DOCKER_HUB_USERNAME/$BACKEND_IMAGE:${IMAGE_TAG}"
+          docker tag "$DOCKER_HUB_USERNAME/$BACKEND_IMAGE:${IMAGE_TAG}" "$DOCKER_HUB_USERNAME/$BACKEND_IMAGE:latest"
+          docker push "$DOCKER_HUB_USERNAME/$BACKEND_IMAGE:latest"
+
+      - name: Build and Push UI
+        run: |
+          docker build -t "$DOCKER_HUB_USERNAME/$UI_IMAGE:${IMAGE_TAG}" ./ui
+          docker push "$DOCKER_HUB_USERNAME/$UI_IMAGE:${IMAGE_TAG}"
+          docker tag "$DOCKER_HUB_USERNAME/$UI_IMAGE:${IMAGE_TAG}" "$DOCKER_HUB_USERNAME/$UI_IMAGE:latest"
+          docker push "$DOCKER_HUB_USERNAME/$UI_IMAGE:latest"

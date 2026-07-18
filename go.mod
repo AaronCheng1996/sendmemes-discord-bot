@@ -1,6 +1,6 @@
 module github.com/AaronCheng1996/sendmemes-discord-bot
 
-go 1.25
+go 1.25.0
 
 tool (
 	github.com/daixiang0/gci
@@ -13,22 +13,22 @@ tool (
 )
 
 require (
-	github.com/Conight/go-googletrans v0.2.4
+	github.com/Conight/go-googletrans v0.3.0
 	github.com/Masterminds/squirrel v1.5.4
-	github.com/ansrivas/fiberprometheus/v2 v2.16.0
+	github.com/ansrivas/fiberprometheus/v2 v2.17.0
 	github.com/bwmarrin/discordgo v0.28.1
-	github.com/caarlos0/env/v11 v11.3.1
+	github.com/caarlos0/env/v11 v11.4.1
 	github.com/go-playground/validator/v10 v10.30.1
 	github.com/goccy/go-json v0.10.5
 	github.com/gofiber/fiber/v2 v2.52.13
 	github.com/gofiber/swagger v1.1.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/jackc/pgx/v5 v5.8.0
-	github.com/rs/zerolog v1.34.0
+	github.com/rs/zerolog v1.35.1
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/swag v1.16.6
 	go.uber.org/mock v0.6.0
-	golang.org/x/sync v0.19.0
+	golang.org/x/sync v0.20.0
 )
 
 require (

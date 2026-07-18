@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
+	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/postgres"
 )
 
@@ -22,11 +24,178 @@ func NewImagesRepo(pg *postgres.Postgres) *ImagesRepo {
 	return &ImagesRepo{Postgres: pg}
 }
 
+func imageSelectBuilder(r *ImagesRepo) sq.SelectBuilder {
+	return r.Builder.
+		Select("i.id", "i.url", "i.source", "i.file_id", "i.album_id", "COALESCE(i.guild_id, '')", "COALESCE(a.name, '')", "i.kind", "COALESCE(i.size_bytes, 0)", "COALESCE(i.public_link, '')").
+		From("images i").
+		LeftJoin("albums a ON a.id = i.album_id")
+}
+
+func scanImageRow(row pgx.Row) (entity.Image, error) {
+	var e entity.Image
+	var source *string
+	var fileID *int64
+	var albumID *int
+	var guildID string
+	if err := row.Scan(&e.ID, &e.URL, &source, &fileID, &albumID, &guildID, &e.AlbumName, &e.Kind, &e.SizeBytes, &e.PublicLink); err != nil {
+		return entity.Image{}, err
+	}
+	if source != nil {
+		e.Source = *source
+	}
+	if fileID != nil {
+		e.FileID = *fileID
+	}
+	if albumID != nil {
+		e.AlbumID = *albumID
+	}
+	e.GuildID = guildID
+	return e, nil
+}
+
+func (r *ImagesRepo) imageAdminOrderBy(q repo.ImageAdminListQuery) string {
+	dir := "DESC"
+	if q.SortAsc {
+		dir = "ASC"
+	}
+	switch strings.ToLower(strings.TrimSpace(q.SortBy)) {
+	case "album_id":
+		return "i.album_id " + dir + ", i.id ASC"
+	case "url":
+		return "i.url " + dir + ", i.id ASC"
+	case "source":
+		return "COALESCE(i.source, '') " + dir + ", i.id ASC"
+	case "guild_id":
+		return "COALESCE(i.guild_id, '') " + dir + ", i.id ASC"
+	case "file_id":
+		return "COALESCE(i.file_id, 0) " + dir + ", i.id ASC"
+	default:
+		return "i.id " + dir
+	}
+}
+
+func (r *ImagesRepo) applyImageAdminFilters(b sq.SelectBuilder, q repo.ImageAdminListQuery) sq.SelectBuilder {
+	if q.AlbumScopeID > 0 {
+		b = b.Where(sq.Eq{"i.album_id": q.AlbumScopeID})
+	}
+	raw := strings.TrimSpace(q.FilterQ)
+	col := strings.ToLower(strings.TrimSpace(q.FilterCol))
+	if raw == "" || col == "" {
+		return b
+	}
+	pat := escapeILikePattern(raw)
+
+	switch col {
+	case "id":
+		return b.Where("CAST(i.id AS TEXT) ILIKE ?", pat)
+	case "album_id":
+		return b.Where("CAST(COALESCE(i.album_id, 0) AS TEXT) ILIKE ?", pat)
+	case "url":
+		return b.Where("i.url ILIKE ?", pat)
+	case "source":
+		return b.Where("COALESCE(i.source, '') ILIKE ?", pat)
+	case "guild_id":
+		return b.Where("COALESCE(i.guild_id, '') ILIKE ?", pat)
+	case "file_id":
+		return b.Where("CAST(COALESCE(i.file_id, 0) AS TEXT) ILIKE ?", pat)
+	case "all":
+		return b.Where(imageOrFilterParts(pat))
+	default:
+		return b.Where(imageOrFilterParts(pat))
+	}
+}
+
+func imageOrFilterParts(pat string) sq.Sqlizer {
+	return sq.Or{
+		sq.Expr("CAST(i.id AS TEXT) ILIKE ?", pat),
+		sq.Expr("CAST(COALESCE(i.album_id, 0) AS TEXT) ILIKE ?", pat),
+		sq.Expr("i.url ILIKE ?", pat),
+		sq.Expr("COALESCE(i.source, '') ILIKE ?", pat),
+		sq.Expr("COALESCE(i.guild_id, '') ILIKE ?", pat),
+		sq.Expr("CAST(COALESCE(i.file_id, 0) AS TEXT) ILIKE ?", pat),
+	}
+}
+
+// List returns images with optional album scope, filters, sort, and pagination.
+func (r *ImagesRepo) List(ctx context.Context, q repo.ImageAdminListQuery, offset, limit int) ([]entity.Image, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	b := imageSelectBuilder(r)
+	b = r.applyImageAdminFilters(b, q)
+	sql, args, err := b.
+		OrderBy(r.imageAdminOrderBy(q)).
+		Offset(uint64(offset)).
+		Limit(uint64(limit)).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("ImagesRepo - List - r.Builder: %w", err)
+	}
+	return r.queryImages(ctx, "ImagesRepo - List", sql, args)
+}
+
+// Count returns the number of images matching the admin list query.
+func (r *ImagesRepo) Count(ctx context.Context, q repo.ImageAdminListQuery) (int, error) {
+	b := r.Builder.Select("COUNT(*)").From("images i")
+	b = r.applyImageAdminFilters(b, q)
+	sql, args, err := b.ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("ImagesRepo - Count - r.Builder: %w", err)
+	}
+	var n int
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("ImagesRepo - Count - QueryRow: %w", err)
+	}
+	return n, nil
+}
+
+// GetFirstByAlbum returns the lowest-id image in albumID, used as a preview when
+// the album has no explicit cover. Returns (zero, false, nil) when the album has no images.
+func (r *ImagesRepo) GetFirstByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error) {
+	sql, args, err := imageSelectBuilder(r).
+		Where(sq.Eq{"i.album_id": albumID}).
+		Where("i.kind = 'image'").
+		OrderBy("i.id ASC").
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return entity.Image{}, false, fmt.Errorf("ImagesRepo - GetFirstByAlbum - r.Builder: %w", err)
+	}
+	e, err := scanImageRow(r.Pool.QueryRow(ctx, sql, args...))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return entity.Image{}, false, nil
+		}
+		return entity.Image{}, false, fmt.Errorf("ImagesRepo - GetFirstByAlbum - QueryRow: %w", err)
+	}
+	return e, true, nil
+}
+
+// GetByID returns image by primary key.
+func (r *ImagesRepo) GetByID(ctx context.Context, id int) (entity.Image, error) {
+	sql, args, err := imageSelectBuilder(r).Where("i.id = ?", id).Limit(1).ToSql()
+	if err != nil {
+		return entity.Image{}, fmt.Errorf("ImagesRepo - GetByID - r.Builder: %w", err)
+	}
+	e, err := scanImageRow(r.Pool.QueryRow(ctx, sql, args...))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return entity.Image{}, fmt.Errorf("ImagesRepo - GetByID - image %d not found", id)
+		}
+		return entity.Image{}, fmt.Errorf("ImagesRepo - GetByID - QueryRow: %w", err)
+	}
+	return e, nil
+}
+
 // GetDefault returns the default image (first row by id).
 func (r *ImagesRepo) GetDefault(ctx context.Context) (entity.Image, error) {
 	sql, args, err := r.Builder.
 		Select("id", "url", "source", "guild_id").
 		From("images").
+		Where("kind = 'image'").
 		OrderBy("id ASC").
 		Limit(1).
 		ToSql()
@@ -51,33 +220,14 @@ func (r *ImagesRepo) GetDefault(ctx context.Context) (entity.Image, error) {
 
 // GetRandom returns a single random image from all images.
 func (r *ImagesRepo) GetRandom(ctx context.Context) (entity.Image, error) {
-	sql, args, err := r.Builder.
-		Select("i.id", "i.url", "i.source", "i.file_id", "i.album_id", "COALESCE(a.name, '')").
-		From("images i").
-		LeftJoin("albums a ON a.id = i.album_id").
-		OrderBy("RANDOM()").
-		Limit(1).
-		ToSql()
+	sql, args, err := imageSelectBuilder(r).Where("i.kind = 'image'").OrderBy("RANDOM()").Limit(1).ToSql()
 	if err != nil {
 		return entity.Image{}, fmt.Errorf("ImagesRepo - GetRandom - r.Builder: %w", err)
 	}
 
-	var e entity.Image
-	var source *string
-	var albumID *int
-	var fileID *int64
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(&e.ID, &e.URL, &source, &fileID, &albumID, &e.AlbumName)
+	e, err := scanImageRow(r.Pool.QueryRow(ctx, sql, args...))
 	if err != nil {
 		return entity.Image{}, fmt.Errorf("ImagesRepo - GetRandom - QueryRow: %w", err)
-	}
-	if source != nil {
-		e.Source = *source
-	}
-	if fileID != nil {
-		e.FileID = *fileID
-	}
-	if albumID != nil {
-		e.AlbumID = *albumID
 	}
 	return e, nil
 }
@@ -85,13 +235,7 @@ func (r *ImagesRepo) GetRandom(ctx context.Context) (entity.Image, error) {
 // GetRandomByAlbum returns up to limit random images from the given album.
 // Pass excludeID > 0 to exclude a specific image (e.g. the cover) from the result.
 func (r *ImagesRepo) GetRandomByAlbum(ctx context.Context, albumID, limit, excludeID int) ([]entity.Image, error) {
-	q := r.Builder.
-		Select("i.id", "i.url", "i.source", "i.file_id", "i.album_id", "COALESCE(a.name, '')").
-		From("images i").
-		LeftJoin("albums a ON a.id = i.album_id").
-		Where(sq.Eq{"i.album_id": albumID}).
-		OrderBy("RANDOM()").
-		Limit(uint64(limit))
+	q := imageSelectBuilder(r).Where(sq.Eq{"i.album_id": albumID}).Where("i.kind = 'image'").OrderBy("RANDOM()").Limit(uint64(limit))
 
 	if excludeID > 0 {
 		q = q.Where(sq.NotEq{"i.id": excludeID})
@@ -107,12 +251,7 @@ func (r *ImagesRepo) GetRandomByAlbum(ctx context.Context, albumID, limit, exclu
 // GetAllByAlbum returns all images in the given album ordered by id.
 // Pass excludeID > 0 to exclude a specific image (e.g. the cover) from the result.
 func (r *ImagesRepo) GetAllByAlbum(ctx context.Context, albumID, excludeID int) ([]entity.Image, error) {
-	q := r.Builder.
-		Select("i.id", "i.url", "i.source", "i.file_id", "i.album_id", "COALESCE(a.name, '')").
-		From("images i").
-		LeftJoin("albums a ON a.id = i.album_id").
-		Where(sq.Eq{"i.album_id": albumID}).
-		OrderBy("i.id ASC")
+	q := imageSelectBuilder(r).Where(sq.Eq{"i.album_id": albumID}).Where("i.kind = 'image'").OrderBy("i.id ASC")
 
 	if excludeID > 0 {
 		q = q.Where(sq.NotEq{"i.id": excludeID})
@@ -125,58 +264,143 @@ func (r *ImagesRepo) GetAllByAlbum(ctx context.Context, albumID, excludeID int) 
 	return r.queryImages(ctx, "ImagesRepo - GetAllByAlbum", sql, args)
 }
 
+// GetRandomVideoByAlbum returns one random video (kind='video') from albumID.
+// Returns (zero, false, nil) when the album has no videos.
+func (r *ImagesRepo) GetRandomVideoByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error) {
+	sql, args, err := imageSelectBuilder(r).
+		Where(sq.Eq{"i.album_id": albumID}).
+		Where("i.kind = 'video'").
+		OrderBy("RANDOM()").
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return entity.Image{}, false, fmt.Errorf("ImagesRepo - GetRandomVideoByAlbum - r.Builder: %w", err)
+	}
+
+	e, err := scanImageRow(r.Pool.QueryRow(ctx, sql, args...))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return entity.Image{}, false, nil
+		}
+		return entity.Image{}, false, fmt.Errorf("ImagesRepo - GetRandomVideoByAlbum - QueryRow: %w", err)
+	}
+	return e, true, nil
+}
+
 // FindCoverByAlbum returns the image in albumID whose filename matches the cover
 // convention: cover.* or _cover.* (case-insensitive).
 func (r *ImagesRepo) FindCoverByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error) {
-	sql, args, err := r.Builder.
-		Select("i.id", "i.url", "i.source", "i.file_id", "i.album_id", "COALESCE(a.name, '')").
-		From("images i").
-		LeftJoin("albums a ON a.id = i.album_id").
-		Where("i.album_id = ? AND i.url ~* ?", albumID, `^_?cover\.`).
-		Limit(1).
-		ToSql()
+	sql, args, err := imageSelectBuilder(r).
+		Where("i.album_id = ? AND i.kind = 'image' AND i.url ~* ?", albumID, `^_?cover\.`).
+		Limit(1).ToSql()
 	if err != nil {
 		return entity.Image{}, false, fmt.Errorf("ImagesRepo - FindCoverByAlbum - r.Builder: %w", err)
 	}
 
-	var e entity.Image
-	var source *string
-	var fileID *int64
-	var albumIDVal *int
-	err = r.Pool.QueryRow(ctx, sql, args...).Scan(&e.ID, &e.URL, &source, &fileID, &albumIDVal, &e.AlbumName)
+	e, err := scanImageRow(r.Pool.QueryRow(ctx, sql, args...))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return entity.Image{}, false, nil
 		}
 		return entity.Image{}, false, fmt.Errorf("ImagesRepo - FindCoverByAlbum - QueryRow: %w", err)
 	}
-	if source != nil {
-		e.Source = *source
-	}
-	if fileID != nil {
-		e.FileID = *fileID
-	}
-	if albumIDVal != nil {
-		e.AlbumID = *albumIDVal
-	}
 	return e, true, nil
 }
 
-// UpsertByFileID inserts or updates an image record keyed on file_id.
-func (r *ImagesRepo) UpsertByFileID(ctx context.Context, img entity.Image) error {
+// Insert inserts one image row.
+func (r *ImagesRepo) Insert(ctx context.Context, img entity.Image) (entity.Image, error) {
 	sql, args, err := r.Builder.
 		Insert("images").
-		Columns("file_id", "url", "source", "album_id").
-		Values(img.FileID, img.URL, img.Source, img.AlbumID).
-		Suffix("ON CONFLICT (file_id) WHERE file_id IS NOT NULL DO UPDATE SET url = EXCLUDED.url, album_id = EXCLUDED.album_id").
+		Columns("url", "source", "guild_id", "album_id", "file_id").
+		Values(img.URL, nullableString(img.Source), nullableString(img.GuildID), nullableInt(img.AlbumID), nullableInt64(img.FileID)).
+		Suffix("RETURNING id, url, COALESCE(source, ''), COALESCE(guild_id, ''), COALESCE(album_id, 0), COALESCE(file_id, 0)").
 		ToSql()
 	if err != nil {
-		return fmt.Errorf("ImagesRepo - UpsertByFileID - r.Builder: %w", err)
+		return entity.Image{}, fmt.Errorf("ImagesRepo - Insert - r.Builder: %w", err)
 	}
 
-	_, err = r.Pool.Exec(ctx, sql, args...)
+	var out entity.Image
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&out.ID, &out.URL, &out.Source, &out.GuildID, &out.AlbumID, &out.FileID); err != nil {
+		return entity.Image{}, fmt.Errorf("ImagesRepo - Insert - QueryRow: %w", err)
+	}
+	return out, nil
+}
+
+// Update updates image fields and returns updated row.
+func (r *ImagesRepo) Update(ctx context.Context, img entity.Image) (entity.Image, error) {
+	sql, args, err := r.Builder.
+		Update("images").
+		Set("url", img.URL).
+		Set("source", nullableString(img.Source)).
+		Set("guild_id", nullableString(img.GuildID)).
+		Set("album_id", nullableInt(img.AlbumID)).
+		Set("file_id", nullableInt64(img.FileID)).
+		Where("id = ?", img.ID).
+		Suffix("RETURNING id, url, COALESCE(source, ''), COALESCE(guild_id, ''), COALESCE(album_id, 0), COALESCE(file_id, 0)").
+		ToSql()
 	if err != nil {
-		return fmt.Errorf("ImagesRepo - UpsertByFileID - Exec: %w", err)
+		return entity.Image{}, fmt.Errorf("ImagesRepo - Update - r.Builder: %w", err)
+	}
+
+	var out entity.Image
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&out.ID, &out.URL, &out.Source, &out.GuildID, &out.AlbumID, &out.FileID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return entity.Image{}, fmt.Errorf("ImagesRepo - Update - image %d not found", img.ID)
+		}
+		return entity.Image{}, fmt.Errorf("ImagesRepo - Update - QueryRow: %w", err)
+	}
+	return out, nil
+}
+
+// Delete removes image by id.
+func (r *ImagesRepo) Delete(ctx context.Context, id int) error {
+	sql, args, err := r.Builder.Delete("images").Where("id = ?", id).ToSql()
+	if err != nil {
+		return fmt.Errorf("ImagesRepo - Delete - r.Builder: %w", err)
+	}
+	if _, err = r.Pool.Exec(ctx, sql, args...); err != nil {
+		return fmt.Errorf("ImagesRepo - Delete - Exec: %w", err)
+	}
+	return nil
+}
+
+// UpsertByFileID inserts or updates an image record keyed on file_id.
+// The returned bool reports whether a new row was inserted (vs. updated);
+// (xmax = 0) is true only for rows created by this statement.
+func (r *ImagesRepo) UpsertByFileID(ctx context.Context, img entity.Image) (bool, error) {
+	kind := img.Kind
+	if kind == "" {
+		kind = entity.MediaKindImage // satisfy the images.kind CHECK constraint
+	}
+	sql, args, err := r.Builder.
+		Insert("images").
+		Columns("file_id", "url", "source", "album_id", "kind", "size_bytes").
+		Values(img.FileID, img.URL, img.Source, img.AlbumID, kind, nullableInt64(img.SizeBytes)).
+		Suffix("ON CONFLICT (file_id) WHERE file_id IS NOT NULL DO UPDATE SET url = EXCLUDED.url, album_id = EXCLUDED.album_id, kind = EXCLUDED.kind, size_bytes = EXCLUDED.size_bytes RETURNING (xmax = 0)").
+		ToSql()
+	if err != nil {
+		return false, fmt.Errorf("ImagesRepo - UpsertByFileID - r.Builder: %w", err)
+	}
+
+	var inserted bool
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&inserted); err != nil {
+		return false, fmt.Errorf("ImagesRepo - UpsertByFileID - QueryRow: %w", err)
+	}
+	return inserted, nil
+}
+
+// SetPublicLink persists the permanent pCloud public share link for image id.
+func (r *ImagesRepo) SetPublicLink(ctx context.Context, id int, link string) error {
+	sql, args, err := r.Builder.
+		Update("images").
+		Set("public_link", link).
+		Where("id = ?", id).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("ImagesRepo - SetPublicLink - r.Builder: %w", err)
+	}
+	if _, err = r.Pool.Exec(ctx, sql, args...); err != nil {
+		return fmt.Errorf("ImagesRepo - SetPublicLink - Exec: %w", err)
 	}
 	return nil
 }
@@ -213,21 +437,9 @@ func (r *ImagesRepo) queryImages(ctx context.Context, caller, sqlStr string, arg
 
 	var images []entity.Image
 	for rows.Next() {
-		var e entity.Image
-		var source *string
-		var fileID *int64
-		var albumID *int
-		if err = rows.Scan(&e.ID, &e.URL, &source, &fileID, &albumID, &e.AlbumName); err != nil {
-			return nil, fmt.Errorf("%s - Scan: %w", caller, err)
-		}
-		if source != nil {
-			e.Source = *source
-		}
-		if fileID != nil {
-			e.FileID = *fileID
-		}
-		if albumID != nil {
-			e.AlbumID = *albumID
+		e, scanErr := scanImageRow(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("%s - Scan: %w", caller, scanErr)
 		}
 		images = append(images, e)
 	}
@@ -235,4 +447,25 @@ func (r *ImagesRepo) queryImages(ctx context.Context, caller, sqlStr string, arg
 		return nil, fmt.Errorf("%s - rows.Err: %w", caller, err)
 	}
 	return images, nil
+}
+
+func nullableString(v string) interface{} {
+	if v == "" {
+		return nil
+	}
+	return v
+}
+
+func nullableInt(v int) interface{} {
+	if v <= 0 {
+		return nil
+	}
+	return v
+}
+
+func nullableInt64(v int64) interface{} {
+	if v <= 0 {
+		return nil
+	}
+	return v
 }
