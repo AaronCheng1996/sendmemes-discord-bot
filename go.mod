@@ -13,7 +13,7 @@ tool (
 )
 
 require (
-	github.com/Conight/go-googletrans v0.2.4
+	github.com/Conight/go-googletrans v0.3.0
 	github.com/Masterminds/squirrel v1.5.4
 	github.com/ansrivas/fiberprometheus/v2 v2.16.0
 	github.com/bwmarrin/discordgo v0.28.1
