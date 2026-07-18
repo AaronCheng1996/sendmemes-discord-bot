@@ -14,6 +14,7 @@ type (
 		HTTP    HTTP
 		Log     Log
 		PG      PG
+		Admin   Admin
 		Discord Discord
 		PCloud  PCloud
 		Metrics Metrics
@@ -57,6 +58,10 @@ type (
 		GuildID       string `env:"DISCORD_GUILD_ID"`
 		// SendChannelID is the channel for scheduled periodic album sends.
 		SendChannelID string `env:"DISCORD_CHANNEL_ID"`
+		// NotifyChannelID is the channel for "new content discovered" sync
+		// notifications. Empty disables them. Per-guild DB override lives in
+		// discord_schedule_settings.notify_channel_id.
+		NotifyChannelID string `env:"DISCORD_NOTIFY_CHANNEL_ID"`
 		// SendInterval is how often to push a random album (Go duration string, e.g. "6h").
 		SendInterval string `env:"DISCORD_SEND_INTERVAL" envDefault:"6h"`
 		// SendHistorySize is the number of most-recently-sent albums to exclude from
@@ -68,13 +73,24 @@ type (
 		VerboseLog bool `env:"DISCORD_VERBOSE_LOG" envDefault:"true"`
 	}
 
+	// Admin controls privileged API access.
+	Admin struct {
+		APIKey string `env:"ADMIN_API_KEY"`
+	}
+
 	// PCloud holds credentials and settings for the pCloud integration.
 	// Auth priority: PCLOUD_ACCESS_TOKEN > PCLOUD_USERNAME + PCLOUD_PASSWORD.
+	// Note: pCloud does not support 2FA via API. Disable 2FA on the account if using username/password.
 	PCloud struct {
-		AccessToken  string `env:"PCLOUD_ACCESS_TOKEN"`
-		Username     string `env:"PCLOUD_USERNAME"`
-		Password     string `env:"PCLOUD_PASSWORD"`
-		RootFolderID int64  `env:"CLOUD_MAIN_FOLDER_ID" envDefault:"0"`
+		AccessToken string `env:"PCLOUD_ACCESS_TOKEN"`
+		// TokenType selects how AccessToken is sent to pCloud:
+		//   "session" (default) — sent as auth=   (pcauth cookie / userinfo getauth)
+		//   "oauth"             — sent as access_token=  (token from a registered pCloud OAuth app)
+		TokenType string `env:"PCLOUD_TOKEN_TYPE" envDefault:"session"`
+		Username  string `env:"PCLOUD_USERNAME"`
+		Password  string `env:"PCLOUD_PASSWORD"`
+		// RootFolderIDs is a comma-separated list of pCloud folder IDs to sync (e.g. "26096342557,26083978164").
+		RootFolderIDs []int64 `env:"CLOUD_MAIN_FOLDER_ID"`
 		// APIEndpoint is the pCloud REST base URL. Use https://eapi.pcloud.com for EU accounts.
 		APIEndpoint  string `env:"PCLOUD_API_ENDPOINT" envDefault:"https://api.pcloud.com"`
 		SyncInterval string `env:"PCLOUD_SYNC_INTERVAL" envDefault:"1h"`
