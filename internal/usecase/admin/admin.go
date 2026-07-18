@@ -24,6 +24,8 @@ type UseCase struct {
 	syncEvents  repo.SyncEventsRepo
 	system      repo.SystemRepo
 	runtime     usecase.AdminRuntime
+	// defaultSendMode is applied when CreateAlbum/UpdateAlbum omit a send mode.
+	defaultSendMode entity.AlbumSendMode
 }
 
 // New creates admin usecase.
@@ -37,17 +39,19 @@ func New(
 	syncEvents repo.SyncEventsRepo,
 	system repo.SystemRepo,
 	runtime usecase.AdminRuntime,
+	defaultSendMode entity.AlbumSendMode,
 ) *UseCase {
 	return &UseCase{
-		albums:      albums,
-		images:      images,
-		imagesUC:    imagesUC,
-		rules:       rules,
-		appSettings: appSettings,
-		audit:       audit,
-		syncEvents:  syncEvents,
-		system:      system,
-		runtime:     runtime,
+		albums:          albums,
+		images:          images,
+		imagesUC:        imagesUC,
+		rules:           rules,
+		appSettings:     appSettings,
+		audit:           audit,
+		syncEvents:      syncEvents,
+		system:          system,
+		runtime:         runtime,
+		defaultSendMode: defaultSendMode,
 	}
 }
 
@@ -105,7 +109,12 @@ func (uc *UseCase) GetAlbum(ctx context.Context, id int) (entity.Album, error) {
 	return uc.albums.GetByID(ctx, id)
 }
 
-func normalizeAlbumSendMode(sendMode entity.AlbumSendMode) (entity.AlbumSendMode, error) {
+// normalizeAlbumSendMode validates sendMode, substituting the configured
+// default when it is empty (instead of the hardcoded Random from ParseAlbumSendMode).
+func (uc *UseCase) normalizeAlbumSendMode(sendMode entity.AlbumSendMode) (entity.AlbumSendMode, error) {
+	if strings.TrimSpace(string(sendMode)) == "" {
+		return uc.defaultSendMode, nil
+	}
 	return entity.ParseAlbumSendMode(string(sendMode))
 }
 
@@ -126,7 +135,7 @@ func (uc *UseCase) CreateAlbum(ctx context.Context, name string, sendMode entity
 	if name == "" {
 		return entity.Album{}, fmt.Errorf("album name is required")
 	}
-	mode, err := normalizeAlbumSendMode(sendMode)
+	mode, err := uc.normalizeAlbumSendMode(sendMode)
 	if err != nil {
 		return entity.Album{}, err
 	}
@@ -142,7 +151,7 @@ func (uc *UseCase) UpdateAlbum(ctx context.Context, id int, name string, sendMod
 	if name == "" {
 		return entity.Album{}, fmt.Errorf("album name is required")
 	}
-	mode, err := normalizeAlbumSendMode(sendMode)
+	mode, err := uc.normalizeAlbumSendMode(sendMode)
 	if err != nil {
 		return entity.Album{}, err
 	}

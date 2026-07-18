@@ -71,6 +71,10 @@ type (
 		// VerboseLog enables info-level logging for every bot request and scheduled
 		// send (received, completed, per-batch progress for full_album).
 		VerboseLog bool `env:"DISCORD_VERBOSE_LOG" envDefault:"true"`
+		// AlbumDefaultSendMode is the send_mode assigned to albums created by the
+		// pCloud sync and to admin CreateAlbum calls that omit a mode. Validated at
+		// startup; one of Order/Random/Single/Video/Custom.
+		AlbumDefaultSendMode string `env:"ALBUM_DEFAULT_SEND_MODE" envDefault:"Random"`
 	}
 
 	// Admin controls privileged API access.

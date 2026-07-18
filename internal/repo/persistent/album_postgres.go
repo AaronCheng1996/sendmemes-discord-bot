@@ -221,13 +221,14 @@ func (r *AlbumsRepo) Create(ctx context.Context, name string, sendMode entity.Al
 }
 
 // GetOrCreate returns the album with the given name, creating it if it does not
-// exist. The returned bool reports whether a new row was created; (xmax = 0) is
-// true only for rows created by this statement.
-func (r *AlbumsRepo) GetOrCreate(ctx context.Context, name string) (entity.Album, bool, error) {
+// exist with defaultMode as its send_mode. The returned bool reports whether a
+// new row was created; (xmax = 0) is true only for rows created by this
+// statement. Existing albums keep their stored send_mode.
+func (r *AlbumsRepo) GetOrCreate(ctx context.Context, name string, defaultMode entity.AlbumSendMode) (entity.Album, bool, error) {
 	sql, args, err := r.Builder.
 		Insert("albums").
 		Columns("name", "send_mode", "send_config_json").
-		Values(name, entity.AlbumSendModeRandom, sq.Expr("'{}'::jsonb")).
+		Values(name, defaultMode, sq.Expr("'{}'::jsonb")).
 		Suffix("ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id, name, has_cover, COALESCE(cover_image_id, 0), send_mode, COALESCE(send_config_json::text, ''), last_sent_at, COALESCE(positive_rating, 0), (xmax = 0)").
 		ToSql()
 	if err != nil {

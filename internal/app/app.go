@@ -64,7 +64,12 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	if err = pcloudClient.Login(context.Background()); err != nil {
 		l.Fatal(fmt.Errorf("app - Run - pcloudClient.Login: %w", err))
 	}
-	syncUseCase := syncuc.New(pcloudClient, albumsRepo, imagesRepo, syncEventsRepo, cfg.PCloud.RootFolderIDs)
+	// Validate the configured default album send mode once, fail fast on garbage.
+	defaultSendMode, err := entity.ParseAlbumSendMode(cfg.Discord.AlbumDefaultSendMode)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - invalid ALBUM_DEFAULT_SEND_MODE: %w", err))
+	}
+	syncUseCase := syncuc.New(pcloudClient, albumsRepo, imagesRepo, syncEventsRepo, cfg.PCloud.RootFolderIDs, defaultSendMode)
 
 	// Use-Case: images, delivery rules, app settings
 	imagesUseCase := images.New(imagesRepo, albumsRepo, pcloudClient, cfg.HTTP.PublicURL)
@@ -86,7 +91,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		l.Fatal(fmt.Errorf("app - Run - discord.NewBot: %w", err))
 	}
 	discordBot.Start()
-	adminUseCase := adminuc.New(albumsRepo, imagesRepo, imagesUseCase, rulesUseCase, appSettingsUseCase, adminAuditRepo, syncEventsRepo, systemRepo, discordBot)
+	adminUseCase := adminuc.New(albumsRepo, imagesRepo, imagesUseCase, rulesUseCase, appSettingsUseCase, adminAuditRepo, syncEventsRepo, systemRepo, discordBot, defaultSendMode)
 
 	// HTTP Server (REST API)
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))

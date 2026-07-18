@@ -114,6 +114,7 @@ Highlights:
 | `DISCORD_TOKEN`, `DISCORD_APPLICATION_ID`, `DISCORD_GUILD_ID` | Discord bot identity |
 | `DISCORD_CHANNEL_ID`, `DISCORD_SEND_INTERVAL`, `DISCORD_SEND_HISTORY_SIZE` | Seed the default **scheduled** delivery rule (once, when `delivery_rules` is empty) |
 | `DISCORD_NOTIFY_CHANNEL_ID` | Seeds default **new_album** + **new_files** rules (once, when `delivery_rules` is empty; empty = no notify rules) |
+| `ALBUM_DEFAULT_SEND_MODE` | Default `send_mode` for albums created by pCloud sync and admin creates that omit one (`Order`/`Random`/`Single`/`Video`/`Custom`, default `Random`) |
 | `PCLOUD_ACCESS_TOKEN` *or* `PCLOUD_USERNAME` + `PCLOUD_PASSWORD` | pCloud authentication. `PCLOUD_TOKEN_TYPE=session` (default, sent as `auth=`) or `oauth` (sent as `access_token=`); pCloud's API does not support 2FA |
 | `CLOUD_MAIN_FOLDER_ID` | Comma-separated pCloud folder IDs holding album subfolders |
 | `PCLOUD_API_ENDPOINT` | `https://api.pcloud.com` (US) or `https://eapi.pcloud.com` (EU) |

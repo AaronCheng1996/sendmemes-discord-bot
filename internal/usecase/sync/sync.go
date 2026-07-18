@@ -20,21 +20,24 @@ const (
 
 // UseCase synchronises the pCloud folder tree with the database.
 type UseCase struct {
-	pcloud    repo.PCloudAPI
-	albums    repo.AlbumsRepo
-	images    repo.ImagesRepo
-	events    repo.SyncEventsRepo
-	folderIDs []int64
+	pcloud      repo.PCloudAPI
+	albums      repo.AlbumsRepo
+	images      repo.ImagesRepo
+	events      repo.SyncEventsRepo
+	folderIDs   []int64
+	defaultMode entity.AlbumSendMode // send_mode for albums created during sync
 }
 
-// New creates a new sync use case.
-func New(pcloud repo.PCloudAPI, albums repo.AlbumsRepo, images repo.ImagesRepo, events repo.SyncEventsRepo, folderIDs []int64) *UseCase {
+// New creates a new sync use case. defaultMode is the send_mode assigned to
+// albums newly created during a sync (existing albums keep their stored mode).
+func New(pcloud repo.PCloudAPI, albums repo.AlbumsRepo, images repo.ImagesRepo, events repo.SyncEventsRepo, folderIDs []int64, defaultMode entity.AlbumSendMode) *UseCase {
 	return &UseCase{
-		pcloud:    pcloud,
-		albums:    albums,
-		images:    images,
-		events:    events,
-		folderIDs: folderIDs,
+		pcloud:      pcloud,
+		albums:      albums,
+		images:      images,
+		events:      events,
+		folderIDs:   folderIDs,
+		defaultMode: defaultMode,
 	}
 }
 
@@ -77,7 +80,7 @@ func (uc *UseCase) SyncImages(ctx context.Context) (entity.SyncReport, error) {
 	stats := make(map[string]*albumSyncStats)
 
 	for _, entry := range entries {
-		album, created, err := uc.albums.GetOrCreate(ctx, entry.ParentFolderName)
+		album, created, err := uc.albums.GetOrCreate(ctx, entry.ParentFolderName, uc.defaultMode)
 		if err != nil {
 			return report, fmt.Errorf("SyncUseCase - SyncImages - GetOrCreate album %q: %w", entry.ParentFolderName, err)
 		}

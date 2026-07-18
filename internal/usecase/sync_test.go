@@ -12,6 +12,10 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
+// testDefaultSendMode is the configured default send mode threaded through the
+// sync use case into GetOrCreate; a non-Random value proves it is passed through.
+const testDefaultSendMode = entity.AlbumSendModeSingle
+
 func syncUseCase(t *testing.T) (*syncuc.UseCase, *MockPCloudAPI, *MockAlbumsRepo, *MockImagesRepo, *MockSyncEventsRepo) {
 	t.Helper()
 
@@ -23,7 +27,7 @@ func syncUseCase(t *testing.T) (*syncuc.UseCase, *MockPCloudAPI, *MockAlbumsRepo
 	images := NewMockImagesRepo(mockCtl)
 	events := NewMockSyncEventsRepo(mockCtl)
 
-	useCase := syncuc.New(pcloud, albums, images, events, []int64{1})
+	useCase := syncuc.New(pcloud, albums, images, events, []int64{1}, testDefaultSendMode)
 
 	return useCase, pcloud, albums, images, events
 }
@@ -54,9 +58,9 @@ func TestSyncImagesReportsDiscoveries(t *testing.T) {
 	}, nil)
 
 	// AlbumA is created on first sight, then updated on the second file.
-	albums.EXPECT().GetOrCreate(ctx, "AlbumA").Return(albumA, true, nil)
-	albums.EXPECT().GetOrCreate(ctx, "AlbumA").Return(albumA, false, nil)
-	albums.EXPECT().GetOrCreate(ctx, "AlbumB").Return(albumB, false, nil)
+	albums.EXPECT().GetOrCreate(ctx, "AlbumA", testDefaultSendMode).Return(albumA, true, nil)
+	albums.EXPECT().GetOrCreate(ctx, "AlbumA", testDefaultSendMode).Return(albumA, false, nil)
+	albums.EXPECT().GetOrCreate(ctx, "AlbumB", testDefaultSendMode).Return(albumB, false, nil)
 
 	images.EXPECT().UpsertByFileID(ctx, entity.Image{
 		FileID: 11, URL: "1.jpg", Source: "pcloud", AlbumID: 1, Kind: entity.MediaKindImage, SizeBytes: 100,
@@ -110,7 +114,7 @@ func TestSyncImagesInitialImport(t *testing.T) {
 	pcloud.EXPECT().ListFolder(ctx, int64(1)).Return([]repo.PCloudEntry{
 		{FileID: 11, Name: "a.jpg", ParentFolderName: "First", Kind: entity.MediaKindImage, Size: 10},
 	}, nil)
-	albums.EXPECT().GetOrCreate(ctx, "First").Return(album, true, nil)
+	albums.EXPECT().GetOrCreate(ctx, "First", testDefaultSendMode).Return(album, true, nil)
 	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(true, nil)
 	noCoverCleanup(ctx, albums, images, album, []int64{11})
 
@@ -141,7 +145,7 @@ func TestSyncImagesNoNewContent(t *testing.T) {
 	pcloud.EXPECT().ListFolder(ctx, int64(1)).Return([]repo.PCloudEntry{
 		{FileID: 31, Name: "same.jpg", ParentFolderName: "Stable", Kind: entity.MediaKindImage, Size: 10},
 	}, nil)
-	albums.EXPECT().GetOrCreate(ctx, "Stable").Return(album, false, nil)
+	albums.EXPECT().GetOrCreate(ctx, "Stable", testDefaultSendMode).Return(album, false, nil)
 	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(false, nil)
 	noCoverCleanup(ctx, albums, images, album, []int64{31})
 

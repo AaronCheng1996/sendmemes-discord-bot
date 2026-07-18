@@ -223,9 +223,9 @@ func (mr *MockAlbumsRepoMockRecorder) GetByName(ctx, name any) *gomock.Call {
 }
 
 // GetOrCreate mocks base method.
-func (m *MockAlbumsRepo) GetOrCreate(ctx context.Context, name string) (entity.Album, bool, error) {
+func (m *MockAlbumsRepo) GetOrCreate(ctx context.Context, name string, defaultMode entity.AlbumSendMode) (entity.Album, bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetOrCreate", ctx, name)
+	ret := m.ctrl.Call(m, "GetOrCreate", ctx, name, defaultMode)
 	ret0, _ := ret[0].(entity.Album)
 	ret1, _ := ret[1].(bool)
 	ret2, _ := ret[2].(error)
@@ -233,9 +233,9 @@ func (m *MockAlbumsRepo) GetOrCreate(ctx context.Context, name string) (entity.A
 }
 
 // GetOrCreate indicates an expected call of GetOrCreate.
-func (mr *MockAlbumsRepoMockRecorder) GetOrCreate(ctx, name any) *gomock.Call {
+func (mr *MockAlbumsRepoMockRecorder) GetOrCreate(ctx, name, defaultMode any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrCreate", reflect.TypeOf((*MockAlbumsRepo)(nil).GetOrCreate), ctx, name)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrCreate", reflect.TypeOf((*MockAlbumsRepo)(nil).GetOrCreate), ctx, name, defaultMode)
 }
 
 // GetRandom mocks base method.

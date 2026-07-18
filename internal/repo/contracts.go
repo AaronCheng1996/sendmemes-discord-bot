@@ -37,8 +37,9 @@ type (
 		GetByID(ctx context.Context, id int) (entity.Album, error)
 		Create(ctx context.Context, name string, sendMode entity.AlbumSendMode, sendConfigJSON string) (entity.Album, error)
 		// GetOrCreate returns the album with the given name, creating it when
-		// missing. The bool reports whether a new row was created.
-		GetOrCreate(ctx context.Context, name string) (entity.Album, bool, error)
+		// missing with defaultMode as its send_mode. The bool reports whether a
+		// new row was created (existing albums keep their stored mode).
+		GetOrCreate(ctx context.Context, name string, defaultMode entity.AlbumSendMode) (entity.Album, bool, error)
 		GetByName(ctx context.Context, name string) (entity.Album, error)
 		GetRandom(ctx context.Context) (entity.Album, error)
 		Update(ctx context.Context, id int, name string, sendMode entity.AlbumSendMode, sendConfigJSON string) (entity.Album, error)
