@@ -32,7 +32,7 @@ const (
 
 	// videoUploadLimit is a conservative default bot attachment cap for
 	// non-boosted guilds. Videos larger than this (or of unknown size) are
-	// delivered as a temporary streaming link instead of a file attachment.
+	// delivered as a permanent pCloud public link instead of a file attachment.
 	videoUploadLimit = 10 * 1024 * 1024
 
 	// downloadTimeout is used for both pCloud downloads and Discord uploads.
@@ -462,7 +462,7 @@ func (b *Bot) downloadAndFit(ctx context.Context, imgs []entity.Image) ([]*disco
 //   - Random/Custom/default: a size-fitted batch of random images (cover-first).
 //   - Single: exactly one image.
 //   - Order: an ordered comic; first chunk to the channel, rest to a thread.
-//   - Video: one random video as an attachment (small) or streaming link (large).
+//   - Video: one random video as an attachment (small) or public link (large).
 func (b *Bot) deliverAlbum(ctx context.Context, channelID string, album entity.Album, captionPrefix string) *discordgo.Message {
 	switch album.SendMode {
 	case entity.AlbumSendModeSingle:
@@ -559,7 +559,7 @@ func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.A
 
 // deliverVideo posts one random video from the album. Videos within
 // videoUploadLimit are uploaded as attachments; larger or unknown-size videos are
-// posted as a temporary streaming link. Returns nil (sending nothing) when the
+// posted as a permanent pCloud public link. Returns nil (sending nothing) when the
 // album has no videos.
 func (b *Bot) deliverVideo(ctx context.Context, channelID string, album entity.Album, captionPrefix string) *discordgo.Message {
 	video, found, err := b.imagesUC.GetRandomVideo(ctx, album.ID)
@@ -582,13 +582,13 @@ func (b *Bot) deliverVideo(ctx context.Context, channelID string, album entity.A
 		return b.channelSendFiles(b.session, channelID, caption, files)
 	}
 
-	// Over the upload limit or unknown size: fall back to a streaming link.
-	url, rerr := b.imagesUC.ResolveURL(ctx, video)
+	// Over the upload limit or unknown size: fall back to a permanent public link.
+	url, rerr := b.imagesUC.ResolvePublicURL(ctx, video)
 	if rerr != nil {
-		b.l.Error(fmt.Errorf("deliverAlbum video ResolveURL %q: %w", album.Name, rerr))
+		b.l.Error(fmt.Errorf("deliverAlbum video ResolvePublicURL %q: %w", album.Name, rerr))
 		return nil
 	}
-	content := fmt.Sprintf("**%s**\n%s\n_(streaming link — expires after a few hours)_", caption, url)
+	content := fmt.Sprintf("**%s**\n%s", caption, url)
 	msg, serr := b.session.ChannelMessageSend(channelID, content)
 	if serr != nil {
 		b.l.Error(fmt.Errorf("deliverAlbum video ChannelMessageSend %q: %w", album.Name, serr))

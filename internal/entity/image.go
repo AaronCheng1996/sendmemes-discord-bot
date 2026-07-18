@@ -24,4 +24,8 @@ type Image struct {
 	// PreviewURL is resolved on demand by the admin list endpoint and is not persisted.
 	// pCloud links are temporary; the caller is expected to re-fetch when needed.
 	PreviewURL string `json:"preview_url,omitempty"`
+	// PublicLink is a permanent pCloud public share URL (from getfilepublink).
+	// Unlike temporary download links it never expires and is not IP-bound, so it
+	// is persisted once and reused. Empty until first resolved.
+	PublicLink string `json:"public_link,omitempty"`
 }

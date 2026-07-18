@@ -85,6 +85,8 @@ type (
 		// FindCoverByAlbum returns the image in albumID whose filename matches
 		// the cover convention (cover.* or _cover.*), case-insensitive.
 		FindCoverByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error)
+		// SetPublicLink persists the permanent pCloud public share link for image id.
+		SetPublicLink(ctx context.Context, id int, link string) error
 	}
 
 	// DeliveryRulesRepo manages configurable Discord delivery rules.
@@ -128,5 +130,9 @@ type (
 	PCloudAPI interface {
 		ListFolder(ctx context.Context, folderID int64) ([]PCloudEntry, error)
 		GetFileLink(ctx context.Context, fileID int64) (string, error)
+		// GetFilePublicLink returns a permanent, non-IP-bound public share URL
+		// for a file (pCloud getfilepublink). The link never expires, so callers
+		// persist it rather than regenerating per request.
+		GetFilePublicLink(ctx context.Context, fileID int64) (string, error)
 	}
 )

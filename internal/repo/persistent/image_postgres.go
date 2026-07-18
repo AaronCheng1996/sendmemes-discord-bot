@@ -26,7 +26,7 @@ func NewImagesRepo(pg *postgres.Postgres) *ImagesRepo {
 
 func imageSelectBuilder(r *ImagesRepo) sq.SelectBuilder {
 	return r.Builder.
-		Select("i.id", "i.url", "i.source", "i.file_id", "i.album_id", "COALESCE(i.guild_id, '')", "COALESCE(a.name, '')", "i.kind", "COALESCE(i.size_bytes, 0)").
+		Select("i.id", "i.url", "i.source", "i.file_id", "i.album_id", "COALESCE(i.guild_id, '')", "COALESCE(a.name, '')", "i.kind", "COALESCE(i.size_bytes, 0)", "COALESCE(i.public_link, '')").
 		From("images i").
 		LeftJoin("albums a ON a.id = i.album_id")
 }
@@ -37,7 +37,7 @@ func scanImageRow(row pgx.Row) (entity.Image, error) {
 	var fileID *int64
 	var albumID *int
 	var guildID string
-	if err := row.Scan(&e.ID, &e.URL, &source, &fileID, &albumID, &guildID, &e.AlbumName, &e.Kind, &e.SizeBytes); err != nil {
+	if err := row.Scan(&e.ID, &e.URL, &source, &fileID, &albumID, &guildID, &e.AlbumName, &e.Kind, &e.SizeBytes, &e.PublicLink); err != nil {
 		return entity.Image{}, err
 	}
 	if source != nil {
@@ -387,6 +387,22 @@ func (r *ImagesRepo) UpsertByFileID(ctx context.Context, img entity.Image) (bool
 		return false, fmt.Errorf("ImagesRepo - UpsertByFileID - QueryRow: %w", err)
 	}
 	return inserted, nil
+}
+
+// SetPublicLink persists the permanent pCloud public share link for image id.
+func (r *ImagesRepo) SetPublicLink(ctx context.Context, id int, link string) error {
+	sql, args, err := r.Builder.
+		Update("images").
+		Set("public_link", link).
+		Where("id = ?", id).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("ImagesRepo - SetPublicLink - r.Builder: %w", err)
+	}
+	if _, err = r.Pool.Exec(ctx, sql, args...); err != nil {
+		return fmt.Errorf("ImagesRepo - SetPublicLink - Exec: %w", err)
+	}
+	return nil
 }
 
 // DeleteByAlbumNotInFileIDs removes pCloud images in albumID whose file_id is not in fileIDs.

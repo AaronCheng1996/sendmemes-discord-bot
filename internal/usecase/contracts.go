@@ -60,6 +60,10 @@ type (
 		// ResolveURL returns a public URL suitable for a Discord embed.
 		// For pCloud images it calls GetFileLink; for local paths it prepends HTTP_PUBLIC_URL.
 		ResolveURL(ctx context.Context, img entity.Image) (string, error)
+		// ResolvePublicURL returns a permanent pCloud public share URL for img,
+		// persisting it on first resolution. Unlike ResolveURL the link never
+		// expires and is not IP-bound. Non-pCloud images fall back to ResolveURL.
+		ResolvePublicURL(ctx context.Context, img entity.Image) (string, error)
 	}
 
 	Sync interface {

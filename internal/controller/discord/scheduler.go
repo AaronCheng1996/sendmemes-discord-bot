@@ -89,7 +89,7 @@ func (b *Bot) notifySyncEvents(ctx context.Context, report entity.SyncReport) {
 
 // postDiscoveredMedia posts an event's newly discovered media to channelID: new
 // images are merged into one size-fitted attachment message (up to
-// albumBatchSize), new videos are posted as pCloud streaming links (never
+// albumBatchSize), new videos are posted as permanent pCloud public links (never
 // uploaded). Falls back to a plain text summary when nothing can be resolved.
 func (b *Bot) postDiscoveredMedia(ctx context.Context, channelID string, ev entity.SyncEvent) {
 	caption := formatSyncEventMessage(ev)
@@ -125,16 +125,16 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, channelID string, ev enti
 		}
 	}
 
-	// New videos: streaming links only (per configuration, never uploaded).
+	// New videos: permanent public links only (per configuration, never uploaded).
 	if len(videos) > 0 {
 		links := make([]string, 0, maxNotifyVideoLinks)
 		for i, v := range videos {
 			if i >= maxNotifyVideoLinks {
 				break
 			}
-			url, err := b.imagesUC.ResolveURL(ctx, v)
+			url, err := b.imagesUC.ResolvePublicURL(ctx, v)
 			if err != nil {
-				b.l.Error(fmt.Errorf("postDiscoveredMedia ResolveURL %q: %w", ev.AlbumName, err))
+				b.l.Error(fmt.Errorf("postDiscoveredMedia ResolvePublicURL %q: %w", ev.AlbumName, err))
 				continue
 			}
 			links = append(links, url)
@@ -149,7 +149,6 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, channelID string, ev enti
 			if len(videos) > len(links) {
 				fmt.Fprintf(&sb, "\n…and %d more video(s)", len(videos)-len(links))
 			}
-			sb.WriteString("\n_(streaming links — expire after a few hours)_")
 			if _, err := b.session.ChannelMessageSend(channelID, sb.String()); err != nil {
 				b.l.Error(fmt.Errorf("postDiscoveredMedia video links %q: %w", ev.AlbumName, err))
 			} else {

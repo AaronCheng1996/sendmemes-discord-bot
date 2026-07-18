@@ -30,11 +30,11 @@ keeps that structure: `cmd/`, `config/`, `internal/{app,entity,usecase,repo,cont
   `Random` (size-fitted batch of images), `Order` (comic pages in natural
   filename order; long albums continue in a thread), `Single` (one image),
   `Video` (one random video — uploaded as an attachment when ≤ 10 MB,
-  otherwise posted as a temporary pCloud streaming link). Set it from the
+  otherwise posted as a permanent pCloud public link). Set it from the
   admin UI or the `/album_mode` slash command.
 - **Rich sync notifications** — `new_album` / `new_files` rules post the actual
   discovered media: new images merged into one size-fitted message (up to 10),
-  new videos as pCloud streaming links. The first-ever import is suppressed to
+  new videos as permanent pCloud public links. The first-ever import is suppressed to
   avoid flooding, and every discovery is also stored for the Activity page.
 - **Reaction feedback** — any non-bot reaction on a scheduled message
   increments the album's `positive_rating` (in-memory map of the latest 200

@@ -92,6 +92,12 @@ type pcloudFileLinkResponse struct {
 	Path   string   `json:"path"`
 }
 
+type pcloudPublicLinkResponse struct {
+	Result int    `json:"result"`
+	Error  string `json:"error"`
+	Link   string `json:"link"`
+}
+
 type pcloudUserInfoResponse struct {
 	Result int    `json:"result"`
 	Error  string `json:"error"`
@@ -504,4 +510,88 @@ func (c *PCloudClient) doGetFileLink(ctx context.Context, fileID int64) (string,
 		return "", fmt.Errorf("PCloudClient - GetFileLink - no hosts returned")
 	}
 	return "https://" + result.Hosts[0] + result.Path, nil
+}
+
+// ---------------------------------------------------------------------------
+// GetFilePublicLink
+// ---------------------------------------------------------------------------
+
+// GetFilePublicLink returns a permanent public share URL for a pCloud file
+// (getfilepublink). Unlike GetFileLink the URL is not bound to the caller's IP
+// and never expires, so the caller persists it instead of relying on the
+// in-memory TTL cache. getfilepublink is idempotent: if a public link already
+// exists for the file, the existing one is returned.
+// Retries up to pcloudMaxRetries times; re-logs in if the token has expired.
+func (c *PCloudClient) GetFilePublicLink(ctx context.Context, fileID int64) (string, error) {
+	var lastErr error
+	backoff := pcloudRetryBase
+	needRelogin := false
+
+	for attempt := 1; attempt <= pcloudMaxRetries; attempt++ {
+		if attempt > 1 {
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+			backoff *= 2
+
+			if needRelogin && c.username != "" {
+				if rerr := c.relogin(ctx); rerr != nil {
+					return "", fmt.Errorf("PCloudClient - GetFilePublicLink - relogin: %w", rerr)
+				}
+				needRelogin = false
+			}
+		}
+
+		link, err := c.doGetFilePublicLink(ctx, fileID)
+		if err == nil {
+			return link, nil
+		}
+		lastErr = err
+		if isTokenErr(err) {
+			needRelogin = true
+			// Clear cached token so relogin proceeds.
+			c.mu.Lock()
+			c.token = ""
+			c.tokenParam = ""
+			c.mu.Unlock()
+			continue
+		}
+		return "", err // non-retriable
+	}
+	return "", fmt.Errorf("PCloudClient - GetFilePublicLink - all %d attempts failed: %w", pcloudMaxRetries, lastErr)
+}
+
+func (c *PCloudClient) doGetFilePublicLink(ctx context.Context, fileID int64) (string, error) {
+	if err := c.acquire(ctx); err != nil {
+		return "", err
+	}
+	defer c.release()
+
+	apiURL := fmt.Sprintf("%s/getfilepublink?fileid=%d&%s",
+		c.apiEndpoint, fileID, c.authQuery())
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("PCloudClient - GetFilePublicLink - NewRequest: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("PCloudClient - GetFilePublicLink - Do: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result pcloudPublicLinkResponse
+	if err = json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("PCloudClient - GetFilePublicLink - Decode: %w", err)
+	}
+	if result.Result != 0 {
+		return "", fmt.Errorf("PCloudClient - GetFilePublicLink - API error %d: %s", result.Result, result.Error)
+	}
+	if result.Link == "" {
+		return "", fmt.Errorf("PCloudClient - GetFilePublicLink - no link returned")
+	}
+	return result.Link, nil
 }

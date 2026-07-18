@@ -252,3 +252,26 @@ func (uc *UseCase) ResolveURL(ctx context.Context, img entity.Image) (string, er
 	}
 	return img.URL, nil
 }
+
+// ResolvePublicURL returns a permanent pCloud public share URL for img.
+// When img already carries a stored PublicLink it is returned directly (no API
+// call). Otherwise a public link is created via the pCloud API, persisted so
+// future lookups skip the call, and returned. Public links are not IP-bound and
+// never expire, unlike the temporary links from ResolveURL. Non-pCloud images
+// fall back to ResolveURL.
+func (uc *UseCase) ResolvePublicURL(ctx context.Context, img entity.Image) (string, error) {
+	if img.Source != "pcloud" {
+		return uc.ResolveURL(ctx, img)
+	}
+	if img.PublicLink != "" {
+		return img.PublicLink, nil
+	}
+	link, err := uc.pcloud.GetFilePublicLink(ctx, img.FileID)
+	if err != nil {
+		return "", fmt.Errorf("ImagesUseCase - ResolvePublicURL - GetFilePublicLink fileID=%d: %w", img.FileID, err)
+	}
+	if err := uc.repo.SetPublicLink(ctx, img.ID, link); err != nil {
+		return "", fmt.Errorf("ImagesUseCase - ResolvePublicURL - SetPublicLink id=%d: %w", img.ID, err)
+	}
+	return link, nil
+}
