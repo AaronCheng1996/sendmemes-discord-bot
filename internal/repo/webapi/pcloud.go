@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo"
 )
 
@@ -27,6 +28,11 @@ const (
 
 	// pcloudRetryBase is the initial backoff duration; it doubles each retry.
 	pcloudRetryBase = 500 * time.Millisecond
+
+	// pcloudFileLinkTTL bounds how long a cached getfilelink URL is reused.
+	// pCloud's signed download URLs are typically valid for several hours; we
+	// expire well below that to stay safe and pick up server hostname changes.
+	pcloudFileLinkTTL = 50 * time.Minute
 )
 
 // isTokenErr returns true when err signals that the pCloud session token
@@ -47,9 +53,21 @@ func isTokenErr(err error) bool {
 		strings.Contains(s, "API error 2094") // Invalid access_token
 }
 
-// imageExtensions is the set of file extensions treated as images.
-var imageExtensions = map[string]struct{}{
-	".jpg": {}, ".jpeg": {}, ".png": {}, ".gif": {}, ".webp": {},
+// mediaExtensions maps a lowercased file extension to its media kind
+// (entity.MediaKindImage or entity.MediaKindVideo). Extensions absent from the
+// map are ignored during folder walks.
+var mediaExtensions = map[string]string{
+	".jpg":  entity.MediaKindImage,
+	".jpeg": entity.MediaKindImage,
+	".png":  entity.MediaKindImage,
+	".gif":  entity.MediaKindImage,
+	".webp": entity.MediaKindImage,
+	".mp4":  entity.MediaKindVideo,
+	".webm": entity.MediaKindVideo,
+	".mov":  entity.MediaKindVideo,
+	".m4v":  entity.MediaKindVideo,
+	".mkv":  entity.MediaKindVideo,
+	".avi":  entity.MediaKindVideo,
 }
 
 // pcloudMeta mirrors the JSON structure returned by pCloud's listfolder API.
@@ -57,6 +75,7 @@ type pcloudMeta struct {
 	Name     string       `json:"name"`
 	IsFolder bool         `json:"isfolder"`
 	FileID   int64        `json:"fileid"`
+	Size     int64        `json:"size"`
 	Contents []pcloudMeta `json:"contents"`
 }
 
@@ -73,6 +92,12 @@ type pcloudFileLinkResponse struct {
 	Path   string   `json:"path"`
 }
 
+type pcloudPublicLinkResponse struct {
+	Result int    `json:"result"`
+	Error  string `json:"error"`
+	Link   string `json:"link"`
+}
+
 type pcloudUserInfoResponse struct {
 	Result int    `json:"result"`
 	Error  string `json:"error"`
@@ -85,10 +110,18 @@ type pcloudUserInfoResponse struct {
 // pCloud uses two different query parameter names depending on how the token was obtained:
 //   - OAuth2 token  →  access_token=TOKEN
 //   - Session token (from username/password login)  →  auth=TOKEN
+//
+// fileLinkCacheEntry holds a pCloud getfilelink result with its expiry.
+type fileLinkCacheEntry struct {
+	url       string
+	expiresAt time.Time
+}
+
 type PCloudClient struct {
 	mu          sync.RWMutex
 	token       string // current token value
-	tokenParam  string // "access_token" or "auth"
+	tokenParam  string // "auth" for session tokens, "access_token" for OAuth tokens
+	oauth       bool   // true when the pre-set token is an OAuth2 access token
 	username    string
 	password    string
 	apiEndpoint string
@@ -101,22 +134,39 @@ type PCloudClient struct {
 	// loginMu serialises re-login so that when many goroutines detect a
 	// token error at the same time only one issues the userinfo request.
 	loginMu sync.Mutex
+
+	// fileLinkCache memoizes getfilelink responses by file_id.
+	// pCloud returns expensive temporary URLs that stay valid for hours; this
+	// cache prevents N pCloud calls per admin list refresh and benefits Discord
+	// embeds when the same image is sent multiple times within the TTL window.
+	fileLinkMu    sync.RWMutex
+	fileLinkCache map[int64]fileLinkCacheEntry
 }
 
 // NewPCloudClient creates a new pCloud API client.
-// If accessToken is non-empty it is used directly as an OAuth token (access_token param).
-// Otherwise call Login(ctx) once at startup to exchange username/password for a session token (auth param).
-func NewPCloudClient(accessToken, username, password, apiEndpoint string) *PCloudClient {
+//
+// If accessToken is non-empty it is used directly and tokenType decides how it
+// is sent to pCloud: "oauth" → access_token= (token from a registered pCloud
+// OAuth app), anything else → auth= (a session token, e.g. the pcauth cookie).
+// When accessToken is empty, call Login(ctx) once at startup to exchange
+// username/password for a session token (sent as auth=).
+func NewPCloudClient(accessToken, tokenType, username, password, apiEndpoint string) *PCloudClient {
 	c := &PCloudClient{
-		username:    username,
-		password:    password,
-		apiEndpoint: strings.TrimSuffix(apiEndpoint, "/"),
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
-		sem:         make(chan struct{}, pcloudMaxConcurrent),
+		username:      username,
+		password:      password,
+		apiEndpoint:   strings.TrimSuffix(apiEndpoint, "/"),
+		httpClient:    &http.Client{Timeout: 30 * time.Second},
+		sem:           make(chan struct{}, pcloudMaxConcurrent),
+		fileLinkCache: make(map[int64]fileLinkCacheEntry),
 	}
 	if accessToken != "" {
 		c.token = accessToken
-		c.tokenParam = "access_token"
+		if strings.EqualFold(strings.TrimSpace(tokenType), "oauth") {
+			c.tokenParam = "access_token"
+			c.oauth = true
+		} else {
+			c.tokenParam = "auth" // session tokens (pcauth cookie / userinfo getauth) use auth=
+		}
 	}
 	return c
 }
@@ -159,7 +209,6 @@ func (c *PCloudClient) doLogin(ctx context.Context) error {
 		url.QueryEscape(c.username),
 		url.QueryEscape(c.password),
 	)
-
 	var lastErr error
 	backoff := pcloudRetryBase
 	for attempt := 1; attempt <= pcloudMaxRetries; attempt++ {
@@ -212,6 +261,13 @@ func (c *PCloudClient) doLogin(ctx context.Context) error {
 // If another goroutine already re-logged in while this one was waiting, the
 // cached token is used directly without making another API call.
 func (c *PCloudClient) relogin(ctx context.Context) error {
+	// OAuth access tokens are permanent (until revoked) and have no
+	// username/password refresh path. Falling back to username/password here
+	// would both be wrong and surface a misleading verification-code error, so
+	// fail clearly instead.
+	if c.oauth {
+		return fmt.Errorf("PCloudClient - relogin: OAuth access token rejected (revoked or wrong region); re-authorize the pCloud app for a new PCLOUD_ACCESS_TOKEN")
+	}
 	if c.username == "" {
 		return fmt.Errorf("PCloudClient - relogin: no username/password configured for token refresh")
 	}
@@ -319,27 +375,31 @@ func (c *PCloudClient) doListFolder(ctx context.Context, folderID int64) ([]repo
 		if !child.IsFolder {
 			continue
 		}
-		collectImages(child, child.Name, &entries)
+		collectMedia(child, child.Name, &entries)
 	}
 	return entries, nil
 }
 
-// collectImages recursively walks a pCloud folder tree node.
-// albumName is always the leaf folder name containing the image file.
-func collectImages(node pcloudMeta, albumName string, out *[]repo.PCloudEntry) {
+// collectMedia recursively walks a pCloud folder tree node, collecting image and
+// video files (per mediaExtensions). Unknown extensions and root-level files are
+// skipped. albumName is always the leaf folder name containing the file.
+func collectMedia(node pcloudMeta, albumName string, out *[]repo.PCloudEntry) {
 	for _, child := range node.Contents {
 		if child.IsFolder {
-			collectImages(child, child.Name, out)
+			collectMedia(child, child.Name, out)
 			continue
 		}
 		ext := strings.ToLower(filepath.Ext(child.Name))
-		if _, ok := imageExtensions[ext]; !ok {
+		kind, ok := mediaExtensions[ext]
+		if !ok {
 			continue
 		}
 		*out = append(*out, repo.PCloudEntry{
 			FileID:           child.FileID,
 			Name:             child.Name,
 			ParentFolderName: albumName,
+			Kind:             kind,
+			Size:             child.Size,
 		})
 	}
 }
@@ -348,9 +408,36 @@ func collectImages(node pcloudMeta, albumName string, out *[]repo.PCloudEntry) {
 // GetFileLink
 // ---------------------------------------------------------------------------
 
+// getFileLinkFromCache returns a cached download URL when present and unexpired.
+func (c *PCloudClient) getFileLinkFromCache(fileID int64) (string, bool) {
+	c.fileLinkMu.RLock()
+	defer c.fileLinkMu.RUnlock()
+	entry, ok := c.fileLinkCache[fileID]
+	if !ok || time.Now().After(entry.expiresAt) {
+		return "", false
+	}
+	return entry.url, true
+}
+
+// putFileLinkInCache stores a freshly resolved URL with TTL.
+func (c *PCloudClient) putFileLinkInCache(fileID int64, url string) {
+	c.fileLinkMu.Lock()
+	defer c.fileLinkMu.Unlock()
+	c.fileLinkCache[fileID] = fileLinkCacheEntry{
+		url:       url,
+		expiresAt: time.Now().Add(pcloudFileLinkTTL),
+	}
+}
+
 // GetFileLink returns a temporary download URL for a pCloud file.
 // Retries up to pcloudMaxRetries times; re-logs in if the token has expired.
+// Results are cached in memory for pcloudFileLinkTTL to avoid repeating the
+// API call for the same file_id (e.g. admin list refreshes).
 func (c *PCloudClient) GetFileLink(ctx context.Context, fileID int64) (string, error) {
+	if url, ok := c.getFileLinkFromCache(fileID); ok {
+		return url, nil
+	}
+
 	var lastErr error
 	backoff := pcloudRetryBase
 	needRelogin := false
@@ -374,6 +461,7 @@ func (c *PCloudClient) GetFileLink(ctx context.Context, fileID int64) (string, e
 
 		link, err := c.doGetFileLink(ctx, fileID)
 		if err == nil {
+			c.putFileLinkInCache(fileID, link)
 			return link, nil
 		}
 		lastErr = err
@@ -422,4 +510,88 @@ func (c *PCloudClient) doGetFileLink(ctx context.Context, fileID int64) (string,
 		return "", fmt.Errorf("PCloudClient - GetFileLink - no hosts returned")
 	}
 	return "https://" + result.Hosts[0] + result.Path, nil
+}
+
+// ---------------------------------------------------------------------------
+// GetFilePublicLink
+// ---------------------------------------------------------------------------
+
+// GetFilePublicLink returns a permanent public share URL for a pCloud file
+// (getfilepublink). Unlike GetFileLink the URL is not bound to the caller's IP
+// and never expires, so the caller persists it instead of relying on the
+// in-memory TTL cache. getfilepublink is idempotent: if a public link already
+// exists for the file, the existing one is returned.
+// Retries up to pcloudMaxRetries times; re-logs in if the token has expired.
+func (c *PCloudClient) GetFilePublicLink(ctx context.Context, fileID int64) (string, error) {
+	var lastErr error
+	backoff := pcloudRetryBase
+	needRelogin := false
+
+	for attempt := 1; attempt <= pcloudMaxRetries; attempt++ {
+		if attempt > 1 {
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+			backoff *= 2
+
+			if needRelogin && c.username != "" {
+				if rerr := c.relogin(ctx); rerr != nil {
+					return "", fmt.Errorf("PCloudClient - GetFilePublicLink - relogin: %w", rerr)
+				}
+				needRelogin = false
+			}
+		}
+
+		link, err := c.doGetFilePublicLink(ctx, fileID)
+		if err == nil {
+			return link, nil
+		}
+		lastErr = err
+		if isTokenErr(err) {
+			needRelogin = true
+			// Clear cached token so relogin proceeds.
+			c.mu.Lock()
+			c.token = ""
+			c.tokenParam = ""
+			c.mu.Unlock()
+			continue
+		}
+		return "", err // non-retriable
+	}
+	return "", fmt.Errorf("PCloudClient - GetFilePublicLink - all %d attempts failed: %w", pcloudMaxRetries, lastErr)
+}
+
+func (c *PCloudClient) doGetFilePublicLink(ctx context.Context, fileID int64) (string, error) {
+	if err := c.acquire(ctx); err != nil {
+		return "", err
+	}
+	defer c.release()
+
+	apiURL := fmt.Sprintf("%s/getfilepublink?fileid=%d&%s",
+		c.apiEndpoint, fileID, c.authQuery())
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("PCloudClient - GetFilePublicLink - NewRequest: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("PCloudClient - GetFilePublicLink - Do: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result pcloudPublicLinkResponse
+	if err = json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("PCloudClient - GetFilePublicLink - Decode: %w", err)
+	}
+	if result.Result != 0 {
+		return "", fmt.Errorf("PCloudClient - GetFilePublicLink - API error %d: %s", result.Result, result.Error)
+	}
+	if result.Link == "" {
+		return "", fmt.Errorf("PCloudClient - GetFilePublicLink - no link returned")
+	}
+	return result.Link, nil
 }

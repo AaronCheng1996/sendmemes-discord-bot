@@ -21,15 +21,20 @@ x-backend-app-environment: &x-backend-app-environment
   PG_POOL_MAX: "2"
   PG_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/sendmemes?sslmode=disable"
   # Discord
+  # Admin
+  ADMIN_API_KEY: "${ADMIN_API_KEY}"
+  # Discord
   DISCORD_TOKEN: "${DISCORD_TOKEN}"
   DISCORD_APPLICATION_ID: "${DISCORD_APPLICATION_ID}"
   DISCORD_GUILD_ID: "${DISCORD_GUILD_ID}"
   DISCORD_CHANNEL_ID: "${DISCORD_CHANNEL_ID}"
+  DISCORD_NOTIFY_CHANNEL_ID: "${DISCORD_NOTIFY_CHANNEL_ID}"
   DISCORD_SEND_INTERVAL: "${DISCORD_SEND_INTERVAL:-6h}"
   DISCORD_SEND_HISTORY_SIZE: "${DISCORD_SEND_HISTORY_SIZE:-10}"
   DISCORD_VERBOSE_LOG: "${DISCORD_VERBOSE_LOG:-true}"
   # pCloud
   PCLOUD_ACCESS_TOKEN: "${PCLOUD_ACCESS_TOKEN}"
+  PCLOUD_TOKEN_TYPE: "${PCLOUD_TOKEN_TYPE:-session}"
   PCLOUD_USERNAME: "${PCLOUD_USERNAME}"
   PCLOUD_PASSWORD: "${PCLOUD_PASSWORD}"
   CLOUD_MAIN_FOLDER_ID: "${CLOUD_MAIN_FOLDER_ID}"
@@ -83,7 +88,7 @@ services:
 
   nginx:
     container_name: nginx
-    image: nginx:1.29.5-alpine
+    image: nginx:1.31.0-alpine
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
     ports:

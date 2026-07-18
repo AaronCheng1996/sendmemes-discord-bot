@@ -4,6 +4,7 @@ package images
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
@@ -57,6 +58,21 @@ func (uc *UseCase) GetAlbumImages(ctx context.Context, albumName string, limit i
 	return uc.albumImagesWithCover(ctx, album, limit)
 }
 
+// GetAlbumByID returns the album with the given id.
+func (uc *UseCase) GetAlbumByID(ctx context.Context, id int) (entity.Album, error) {
+	album, err := uc.albums.GetByID(ctx, id)
+	if err != nil {
+		return entity.Album{}, fmt.Errorf("ImagesUseCase - GetAlbumByID - GetByID %d: %w", id, err)
+	}
+	return album, nil
+}
+
+// GetAlbumBatch returns up to limit images for album using cover-first rules
+// (cover first when present, then random non-cover images).
+func (uc *UseCase) GetAlbumBatch(ctx context.Context, album entity.Album, limit int) ([]entity.Image, error) {
+	return uc.albumImagesWithCover(ctx, album, limit)
+}
+
 // GetRandomAlbumImages picks a random album and returns up to limit images from it.
 // If the album has a cover, it is always prepended as the first element.
 func (uc *UseCase) GetRandomAlbumImages(ctx context.Context, limit int) ([]entity.Image, error) {
@@ -92,19 +108,72 @@ func (uc *UseCase) albumImagesWithCover(ctx context.Context, album entity.Album,
 	return append([]entity.Image{cover}, rest...), nil
 }
 
-// GetScheduledAlbumImages picks a random album with anti-repeat logic and returns
-// up to limit images (cover-first) together with the selected album's ID.
-// Pass the returned albumID to MarkAlbumSent after the message is sent.
-func (uc *UseCase) GetScheduledAlbumImages(ctx context.Context, excludeN, limit int) ([]entity.Image, int, error) {
+// GetScheduledAlbum picks a random album with anti-repeat logic (avoiding the
+// excludeN most recently sent albums). Pass the album's ID to MarkAlbumSent after
+// the message is sent.
+func (uc *UseCase) GetScheduledAlbum(ctx context.Context, excludeN int) (entity.Album, error) {
 	album, err := uc.albums.GetRandomExcludeRecent(ctx, excludeN)
 	if err != nil {
-		return nil, 0, fmt.Errorf("ImagesUseCase - GetScheduledAlbumImages - GetRandomExcludeRecent: %w", err)
+		return entity.Album{}, fmt.Errorf("ImagesUseCase - GetScheduledAlbum - GetRandomExcludeRecent: %w", err)
 	}
-	imgs, err := uc.albumImagesWithCover(ctx, album, limit)
+	return album, nil
+}
+
+// GetComicPages returns the album's images in reading order for comic delivery:
+// the cover first (when the album has one), then all remaining images sorted by
+// natural filename order (so "2.jpg" precedes "10.jpg").
+func (uc *UseCase) GetComicPages(ctx context.Context, album entity.Album) ([]entity.Image, error) {
+	excludeID := 0
+	var pages []entity.Image
+	if album.HasCover {
+		cover, found, err := uc.repo.FindCoverByAlbum(ctx, album.ID)
+		if err != nil {
+			return nil, fmt.Errorf("ImagesUseCase - GetComicPages - FindCoverByAlbum: %w", err)
+		}
+		if found {
+			cover.IsCover = true
+			excludeID = cover.ID
+			pages = append(pages, cover)
+		}
+	}
+	rest, err := uc.repo.GetAllByAlbum(ctx, album.ID, excludeID)
 	if err != nil {
-		return nil, 0, fmt.Errorf("ImagesUseCase - GetScheduledAlbumImages - albumImagesWithCover: %w", err)
+		return nil, fmt.Errorf("ImagesUseCase - GetComicPages - GetAllByAlbum: %w", err)
 	}
-	return imgs, album.ID, nil
+	sort.SliceStable(rest, func(i, j int) bool {
+		return naturalLess(rest[i].URL, rest[j].URL)
+	})
+	return append(pages, rest...), nil
+}
+
+// GetRandomVideo returns one random video from the album.
+// Returns (image, true, nil) when a video exists, (zero, false, nil) when none.
+func (uc *UseCase) GetRandomVideo(ctx context.Context, albumID int) (entity.Image, bool, error) {
+	img, found, err := uc.repo.GetRandomVideoByAlbum(ctx, albumID)
+	if err != nil {
+		return entity.Image{}, false, fmt.Errorf("ImagesUseCase - GetRandomVideo - GetRandomVideoByAlbum: %w", err)
+	}
+	return img, found, nil
+}
+
+// SetAlbumMode updates the named album's send mode, preserving its name and
+// existing send-config JSON, and returns the updated album. An empty stored
+// config JSON is normalized to "{}" so the persistence layer's ?::jsonb cast
+// does not fail.
+func (uc *UseCase) SetAlbumMode(ctx context.Context, albumName string, mode entity.AlbumSendMode) (entity.Album, error) {
+	album, err := uc.albums.GetByName(ctx, albumName)
+	if err != nil {
+		return entity.Album{}, fmt.Errorf("ImagesUseCase - SetAlbumMode - GetByName %q: %w", albumName, err)
+	}
+	configJSON := strings.TrimSpace(album.SendConfigJSON)
+	if configJSON == "" {
+		configJSON = "{}"
+	}
+	updated, err := uc.albums.Update(ctx, album.ID, album.Name, mode, configJSON)
+	if err != nil {
+		return entity.Album{}, fmt.Errorf("ImagesUseCase - SetAlbumMode - Update %q: %w", albumName, err)
+	}
+	return updated, nil
 }
 
 // MarkAlbumSent stamps last_sent_at = NOW() for albumID.
@@ -182,4 +251,27 @@ func (uc *UseCase) ResolveURL(ctx context.Context, img entity.Image) (string, er
 		return strings.TrimSuffix(uc.publicURL, "/") + img.URL, nil
 	}
 	return img.URL, nil
+}
+
+// ResolvePublicURL returns a permanent pCloud public share URL for img.
+// When img already carries a stored PublicLink it is returned directly (no API
+// call). Otherwise a public link is created via the pCloud API, persisted so
+// future lookups skip the call, and returned. Public links are not IP-bound and
+// never expire, unlike the temporary links from ResolveURL. Non-pCloud images
+// fall back to ResolveURL.
+func (uc *UseCase) ResolvePublicURL(ctx context.Context, img entity.Image) (string, error) {
+	if img.Source != "pcloud" {
+		return uc.ResolveURL(ctx, img)
+	}
+	if img.PublicLink != "" {
+		return img.PublicLink, nil
+	}
+	link, err := uc.pcloud.GetFilePublicLink(ctx, img.FileID)
+	if err != nil {
+		return "", fmt.Errorf("ImagesUseCase - ResolvePublicURL - GetFilePublicLink fileID=%d: %w", img.FileID, err)
+	}
+	if err := uc.repo.SetPublicLink(ctx, img.ID, link); err != nil {
+		return "", fmt.Errorf("ImagesUseCase - ResolvePublicURL - SetPublicLink id=%d: %w", img.ID, err)
+	}
+	return link, nil
 }
