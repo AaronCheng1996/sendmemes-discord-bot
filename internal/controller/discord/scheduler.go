@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
+	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/schedulespec"
 )
 
 const (
@@ -37,14 +38,40 @@ func (b *Bot) runSyncScheduler() {
 			b.l.Error(fmt.Errorf("runSyncScheduler GetSyncInterval: %w", err))
 			intervalStr = b.cfg.PCloud.SyncInterval
 		}
-		interval := parseDuration(intervalStr, time.Hour)
+		// The interval is re-read every round so runtime edits from the
+		// Connection page take effect on the next tick. It may be a Go
+		// duration or a cron expression.
+		wait := b.nextSyncWait(intervalStr)
+		timer := time.NewTimer(wait)
 		select {
-		case <-time.After(interval):
+		case <-timer.C:
 			b.doSync()
 		case <-b.stopCh:
+			timer.Stop()
 			return
 		}
 	}
+}
+
+// nextSyncWait resolves how long to wait before the next sync from intervalStr,
+// falling back to the env default and finally to one hour when parsing fails.
+func (b *Bot) nextSyncWait(intervalStr string) time.Duration {
+	spec, err := schedulespec.Parse(intervalStr)
+	if err != nil {
+		b.l.Error(fmt.Errorf("runSyncScheduler: invalid sync interval %q, using env default: %w", intervalStr, err))
+		spec, err = schedulespec.Parse(b.cfg.PCloud.SyncInterval)
+		if err != nil {
+			return time.Hour
+		}
+	}
+	next := spec.Next(time.Now())
+	if next.IsZero() {
+		return time.Hour
+	}
+	if wait := time.Until(next); wait > 0 {
+		return wait
+	}
+	return time.Hour
 }
 
 func (b *Bot) doSync() {
@@ -270,23 +297,29 @@ func (b *Bot) reconcileScheduledRules(running map[int64]scheduledHandle) {
 	}
 }
 
-// runScheduledRule fires one scheduled rule every interval until its context or
-// the bot's stop channel is cancelled.
+// runScheduledRule fires one scheduled rule on its schedule (a Go duration or a
+// cron expression) until its context or the bot's stop channel is cancelled.
 func (b *Bot) runScheduledRule(ctx context.Context, rule entity.DeliveryRule) {
-	interval := parseDuration(rule.SendInterval, 0)
-	if interval <= 0 {
-		b.l.Info("schedule rule %d disabled (invalid interval %q)", rule.ID, rule.SendInterval)
+	spec, err := schedulespec.Parse(rule.SendInterval)
+	if err != nil {
+		b.l.Info("schedule rule %d disabled (invalid interval %q): %v", rule.ID, rule.SendInterval, err)
 		return
 	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
 	for {
+		next := spec.Next(time.Now())
+		if next.IsZero() {
+			b.l.Info("schedule rule %d disabled (interval %q never fires)", rule.ID, rule.SendInterval)
+			return
+		}
+		timer := time.NewTimer(time.Until(next))
 		select {
-		case <-ticker.C:
+		case <-timer.C:
 			_, _ = b.doScheduledSend(rule.ChannelID, rule.HistorySize)
 		case <-ctx.Done():
+			timer.Stop()
 			return
 		case <-b.stopCh:
+			timer.Stop()
 			return
 		}
 	}

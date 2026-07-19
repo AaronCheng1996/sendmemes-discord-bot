@@ -691,14 +691,6 @@ func albumNameFrom(imgs []entity.Image) string {
 	return ""
 }
 
-func parseDuration(s string, fallback time.Duration) time.Duration {
-	d, err := time.ParseDuration(s)
-	if err != nil || d <= 0 {
-		return fallback
-	}
-	return d
-}
-
 // TriggerScheduleNow sends a random album immediately to channelID.
 func (b *Bot) TriggerScheduleNow(ctx context.Context, channelID string, historySize int) (entity.ManualScheduleTriggerResult, error) {
 	_ = ctx

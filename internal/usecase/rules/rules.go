@@ -5,10 +5,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo"
+	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/schedulespec"
 )
 
 // defaultHistorySize is used when a scheduled rule does not specify one.
@@ -61,8 +61,8 @@ func normalize(rule *entity.DeliveryRule) error {
 	rule.SendInterval = strings.TrimSpace(rule.SendInterval)
 
 	if trigger == entity.TriggerScheduled {
-		if _, derr := time.ParseDuration(rule.SendInterval); derr != nil {
-			return fmt.Errorf("scheduled rule needs a valid send_interval (e.g. 6h): %w", derr)
+		if _, derr := schedulespec.Parse(rule.SendInterval); derr != nil {
+			return fmt.Errorf("scheduled rule needs a valid send_interval (e.g. 6h or 0 9 * * *): %w", derr)
 		}
 		if rule.HistorySize <= 0 {
 			rule.HistorySize = defaultHistorySize

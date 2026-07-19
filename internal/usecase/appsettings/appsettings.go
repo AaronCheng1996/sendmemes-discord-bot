@@ -5,10 +5,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo"
+	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/schedulespec"
 )
 
 // UseCase resolves global settings, falling back to env-provided defaults.
@@ -38,8 +38,8 @@ func (uc *UseCase) GetSyncInterval(ctx context.Context) (string, error) {
 // SetSyncInterval validates and stores the sync cadence.
 func (uc *UseCase) SetSyncInterval(ctx context.Context, interval string) (entity.AppSettings, error) {
 	interval = strings.TrimSpace(interval)
-	if _, err := time.ParseDuration(interval); err != nil {
-		return entity.AppSettings{}, fmt.Errorf("sync_interval must be a valid duration (e.g. 1h): %w", err)
+	if _, err := schedulespec.Parse(interval); err != nil {
+		return entity.AppSettings{}, fmt.Errorf("sync_interval must be a valid duration or cron expression (e.g. 1h or 0 9 * * *): %w", err)
 	}
 	out, err := uc.repo.Upsert(ctx, entity.AppSettings{SyncInterval: interval})
 	if err != nil {
