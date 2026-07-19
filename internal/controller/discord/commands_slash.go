@@ -111,9 +111,15 @@ func (b *Bot) handleReady(s *discordgo.Session, r *discordgo.Ready) {
 }
 
 func (b *Bot) handleInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if i.Type != discordgo.InteractionApplicationCommand {
-		return
+	switch i.Type {
+	case discordgo.InteractionApplicationCommand:
+		b.handleApplicationCommand(s, i)
+	case discordgo.InteractionMessageComponent:
+		b.handleMessageComponent(s, i)
 	}
+}
+
+func (b *Bot) handleApplicationCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	switch i.ApplicationCommandData().Name {
 	case "image":
 		b.cmdImage(s, i)
@@ -130,6 +136,88 @@ func (b *Bot) handleInteractionCreate(s *discordgo.Session, i *discordgo.Interac
 	case "schedule":
 		b.cmdSchedule(s, i)
 	}
+}
+
+// handleMessageComponent routes button/select interactions. Currently only the
+// "Full album" button (attached to random scheduled posts) is handled.
+func (b *Bot) handleMessageComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	customID := i.MessageComponentData().CustomID
+	if albumID, ok := parseFullAlbumCustomID(customID); ok {
+		b.cmdFullAlbumButton(s, i, albumID)
+	}
+}
+
+// cmdFullAlbumButton posts the whole album behind a random post into a thread.
+// Anyone may press the button; the presser gets an ephemeral progress reply. If
+// a thread already exists on the message (someone pressed first), it reports
+// that instead of posting a duplicate.
+func (b *Bot) cmdFullAlbumButton(s *discordgo.Session, i *discordgo.InteractionCreate, albumID int) {
+	user := interactionUser(i)
+	b.vlog("full-album button pressed by %s: albumID=%d", user, albumID)
+
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Flags:   discordgo.MessageFlagsEphemeral,
+			Content: "Posting full album…",
+		},
+	}); err != nil {
+		b.l.Error(fmt.Errorf("cmdFullAlbumButton ack: %w", err))
+		return
+	}
+
+	channelID := i.ChannelID
+	messageID := i.Message.ID
+
+	go func() {
+		ctx := context.Background()
+
+		album, err := b.imagesUC.GetAlbumByID(ctx, albumID)
+		if err != nil {
+			b.l.Error(fmt.Errorf("cmdFullAlbumButton GetAlbumByID %d: %w", albumID, err))
+			b.editInteractionContent(s, i, "Album not found.")
+			return
+		}
+
+		cover, hasCover, err := b.imagesUC.GetAlbumCover(ctx, album.Name)
+		if err != nil {
+			b.l.Error(fmt.Errorf("cmdFullAlbumButton GetAlbumCover %q: %w", album.Name, err))
+			b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** not found.", album.Name))
+			return
+		}
+		imgs, err := b.imagesUC.GetFullAlbum(ctx, album.Name)
+		if err != nil {
+			b.l.Error(fmt.Errorf("cmdFullAlbumButton GetFullAlbum %q: %w", album.Name, err))
+			b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** not found.", album.Name))
+			return
+		}
+
+		total := len(imgs)
+		if hasCover {
+			total++
+		}
+		if total == 0 {
+			b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** is empty.", album.Name))
+			return
+		}
+
+		thread, err := b.session.MessageThreadStartComplex(channelID, messageID, &discordgo.ThreadStart{
+			Name:                fmt.Sprintf("Full album: %s", album.Name),
+			AutoArchiveDuration: 60,
+			Type:                discordgo.ChannelTypeGuildPublicThread,
+		})
+		if err != nil {
+			// Most commonly the message already has a thread (someone pressed first).
+			b.vlog("cmdFullAlbumButton ThreadStart %q: %v", album.Name, err)
+			b.editInteractionContent(s, i, fmt.Sprintf("Full album **%s** has already been posted.", album.Name))
+			return
+		}
+
+		b.sendFullAlbumToThread(ctx, thread.ID, album.Name, cover, hasCover, imgs)
+		b.editInteractionContent(s, i,
+			fmt.Sprintf("Full album **%s** — %d images posted in <#%s>.", album.Name, total, thread.ID))
+		b.vlog("full-album button completed for %s: album=%q total=%d", user, album.Name, total)
+	}()
 }
 
 func (b *Bot) cmdImage(s *discordgo.Session, i *discordgo.InteractionCreate) {

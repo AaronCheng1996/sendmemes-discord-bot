@@ -478,14 +478,21 @@ func (b *Bot) deliverAlbum(ctx context.Context, channelID string, album entity.A
 	}
 }
 
-// deliverRandom sends a size-fitted batch of random images (cover-first).
+// deliverRandom sends a size-fitted batch of random images (cover-first) with a
+// "Full album" button that expands the whole album into a thread on demand.
 func (b *Bot) deliverRandom(ctx context.Context, channelID string, album entity.Album, captionPrefix string) *discordgo.Message {
 	imgs, err := b.imagesUC.GetAlbumBatch(ctx, album, albumPoolSize)
 	if err != nil {
 		b.l.Error(fmt.Errorf("deliverAlbum random GetAlbumBatch %q: %w", album.Name, err))
 		return nil
 	}
-	return b.sendAlbumToChannel(ctx, b.session, channelID, captionPrefix+album.Name, imgs)
+	files, err := b.downloadAndFit(ctx, imgs)
+	if err != nil {
+		b.l.Error(fmt.Errorf("deliverAlbum random downloadAndFit %q: %w", album.Name, err))
+		_, _ = b.session.ChannelMessageSend(channelID, "Failed to download images.")
+		return nil
+	}
+	return b.channelSendFilesWithButton(channelID, captionPrefix+album.Name, files, album.ID)
 }
 
 // deliverSingle sends exactly one image from the album (cover when present).
@@ -601,6 +608,28 @@ func (b *Bot) channelSendFiles(s *discordgo.Session, channelID, caption string, 
 	msg, err := s.ChannelMessageSendComplex(channelID, payload)
 	if err != nil {
 		b.l.Error(fmt.Errorf("channelSendFiles: %w", err))
+		return nil
+	}
+	return msg
+}
+
+// channelSendFilesWithButton sends file attachments with a bold caption and a
+// single "Full album" button (CustomID fullalbum:<albumID>) attached. Used only
+// on the random scheduled-post path. Returns the sent message (nil on failure).
+func (b *Bot) channelSendFilesWithButton(channelID, caption string, files []*discordgo.File, albumID int) *discordgo.Message {
+	if len(files) == 0 {
+		return nil
+	}
+	payload := &discordgo.MessageSend{
+		Files:      files,
+		Components: fullAlbumButtonRow(albumID),
+	}
+	if caption != "" {
+		payload.Content = "**" + caption + "**"
+	}
+	msg, err := b.session.ChannelMessageSendComplex(channelID, payload)
+	if err != nil {
+		b.l.Error(fmt.Errorf("channelSendFilesWithButton: %w", err))
 		return nil
 	}
 	return msg
