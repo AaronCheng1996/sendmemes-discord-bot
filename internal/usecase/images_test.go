@@ -92,3 +92,84 @@ func TestResolvePublicURLNonPCloudFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "https://example.test/media/x.png", url)
 }
+
+// A pCloud preview is the getpubthumb URL built from the stored share link, not
+// the landing-page link itself.
+func TestResolvePreviewURLUsesPublicThumb(t *testing.T) {
+	t.Parallel()
+
+	uc, _, pcloud := imagesUseCase(t)
+	ctx := context.Background()
+
+	img := entity.Image{
+		ID:         7,
+		Source:     "pcloud",
+		FileID:     42,
+		PublicLink: "https://u.pcloud.link/publink/show?code=cached",
+	}
+	thumb := "https://api.pcloud.com/getpubthumb?code=cached&fileid=42&size=512x512"
+
+	pcloud.EXPECT().PublicThumbURL(img.PublicLink, int64(42), "").Return(thumb)
+
+	url, err := uc.ResolvePreviewURL(ctx, img)
+	require.NoError(t, err)
+	require.Equal(t, thumb, url)
+}
+
+// When no share code can be extracted the preview falls back to a temporary
+// getfilelink URL rather than returning the unusable landing page.
+func TestResolvePreviewURLFallsBackWhenNoThumb(t *testing.T) {
+	t.Parallel()
+
+	uc, _, pcloud := imagesUseCase(t)
+	ctx := context.Background()
+
+	img := entity.Image{
+		ID:         7,
+		Source:     "pcloud",
+		FileID:     42,
+		PublicLink: "https://u.pcloud.link/publink/show",
+	}
+
+	pcloud.EXPECT().PublicThumbURL(img.PublicLink, int64(42), "").Return("")
+	pcloud.EXPECT().GetFileLink(ctx, int64(42)).Return("https://p-def1.pcloud.com/temp.png", nil)
+
+	url, err := uc.ResolvePreviewURL(ctx, img)
+	require.NoError(t, err)
+	require.Equal(t, "https://p-def1.pcloud.com/temp.png", url)
+}
+
+// A first-time pCloud preview resolves and persists the share link before
+// building the thumbnail URL.
+func TestResolvePreviewURLResolvesLinkFirst(t *testing.T) {
+	t.Parallel()
+
+	uc, repoMock, pcloud := imagesUseCase(t)
+	ctx := context.Background()
+
+	img := entity.Image{ID: 7, Source: "pcloud", FileID: 42}
+	link := "https://u.pcloud.link/publink/show?code=fresh"
+	thumb := "https://api.pcloud.com/getpubthumb?code=fresh&fileid=42&size=512x512"
+
+	pcloud.EXPECT().GetFilePublicLink(ctx, int64(42)).Return(link, nil)
+	repoMock.EXPECT().SetPublicLink(ctx, 7, link).Return(nil)
+	pcloud.EXPECT().PublicThumbURL(link, int64(42), "").Return(thumb)
+
+	url, err := uc.ResolvePreviewURL(ctx, img)
+	require.NoError(t, err)
+	require.Equal(t, thumb, url)
+}
+
+// Non-pCloud images keep using ResolveURL.
+func TestResolvePreviewURLNonPCloudFallback(t *testing.T) {
+	t.Parallel()
+
+	uc, _, _ := imagesUseCase(t)
+	ctx := context.Background()
+
+	img := entity.Image{ID: 8, Source: "local", URL: "/media/x.png"}
+
+	url, err := uc.ResolvePreviewURL(ctx, img)
+	require.NoError(t, err)
+	require.Equal(t, "https://example.test/media/x.png", url)
+}

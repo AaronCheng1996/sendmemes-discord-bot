@@ -29,6 +29,11 @@ const (
 	// pcloudRetryBase is the initial backoff duration; it doubles each retry.
 	pcloudRetryBase = 500 * time.Millisecond
 
+	// pcloudPublicThumbSize is the default geometry requested from getpubthumb.
+	// pCloud accepts 16..2048 per side and requires one side to be a multiple
+	// of 4; 512x512 comfortably covers the dashboard's album cards.
+	pcloudPublicThumbSize = "512x512"
+
 	// pcloudFileLinkTTL bounds how long a cached getfilelink URL is reused.
 	// pCloud's signed download URLs are typically valid for several hours; we
 	// expire well below that to stay safe and pick up server hostname changes.
@@ -594,4 +599,39 @@ func (c *PCloudClient) doGetFilePublicLink(ctx context.Context, fileID int64) (s
 		return "", fmt.Errorf("PCloudClient - GetFilePublicLink - no link returned")
 	}
 	return result.Link, nil
+}
+
+// ---------------------------------------------------------------------------
+// PublicThumbURL
+// ---------------------------------------------------------------------------
+
+// PublicThumbURL builds a direct getpubthumb URL from a public share link.
+//
+// The link GetFilePublicLink returns (https://u.pcloud.link/publink/show?code=XZ…)
+// is a *landing page*, not the file — dropping it into an <img> tag renders
+// nothing. getpubthumb serves the thumbnail bytes for the same share code,
+// needs no auth token and is not bound to the caller's IP, which makes it the
+// only form a browser on the viewer's machine can actually load.
+//
+// size is a "WxH" geometry; empty means pcloudPublicThumbSize. Returns "" when
+// publicLink carries no code parameter, leaving the fallback to the caller.
+func (c *PCloudClient) PublicThumbURL(publicLink string, fileID int64, size string) string {
+	code := publicLinkCode(publicLink)
+	if code == "" {
+		return ""
+	}
+	if strings.TrimSpace(size) == "" {
+		size = pcloudPublicThumbSize
+	}
+	return fmt.Sprintf("%s/getpubthumb?code=%s&fileid=%d&size=%s",
+		c.apiEndpoint, url.QueryEscape(code), fileID, url.QueryEscape(size))
+}
+
+// publicLinkCode extracts the share code from a pCloud public link.
+func publicLinkCode(publicLink string) string {
+	parsed, err := url.Parse(strings.TrimSpace(publicLink))
+	if err != nil {
+		return ""
+	}
+	return parsed.Query().Get("code")
 }

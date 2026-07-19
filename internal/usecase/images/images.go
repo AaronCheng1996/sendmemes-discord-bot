@@ -275,3 +275,26 @@ func (uc *UseCase) ResolvePublicURL(ctx context.Context, img entity.Image) (stri
 	}
 	return link, nil
 }
+
+// ResolvePreviewURL returns a URL a browser can render directly in an <img> tag.
+//
+// ResolveURL's temporary getfilelink URLs are bound to the *bot container's* IP,
+// so the dashboard running on someone else's machine renders a broken image —
+// the same problem R1 fixed for Discord video links. Public share links are not
+// IP-bound but point at a landing page rather than the file, so pCloud images
+// resolve to a getpubthumb thumbnail built from the (persisted) share link.
+// Non-pCloud images, and pCloud links with no extractable share code, fall back
+// to ResolveURL.
+func (uc *UseCase) ResolvePreviewURL(ctx context.Context, img entity.Image) (string, error) {
+	if img.Source != "pcloud" {
+		return uc.ResolveURL(ctx, img)
+	}
+	link, err := uc.ResolvePublicURL(ctx, img)
+	if err != nil {
+		return "", fmt.Errorf("ImagesUseCase - ResolvePreviewURL - ResolvePublicURL id=%d: %w", img.ID, err)
+	}
+	if thumb := uc.pcloud.PublicThumbURL(link, img.FileID, ""); thumb != "" {
+		return thumb, nil
+	}
+	return uc.ResolveURL(ctx, img)
+}

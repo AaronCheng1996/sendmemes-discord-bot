@@ -64,6 +64,11 @@ type (
 		// persisting it on first resolution. Unlike ResolveURL the link never
 		// expires and is not IP-bound. Non-pCloud images fall back to ResolveURL.
 		ResolvePublicURL(ctx context.Context, img entity.Image) (string, error)
+		// ResolvePreviewURL returns a URL a browser can render directly in an
+		// <img> tag. pCloud images resolve to a getpubthumb thumbnail derived
+		// from the persisted public share link; everything else falls back to
+		// ResolveURL.
+		ResolvePreviewURL(ctx context.Context, img entity.Image) (string, error)
 	}
 
 	Sync interface {

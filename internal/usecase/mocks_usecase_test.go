@@ -291,6 +291,21 @@ func (mr *MockImagesMockRecorder) MarkAlbumSent(ctx, albumID any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkAlbumSent", reflect.TypeOf((*MockImages)(nil).MarkAlbumSent), ctx, albumID)
 }
 
+// ResolvePreviewURL mocks base method.
+func (m *MockImages) ResolvePreviewURL(ctx context.Context, img entity.Image) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolvePreviewURL", ctx, img)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolvePreviewURL indicates an expected call of ResolvePreviewURL.
+func (mr *MockImagesMockRecorder) ResolvePreviewURL(ctx, img any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolvePreviewURL", reflect.TypeOf((*MockImages)(nil).ResolvePreviewURL), ctx, img)
+}
+
 // ResolvePublicURL mocks base method.
 func (m *MockImages) ResolvePublicURL(ctx context.Context, img entity.Image) (string, error) {
 	m.ctrl.T.Helper()

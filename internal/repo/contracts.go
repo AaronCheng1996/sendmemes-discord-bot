@@ -135,5 +135,10 @@ type (
 		// for a file (pCloud getfilepublink). The link never expires, so callers
 		// persist it rather than regenerating per request.
 		GetFilePublicLink(ctx context.Context, fileID int64) (string, error)
+		// PublicThumbURL turns a public share link from GetFilePublicLink into a
+		// direct thumbnail URL that renders in an <img> tag without auth. Pass an
+		// empty size for the default geometry. Returns "" when publicLink carries
+		// no usable share code.
+		PublicThumbURL(publicLink string, fileID int64, size string) string
 	}
 )

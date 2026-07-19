@@ -67,7 +67,10 @@ keeps that structure: `cmd/`, `config/`, `internal/{app,entity,usecase,repo,cont
 
 List endpoints return a paginated envelope and embed a resolved
 `preview_url` per row so the dashboard can render thumbnails without extra
-round-trips:
+round-trips. Album previews use a pCloud `getpubthumb` thumbnail derived from
+the file's permanent public share link, so they load from any browser; image
+rows still use temporary `getfilelink` URLs, which are bound to the bot
+container's IP:
 
 ```json
 { "items": [...], "total": 0, "offset": 0, "limit": 50 }

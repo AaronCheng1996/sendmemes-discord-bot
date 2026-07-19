@@ -60,7 +60,8 @@ func New(
 
 // ListAlbums returns paginated albums with preview URLs already resolved.
 // Preview rule: cover image (if has_cover && cover_image_id) → first image in album → empty.
-// pCloud URLs go through PCloudClient's in-memory cache to limit upstream API calls.
+// pCloud previews are getpubthumb thumbnails off the persisted public share
+// link, so repeat listings cost no upstream API calls once resolved.
 func (uc *UseCase) ListAlbums(ctx context.Context, q repo.AlbumAdminListQuery, offset, limit int) ([]entity.Album, int, error) {
 	items, err := uc.albums.List(ctx, q, offset, limit)
 	if err != nil {
@@ -101,7 +102,7 @@ func (uc *UseCase) resolveAlbumPreviewURL(ctx context.Context, album entity.Albu
 		}
 		img = fallback
 	}
-	url, err := uc.imagesUC.ResolveURL(ctx, img)
+	url, err := uc.imagesUC.ResolvePreviewURL(ctx, img)
 	if err != nil {
 		return "", false, err
 	}
