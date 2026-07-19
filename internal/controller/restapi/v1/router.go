@@ -48,4 +48,5 @@ func NewAdminRoutes(adminGroup fiber.Router, a usecase.Admin, l logger.Interface
 	adminGroup.Post("/sync/trigger-now", r.triggerSyncNow)
 	adminGroup.Get("/sync-events", r.listSyncEvents)
 	adminGroup.Get("/system/status", r.getSystemStatus)
+	adminGroup.Get("/jobs", r.listJobs)
 }

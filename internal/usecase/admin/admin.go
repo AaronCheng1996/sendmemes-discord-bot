@@ -24,6 +24,7 @@ type UseCase struct {
 	syncEvents  repo.SyncEventsRepo
 	system      repo.SystemRepo
 	runtime     usecase.AdminRuntime
+	jobs        usecase.Jobs
 	// defaultSendMode is applied when CreateAlbum/UpdateAlbum omit a send mode.
 	defaultSendMode entity.AlbumSendMode
 }
@@ -39,6 +40,7 @@ func New(
 	syncEvents repo.SyncEventsRepo,
 	system repo.SystemRepo,
 	runtime usecase.AdminRuntime,
+	jobs usecase.Jobs,
 	defaultSendMode entity.AlbumSendMode,
 ) *UseCase {
 	return &UseCase{
@@ -51,6 +53,7 @@ func New(
 		syncEvents:      syncEvents,
 		system:          system,
 		runtime:         runtime,
+		jobs:            jobs,
 		defaultSendMode: defaultSendMode,
 	}
 }
@@ -273,19 +276,31 @@ func (uc *UseCase) UpdateSyncSettings(ctx context.Context, interval, actor strin
 	return out, nil
 }
 
-func (uc *UseCase) TriggerSyncNow(ctx context.Context, actor string) (entity.SyncReport, error) {
+func (uc *UseCase) TriggerSyncNow(ctx context.Context, actor string) (entity.Job, error) {
 	if uc.runtime == nil {
-		return entity.SyncReport{}, fmt.Errorf("runtime trigger is not available")
+		return entity.Job{}, fmt.Errorf("runtime trigger is not available")
 	}
-	report, err := uc.runtime.TriggerSyncNow(ctx)
-	if err != nil {
-		return entity.SyncReport{}, err
-	}
-	_ = uc.RecordAudit(ctx, actor, "sync.trigger_now", "sync", "", map[string]any{
-		"events":         len(report.Events),
-		"initial_import": report.InitialImport,
+	job := uc.jobs.Start(entity.JobKindSync, "pCloud sync", func(jctx context.Context) (map[string]any, error) {
+		report, err := uc.runtime.TriggerSyncNow(jctx)
+		if err != nil {
+			return nil, err
+		}
+		result := map[string]any{
+			"events":         len(report.Events),
+			"initial_import": report.InitialImport,
+		}
+		_ = uc.RecordAudit(jctx, actor, "sync.trigger_now", "sync", "", result)
+		return result, nil
 	})
-	return report, nil
+	return job, nil
+}
+
+// ListJobs returns the most recent background jobs, newest first.
+func (uc *UseCase) ListJobs(_ context.Context) []entity.Job {
+	if uc.jobs == nil {
+		return nil
+	}
+	return uc.jobs.List()
 }
 
 func (uc *UseCase) RecordAudit(ctx context.Context, actor, action, targetType, targetID string, metadata map[string]any) error {
@@ -363,45 +378,59 @@ func (uc *UseCase) resolveTargetChannel(ctx context.Context, channelID string) (
 	return ch, history, nil
 }
 
-func (uc *UseCase) TriggerScheduleNow(ctx context.Context, channelID, actor string) (entity.ManualScheduleTriggerResult, error) {
+func (uc *UseCase) TriggerScheduleNow(ctx context.Context, channelID, actor string) (entity.Job, error) {
 	if uc.runtime == nil {
-		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("runtime trigger is not available")
+		return entity.Job{}, fmt.Errorf("runtime trigger is not available")
 	}
 	ch, history, err := uc.resolveTargetChannel(ctx, channelID)
 	if err != nil {
-		return entity.ManualScheduleTriggerResult{}, err
+		return entity.Job{}, err
 	}
-	res, err := uc.runtime.TriggerScheduleNow(ctx, ch, history)
-	if err != nil {
-		return entity.ManualScheduleTriggerResult{}, err
-	}
-	_ = uc.RecordAudit(ctx, actor, "schedule.trigger_now", "schedule", ch, map[string]any{
-		"triggered":  res.Triggered,
-		"album_id":   res.AlbumID,
-		"album_name": res.AlbumName,
-		"channel_id": res.ChannelID,
-		"message_id": res.MessageID,
+	job := uc.jobs.Start(entity.JobKindScheduleSend, ch, func(jctx context.Context) (map[string]any, error) {
+		res, err := uc.runtime.TriggerScheduleNow(jctx, ch, history)
+		if err != nil {
+			return nil, err
+		}
+		result := map[string]any{
+			"triggered":  res.Triggered,
+			"album_id":   res.AlbumID,
+			"album_name": res.AlbumName,
+			"channel_id": res.ChannelID,
+			"message_id": res.MessageID,
+		}
+		_ = uc.RecordAudit(jctx, actor, "schedule.trigger_now", "schedule", ch, result)
+		return result, nil
 	})
-	return res, nil
+	return job, nil
 }
 
-func (uc *UseCase) SendAlbumTest(ctx context.Context, albumID int, channelID, actor string) (entity.ManualScheduleTriggerResult, error) {
+func (uc *UseCase) SendAlbumTest(ctx context.Context, albumID int, channelID, actor string) (entity.Job, error) {
 	if uc.runtime == nil {
-		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("runtime trigger is not available")
+		return entity.Job{}, fmt.Errorf("runtime trigger is not available")
 	}
 	ch, _, err := uc.resolveTargetChannel(ctx, channelID)
 	if err != nil {
-		return entity.ManualScheduleTriggerResult{}, err
+		return entity.Job{}, err
 	}
-	res, err := uc.runtime.SendAlbumTest(ctx, ch, albumID)
-	if err != nil {
-		return entity.ManualScheduleTriggerResult{}, err
+	// Resolve the album name up front for a friendlier job label; fall back to
+	// the id when the album cannot be loaded (the job itself will surface the error).
+	label := strconv.Itoa(albumID)
+	if album, aerr := uc.albums.GetByID(ctx, albumID); aerr == nil && strings.TrimSpace(album.Name) != "" {
+		label = album.Name
 	}
-	_ = uc.RecordAudit(ctx, actor, "album.send_test", "album", strconv.Itoa(albumID), map[string]any{
-		"channel_id": res.ChannelID,
-		"album_id":   res.AlbumID,
-		"album_name": res.AlbumName,
-		"message_id": res.MessageID,
+	job := uc.jobs.Start(entity.JobKindSendTest, label, func(jctx context.Context) (map[string]any, error) {
+		res, err := uc.runtime.SendAlbumTest(jctx, ch, albumID)
+		if err != nil {
+			return nil, err
+		}
+		result := map[string]any{
+			"channel_id": res.ChannelID,
+			"album_id":   res.AlbumID,
+			"album_name": res.AlbumName,
+			"message_id": res.MessageID,
+		}
+		_ = uc.RecordAudit(jctx, actor, "album.send_test", "album", strconv.Itoa(albumID), result)
+		return result, nil
 	})
-	return res, nil
+	return job, nil
 }

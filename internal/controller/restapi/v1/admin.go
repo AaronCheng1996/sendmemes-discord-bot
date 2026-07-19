@@ -398,12 +398,20 @@ func (r *V1) putSyncSettings(ctx *fiber.Ctx) error {
 }
 
 func (r *V1) triggerSyncNow(ctx *fiber.Ctx) error {
-	report, err := r.a.TriggerSyncNow(ctx.UserContext(), actorFromCtx(ctx))
+	job, err := r.a.TriggerSyncNow(ctx.UserContext(), actorFromCtx(ctx))
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - triggerSyncNow")
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
-	return ctx.Status(http.StatusOK).JSON(report)
+	return ctx.Status(http.StatusAccepted).JSON(job)
+}
+
+func (r *V1) listJobs(ctx *fiber.Ctx) error {
+	jobs := r.a.ListJobs(ctx.UserContext())
+	if jobs == nil {
+		jobs = []entity.Job{}
+	}
+	return ctx.Status(http.StatusOK).JSON(jobs)
 }
 
 func (r *V1) listSyncEvents(ctx *fiber.Ctx) error {
@@ -438,12 +446,12 @@ func (r *V1) triggerScheduleNow(ctx *fiber.Ctx) error {
 	if err := ctx.BodyParser(&body); err != nil {
 		body = request.ScheduleTriggerNow{}
 	}
-	res, err := r.a.TriggerScheduleNow(ctx.UserContext(), strings.TrimSpace(body.ChannelID), actorFromCtx(ctx))
+	job, err := r.a.TriggerScheduleNow(ctx.UserContext(), strings.TrimSpace(body.ChannelID), actorFromCtx(ctx))
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - triggerScheduleNow")
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
-	return ctx.Status(http.StatusOK).JSON(res)
+	return ctx.Status(http.StatusAccepted).JSON(job)
 }
 
 func (r *V1) sendAlbumTest(ctx *fiber.Ctx) error {
@@ -455,10 +463,10 @@ func (r *V1) sendAlbumTest(ctx *fiber.Ctx) error {
 	if err := ctx.BodyParser(&body); err != nil {
 		body = request.AlbumSendTest{}
 	}
-	res, err := r.a.SendAlbumTest(ctx.UserContext(), id, strings.TrimSpace(body.ChannelID), actorFromCtx(ctx))
+	job, err := r.a.SendAlbumTest(ctx.UserContext(), id, strings.TrimSpace(body.ChannelID), actorFromCtx(ctx))
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - sendAlbumTest")
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
-	return ctx.Status(http.StatusOK).JSON(res)
+	return ctx.Status(http.StatusAccepted).JSON(job)
 }

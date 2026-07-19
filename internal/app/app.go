@@ -18,6 +18,7 @@ import (
 	adminuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/admin"
 	appsettingsuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/appsettings"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/images"
+	jobsuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/jobs"
 	rulesuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/rules"
 	syncuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/sync"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/translation"
@@ -91,7 +92,8 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		l.Fatal(fmt.Errorf("app - Run - discord.NewBot: %w", err))
 	}
 	discordBot.Start()
-	adminUseCase := adminuc.New(albumsRepo, imagesRepo, imagesUseCase, rulesUseCase, appSettingsUseCase, adminAuditRepo, syncEventsRepo, systemRepo, discordBot, defaultSendMode)
+	jobsManager := jobsuc.New()
+	adminUseCase := adminuc.New(albumsRepo, imagesRepo, imagesUseCase, rulesUseCase, appSettingsUseCase, adminAuditRepo, syncEventsRepo, systemRepo, discordBot, jobsManager, defaultSendMode)
 
 	// HTTP Server (REST API)
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))

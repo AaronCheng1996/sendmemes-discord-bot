@@ -94,6 +94,15 @@ type (
 		SetSyncInterval(ctx context.Context, interval string) (entity.AppSettings, error)
 	}
 
+	// Jobs runs long-running deliveries in the background and exposes their state.
+	Jobs interface {
+		// Start records a running job, runs fn in a goroutine, and returns the job
+		// immediately. fn's result/error becomes the job's terminal state.
+		Start(kind entity.JobKind, label string, fn func(context.Context) (map[string]any, error)) entity.Job
+		// List returns the most recent jobs, newest first.
+		List() []entity.Job
+	}
+
 	AdminRuntime interface {
 		// TriggerScheduleNow sends a random album immediately to channelID.
 		TriggerScheduleNow(ctx context.Context, channelID string, historySize int) (entity.ManualScheduleTriggerResult, error)
@@ -128,16 +137,19 @@ type (
 		// Sync settings + manual trigger.
 		GetSyncSettings(ctx context.Context) (entity.AppSettings, error)
 		UpdateSyncSettings(ctx context.Context, interval, actor string) (entity.AppSettings, error)
-		TriggerSyncNow(ctx context.Context, actor string) (entity.SyncReport, error)
+		// TriggerSyncNow queues a pCloud sync as a background job and returns it.
+		TriggerSyncNow(ctx context.Context, actor string) (entity.Job, error)
 		RecordAudit(ctx context.Context, actor, action, targetType, targetID string, metadata map[string]any) error
 		// ListSyncEvents returns paginated sync discovery events, newest first.
 		ListSyncEvents(ctx context.Context, offset, limit int) ([]entity.SyncEvent, int, error)
 		GetSystemStatus(ctx context.Context) (entity.SystemStatus, error)
-		// TriggerScheduleNow sends a random album now to channelID (empty = first
-		// enabled scheduled rule's channel).
-		TriggerScheduleNow(ctx context.Context, channelID, actor string) (entity.ManualScheduleTriggerResult, error)
-		// SendAlbumTest delivers a one-off preview for albumID to channelID (empty =
-		// first enabled scheduled rule's channel).
-		SendAlbumTest(ctx context.Context, albumID int, channelID, actor string) (entity.ManualScheduleTriggerResult, error)
+		// ListJobs returns the most recent background jobs, newest first.
+		ListJobs(ctx context.Context) []entity.Job
+		// TriggerScheduleNow queues a random album send to channelID (empty = first
+		// enabled scheduled rule's channel) as a background job and returns it.
+		TriggerScheduleNow(ctx context.Context, channelID, actor string) (entity.Job, error)
+		// SendAlbumTest queues a one-off preview for albumID to channelID (empty =
+		// first enabled scheduled rule's channel) as a background job and returns it.
+		SendAlbumTest(ctx context.Context, albumID int, channelID, actor string) (entity.Job, error)
 	}
 )
