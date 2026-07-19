@@ -95,7 +95,7 @@ var slashCommands = []*discordgo.ApplicationCommand{
 func (b *Bot) handleReady(s *discordgo.Session, r *discordgo.Ready) {
 	b.l.Info("discord bot ready: user %s", r.User.Username)
 	if b.cfg.Discord.ApplicationID == "" {
-		b.l.Info("SENDMEMES_DISCORD_APPLICATION_ID not set, skipping slash command registration")
+		b.l.Info("DISCORD_APPLICATION_ID not set, skipping slash command registration")
 		return
 	}
 	registered, err := s.ApplicationCommandBulkOverwrite(

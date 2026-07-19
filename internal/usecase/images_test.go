@@ -79,7 +79,7 @@ func TestResolvePublicURLAPIError(t *testing.T) {
 	require.Error(t, err)
 }
 
-// Non-pCloud images fall back to ResolveURL (local path → SENDMEMES_HTTP_PUBLIC_URL).
+// Non-pCloud images fall back to ResolveURL (local path → HTTP_PUBLIC_URL).
 func TestResolvePublicURLNonPCloudFallback(t *testing.T) {
 	t.Parallel()
 

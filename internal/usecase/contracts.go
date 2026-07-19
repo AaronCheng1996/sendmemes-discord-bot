@@ -58,7 +58,7 @@ type (
 		// Returns (image, true, nil) when a cover exists, (zero, false, nil) when it does not.
 		GetAlbumCover(ctx context.Context, albumName string) (entity.Image, bool, error)
 		// ResolveURL returns a public URL suitable for a Discord embed.
-		// For pCloud images it calls GetFileLink; for local paths it prepends SENDMEMES_HTTP_PUBLIC_URL.
+		// For pCloud images it calls GetFileLink; for local paths it prepends HTTP_PUBLIC_URL.
 		ResolveURL(ctx context.Context, img entity.Image) (string, error)
 		// ResolvePublicURL returns a permanent pCloud public share URL for img,
 		// persisting it on first resolution. Unlike ResolveURL the link never

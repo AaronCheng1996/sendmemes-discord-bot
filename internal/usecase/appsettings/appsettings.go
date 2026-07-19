@@ -18,7 +18,7 @@ type UseCase struct {
 }
 
 // New creates an app-settings use case. defaultInterval is the env fallback
-// (SENDMEMES_PCLOUD_SYNC_INTERVAL) used until a value is stored.
+// (PCLOUD_SYNC_INTERVAL) used until a value is stored.
 func New(r repo.AppSettingsRepo, defaultInterval string) *UseCase {
 	return &UseCase{repo: r, defaultInterval: defaultInterval}
 }

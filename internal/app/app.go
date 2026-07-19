@@ -67,7 +67,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	// Validate the configured default album send mode once, fail fast on garbage.
 	defaultSendMode, err := entity.ParseAlbumSendMode(cfg.Discord.AlbumDefaultSendMode)
 	if err != nil {
-		l.Fatal(fmt.Errorf("app - Run - invalid SENDMEMES_ALBUM_DEFAULT_SEND_MODE: %w", err))
+		l.Fatal(fmt.Errorf("app - Run - invalid ALBUM_DEFAULT_SEND_MODE: %w", err))
 	}
 	syncUseCase := syncuc.New(pcloudClient, albumsRepo, imagesRepo, syncEventsRepo, cfg.PCloud.RootFolderIDs, defaultSendMode)
 
@@ -119,8 +119,8 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 }
 
 // defaultRulesFromEnv builds the seed delivery rules from env configuration:
-// a scheduled rule from SENDMEMES_DISCORD_CHANNEL_ID and new_album/new_files rules from
-// SENDMEMES_DISCORD_NOTIFY_CHANNEL_ID. Only seeded once, when no rules exist yet.
+// a scheduled rule from DISCORD_CHANNEL_ID and new_album/new_files rules from
+// DISCORD_NOTIFY_CHANNEL_ID. Only seeded once, when no rules exist yet.
 func defaultRulesFromEnv(cfg *config.Config) []entity.DeliveryRule {
 	var rules []entity.DeliveryRule
 	if strings.TrimSpace(cfg.Discord.SendChannelID) != "" {

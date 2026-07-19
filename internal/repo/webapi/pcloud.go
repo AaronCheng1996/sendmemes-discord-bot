@@ -266,7 +266,7 @@ func (c *PCloudClient) relogin(ctx context.Context) error {
 	// would both be wrong and surface a misleading verification-code error, so
 	// fail clearly instead.
 	if c.oauth {
-		return fmt.Errorf("PCloudClient - relogin: OAuth access token rejected (revoked or wrong region); re-authorize the pCloud app for a new SENDMEMES_PCLOUD_ACCESS_TOKEN")
+		return fmt.Errorf("PCloudClient - relogin: OAuth access token rejected (revoked or wrong region); re-authorize the pCloud app for a new PCLOUD_ACCESS_TOKEN")
 	}
 	if c.username == "" {
 		return fmt.Errorf("PCloudClient - relogin: no username/password configured for token refresh")

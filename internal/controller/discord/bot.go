@@ -661,7 +661,7 @@ func (b *Bot) editInteractionContent(s *discordgo.Session, i *discordgo.Interact
 // Verbose logging helper
 // ---------------------------------------------------------------------------
 
-// vlog emits an info log only when SENDMEMES_DISCORD_VERBOSE_LOG is enabled.
+// vlog emits an info log only when DISCORD_VERBOSE_LOG is enabled.
 // Use this for per-request and per-batch operational messages.
 func (b *Bot) vlog(format string, args ...interface{}) {
 	if b.cfg.Discord.VerboseLog {
