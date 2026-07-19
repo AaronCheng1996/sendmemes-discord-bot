@@ -7,7 +7,7 @@
 # Prerequisites on the host:
 #   - `shared_net` network exists:  docker network create shared_net
 #   - a PostgreSQL service is reachable as `postgres:5432` on that network
-#   - the target database (POSTGRES_DB, default `sendmemes`) already exists
+#   - the target database (SENDMEMES_POSTGRES_DB, default `sendmemes`) already exists
 #     (the app auto-creates its TABLES via the migrate build tag, but not the
 #      database itself)
 #   - a `.env` file next to this compose supplies the values below
@@ -24,40 +24,42 @@ services:
       - "8090:8080"
     environment:
       # App
-      APP_NAME: sendmemes-discord-bot
-      APP_VERSION: "1.0.0"
+      SENDMEMES_APP_NAME: sendmemes-discord-bot
+      SENDMEMES_APP_VERSION: "1.0.0"
       # HTTP
-      HTTP_PORT: "8080"
-      HTTP_USE_PREFORK_MODE: "false"
-      HTTP_PUBLIC_URL: ${HTTP_PUBLIC_URL:-http://localhost:8090}
+      SENDMEMES_HTTP_PORT: "8080"
+      SENDMEMES_HTTP_USE_PREFORK_MODE: "false"
+      SENDMEMES_HTTP_PUBLIC_URL: ${SENDMEMES_HTTP_PUBLIC_URL:-http://localhost:8090}
       # Logger
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      # Database (shared postgres on shared_net)
-      PG_POOL_MAX: ${PG_POOL_MAX:-2}
-      PG_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sendmemes}?sslmode=disable
+      SENDMEMES_LOG_LEVEL: ${SENDMEMES_LOG_LEVEL:-info}
+      # Database (shared postgres on shared_net).
+      # POSTGRES_USER / POSTGRES_PASSWORD stay unprefixed: they are the shared
+      # cluster credentials, reused across every app on this host.
+      SENDMEMES_PG_POOL_MAX: ${SENDMEMES_PG_POOL_MAX:-2}
+      SENDMEMES_PG_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${SENDMEMES_POSTGRES_DB:-sendmemes}?sslmode=disable
       # Admin API / UI sign-in
-      ADMIN_API_KEY: ${ADMIN_API_KEY}
+      SENDMEMES_ADMIN_API_KEY: ${SENDMEMES_ADMIN_API_KEY}
       # Discord
-      DISCORD_TOKEN: ${DISCORD_TOKEN}
-      DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID}
-      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
-      DISCORD_CHANNEL_ID: ${DISCORD_CHANNEL_ID}
-      DISCORD_NOTIFY_CHANNEL_ID: ${DISCORD_NOTIFY_CHANNEL_ID}
-      DISCORD_SEND_INTERVAL: ${DISCORD_SEND_INTERVAL:-6h}
-      DISCORD_SEND_HISTORY_SIZE: ${DISCORD_SEND_HISTORY_SIZE:-10}
-      DISCORD_VERBOSE_LOG: ${DISCORD_VERBOSE_LOG:-true}
-      ALBUM_DEFAULT_SEND_MODE: ${ALBUM_DEFAULT_SEND_MODE:-Random}
+      SENDMEMES_DISCORD_TOKEN: ${SENDMEMES_DISCORD_TOKEN}
+      SENDMEMES_DISCORD_APPLICATION_ID: ${SENDMEMES_DISCORD_APPLICATION_ID}
+      SENDMEMES_DISCORD_GUILD_ID: ${SENDMEMES_DISCORD_GUILD_ID}
+      SENDMEMES_DISCORD_CHANNEL_ID: ${SENDMEMES_DISCORD_CHANNEL_ID}
+      SENDMEMES_DISCORD_NOTIFY_CHANNEL_ID: ${SENDMEMES_DISCORD_NOTIFY_CHANNEL_ID}
+      SENDMEMES_DISCORD_SEND_INTERVAL: ${SENDMEMES_DISCORD_SEND_INTERVAL:-6h}
+      SENDMEMES_DISCORD_SEND_HISTORY_SIZE: ${SENDMEMES_DISCORD_SEND_HISTORY_SIZE:-10}
+      SENDMEMES_DISCORD_VERBOSE_LOG: ${SENDMEMES_DISCORD_VERBOSE_LOG:-true}
+      SENDMEMES_ALBUM_DEFAULT_SEND_MODE: ${SENDMEMES_ALBUM_DEFAULT_SEND_MODE:-Random}
       # pCloud
-      PCLOUD_ACCESS_TOKEN: ${PCLOUD_ACCESS_TOKEN}
-      PCLOUD_TOKEN_TYPE: ${PCLOUD_TOKEN_TYPE:-session}
-      PCLOUD_USERNAME: ${PCLOUD_USERNAME}
-      PCLOUD_PASSWORD: ${PCLOUD_PASSWORD}
-      CLOUD_MAIN_FOLDER_ID: ${CLOUD_MAIN_FOLDER_ID}
-      PCLOUD_API_ENDPOINT: ${PCLOUD_API_ENDPOINT:-https://api.pcloud.com}
-      PCLOUD_SYNC_INTERVAL: ${PCLOUD_SYNC_INTERVAL:-1h}
+      SENDMEMES_PCLOUD_ACCESS_TOKEN: ${SENDMEMES_PCLOUD_ACCESS_TOKEN}
+      SENDMEMES_PCLOUD_TOKEN_TYPE: ${SENDMEMES_PCLOUD_TOKEN_TYPE:-session}
+      SENDMEMES_PCLOUD_USERNAME: ${SENDMEMES_PCLOUD_USERNAME}
+      SENDMEMES_PCLOUD_PASSWORD: ${SENDMEMES_PCLOUD_PASSWORD}
+      SENDMEMES_CLOUD_MAIN_FOLDER_ID: ${SENDMEMES_CLOUD_MAIN_FOLDER_ID}
+      SENDMEMES_PCLOUD_API_ENDPOINT: ${SENDMEMES_PCLOUD_API_ENDPOINT:-https://api.pcloud.com}
+      SENDMEMES_PCLOUD_SYNC_INTERVAL: ${SENDMEMES_PCLOUD_SYNC_INTERVAL:-1h}
       # Observability
-      METRICS_ENABLED: ${METRICS_ENABLED:-true}
-      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
+      SENDMEMES_METRICS_ENABLED: ${SENDMEMES_METRICS_ENABLED:-true}
+      SENDMEMES_SWAGGER_ENABLED: ${SENDMEMES_SWAGGER_ENABLED:-false}
     restart: unless-stopped
     networks:
       - shared_net

@@ -24,7 +24,7 @@ keeps that structure: `cmd/`, `config/`, `internal/{app,entity,usecase,repo,cont
   Rules are managed from the admin UI or the `/schedule` slash/prefix command
   (`list` / `add` / `remove`). A scheduled goroutine per rule is reconciled
   from the DB every ~30s, so edits take effect without a restart. Env
-  (`DISCORD_CHANNEL_ID`, `DISCORD_NOTIFY_CHANNEL_ID`) seeds default rules once
+  (`SENDMEMES_DISCORD_CHANNEL_ID`, `SENDMEMES_DISCORD_NOTIFY_CHANNEL_ID`) seeds default rules once
   when the table is empty.
 - **Typed delivery** — each album's `send_mode` controls the message format:
   `Random` (size-fitted batch of images), `Order` (comic pages in natural
@@ -43,7 +43,7 @@ keeps that structure: `cmd/`, `config/`, `internal/{app,entity,usecase,repo,cont
 - **pCloud sync** — periodically walks the configured pCloud root folders and
   reconciles albums, images, and videos (file sizes included). The cadence is
   runtime-configurable (`app_settings.sync_interval`, seeded from
-  `PCLOUD_SYNC_INTERVAL`) and can be triggered on demand. Download URLs are
+  `SENDMEMES_PCLOUD_SYNC_INTERVAL`) and can be triggered on demand. Download URLs are
   short-lived, so the bot resolves them on demand and caches them in memory
   (~50 min TTL) to keep pCloud API usage low.
 
@@ -76,7 +76,7 @@ round-trips:
 ### Other endpoints
 
 - `GET /healthz` — liveness probe
-- `GET /metrics` — Prometheus, when `METRICS_ENABLED=true`
+- `GET /metrics` — Prometheus, when `SENDMEMES_METRICS_ENABLED=true`
 - `GET /swagger/*` — Swagger UI for the legacy translation routes (kept while
   those routes remain wired)
 
@@ -102,24 +102,26 @@ ui                      # Vue 3 admin dashboard (git submodule)
 
 ## Configuration
 
-All configuration is driven by environment variables (see `.env.example`).
+All configuration is driven by environment variables (see `.env.example`). Every
+variable is prefixed with `SENDMEMES_` so a shared host `.env` can serve multiple
+apps without name collisions.
 
 Highlights:
 
 | Variable | Purpose |
 |---|---|
-| `HTTP_PORT`, `HTTP_PUBLIC_URL` | HTTP server bind/port and external base URL used in resolved preview URLs |
-| `POSTGRES_*` / `PG_URL` | PostgreSQL connection (PG_URL takes precedence) |
-| `ADMIN_API_KEY` | Required for every `/v1/admin/*` request and for the UI sign-in |
-| `DISCORD_TOKEN`, `DISCORD_APPLICATION_ID`, `DISCORD_GUILD_ID` | Discord bot identity |
-| `DISCORD_CHANNEL_ID`, `DISCORD_SEND_INTERVAL`, `DISCORD_SEND_HISTORY_SIZE` | Seed the default **scheduled** delivery rule (once, when `delivery_rules` is empty) |
-| `DISCORD_NOTIFY_CHANNEL_ID` | Seeds default **new_album** + **new_files** rules (once, when `delivery_rules` is empty; empty = no notify rules) |
-| `ALBUM_DEFAULT_SEND_MODE` | Default `send_mode` for albums created by pCloud sync and admin creates that omit one (`Order`/`Random`/`Single`/`Video`/`Custom`, default `Random`) |
-| `PCLOUD_ACCESS_TOKEN` *or* `PCLOUD_USERNAME` + `PCLOUD_PASSWORD` | pCloud authentication. `PCLOUD_TOKEN_TYPE=session` (default, sent as `auth=`) or `oauth` (sent as `access_token=`); pCloud's API does not support 2FA |
-| `CLOUD_MAIN_FOLDER_ID` | Comma-separated pCloud folder IDs holding album subfolders |
-| `PCLOUD_API_ENDPOINT` | `https://api.pcloud.com` (US) or `https://eapi.pcloud.com` (EU) |
-| `PCLOUD_SYNC_INTERVAL` | Seeds `app_settings.sync_interval` (once); afterwards editable at runtime from the Connection page |
-| `METRICS_ENABLED`, `SWAGGER_ENABLED` | Toggle Prometheus and Swagger handlers |
+| `SENDMEMES_HTTP_PORT`, `SENDMEMES_HTTP_PUBLIC_URL` | HTTP server bind/port and external base URL used in resolved preview URLs |
+| `SENDMEMES_POSTGRES_*` / `SENDMEMES_PG_URL` | PostgreSQL connection (`SENDMEMES_PG_URL` takes precedence) |
+| `SENDMEMES_ADMIN_API_KEY` | Required for every `/v1/admin/*` request and for the UI sign-in |
+| `SENDMEMES_DISCORD_TOKEN`, `SENDMEMES_DISCORD_APPLICATION_ID`, `SENDMEMES_DISCORD_GUILD_ID` | Discord bot identity |
+| `SENDMEMES_DISCORD_CHANNEL_ID`, `SENDMEMES_DISCORD_SEND_INTERVAL`, `SENDMEMES_DISCORD_SEND_HISTORY_SIZE` | Seed the default **scheduled** delivery rule (once, when `delivery_rules` is empty) |
+| `SENDMEMES_DISCORD_NOTIFY_CHANNEL_ID` | Seeds default **new_album** + **new_files** rules (once, when `delivery_rules` is empty; empty = no notify rules) |
+| `SENDMEMES_ALBUM_DEFAULT_SEND_MODE` | Default `send_mode` for albums created by pCloud sync and admin creates that omit one (`Order`/`Random`/`Single`/`Video`/`Custom`, default `Random`) |
+| `SENDMEMES_PCLOUD_ACCESS_TOKEN` *or* `SENDMEMES_PCLOUD_USERNAME` + `SENDMEMES_PCLOUD_PASSWORD` | pCloud authentication. `SENDMEMES_PCLOUD_TOKEN_TYPE=session` (default, sent as `auth=`) or `oauth` (sent as `access_token=`); pCloud's API does not support 2FA |
+| `SENDMEMES_CLOUD_MAIN_FOLDER_ID` | Comma-separated pCloud folder IDs holding album subfolders |
+| `SENDMEMES_PCLOUD_API_ENDPOINT` | `https://api.pcloud.com` (US) or `https://eapi.pcloud.com` (EU) |
+| `SENDMEMES_PCLOUD_SYNC_INTERVAL` | Seeds `app_settings.sync_interval` (once); afterwards editable at runtime from the Connection page |
+| `SENDMEMES_METRICS_ENABLED`, `SENDMEMES_SWAGGER_ENABLED` | Toggle Prometheus and Swagger handlers |
 
 ## Running locally
 
@@ -129,7 +131,7 @@ and an Nginx reverse proxy.
 ```sh
 git submodule update --init --recursive
 cp .env.example .env
-# Fill in DISCORD_*, PCLOUD_*, ADMIN_API_KEY in .env
+# Fill in SENDMEMES_DISCORD_*, SENDMEMES_PCLOUD_*, SENDMEMES_ADMIN_API_KEY in .env
 docker compose up -d --build
 docker compose logs -f app
 ```
@@ -168,7 +170,7 @@ npm install
 npm run dev   # http://localhost:5173 by default
 ```
 
-Sign in with the `ADMIN_API_KEY` you set in `.env`. The key is held only in
+Sign in with the `SENDMEMES_ADMIN_API_KEY` you set in `.env`. The key is held only in
 the browser's `sessionStorage`.
 
 ## Development workflow

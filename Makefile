@@ -91,16 +91,16 @@ migrate-create:  ### create new migration
 .PHONY: migrate-create
 
 migrate-up: ### migration up
-	migrate -path migrations -database '$(PG_URL)?sslmode=disable' up
+	migrate -path migrations -database '$(SENDMEMES_PG_URL)?sslmode=disable' up
 .PHONY: migrate-up
 
 migrate-down: ### migration down one version
-	migrate -path migrations -database '$(PG_URL)?sslmode=disable' down 1
+	migrate -path migrations -database '$(SENDMEMES_PG_URL)?sslmode=disable' down 1
 .PHONY: migrate-down
 
 db-reset: ### reset DB to a clean state (drops everything, re-runs init migration)
-	migrate -path migrations -database '$(PG_URL)?sslmode=disable' down -all
-	migrate -path migrations -database '$(PG_URL)?sslmode=disable' up
+	migrate -path migrations -database '$(SENDMEMES_PG_URL)?sslmode=disable' down -all
+	migrate -path migrations -database '$(SENDMEMES_PG_URL)?sslmode=disable' up
 .PHONY: db-reset
 
 bin-deps: ### install tools

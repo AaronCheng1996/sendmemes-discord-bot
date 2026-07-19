@@ -16,7 +16,7 @@ type UseCase struct {
 	repo      repo.ImagesRepo
 	albums    repo.AlbumsRepo
 	pcloud    repo.PCloudAPI
-	publicURL string // HTTP_PUBLIC_URL, used for local/default images
+	publicURL string // SENDMEMES_HTTP_PUBLIC_URL, used for local/default images
 }
 
 // New creates an images use case.
@@ -237,7 +237,7 @@ func (uc *UseCase) GetAlbumCover(ctx context.Context, albumName string) (entity.
 
 // ResolveURL returns a public URL suitable for a Discord embed.
 // - pCloud images: generates a fresh temporary download link via GetFileLink.
-// - Local/relative paths (starting with "/"): prepends HTTP_PUBLIC_URL.
+// - Local/relative paths (starting with "/"): prepends SENDMEMES_HTTP_PUBLIC_URL.
 // - Already absolute URLs: returned as-is.
 func (uc *UseCase) ResolveURL(ctx context.Context, img entity.Image) (string, error) {
 	if img.Source == "pcloud" {

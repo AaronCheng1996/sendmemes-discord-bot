@@ -21,9 +21,9 @@ const (
 )
 
 func init() {
-	databaseURL, ok := os.LookupEnv("PG_URL")
+	databaseURL, ok := os.LookupEnv("SENDMEMES_PG_URL")
 	if !ok || len(databaseURL) == 0 {
-		log.Fatalf("migrate: environment variable not declared: PG_URL")
+		log.Fatalf("migrate: environment variable not declared: SENDMEMES_PG_URL")
 	}
 
 	// Only append sslmode if URL has no query string (avoid duplicate ?sslmode=disable)
