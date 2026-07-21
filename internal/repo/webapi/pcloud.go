@@ -136,7 +136,7 @@ type PCloudClient struct {
 	// triggering connection-level rate limiting (EOF responses).
 	sem chan struct{}
 
-	// loginMu serialises re-login so that when many goroutines detect a
+	// loginMu serializes re-login so that when many goroutines detect a
 	// token error at the same time only one issues the userinfo request.
 	loginMu sync.Mutex
 
@@ -177,7 +177,7 @@ func NewPCloudClient(accessToken, tokenType, username, password, apiEndpoint str
 }
 
 // acquire blocks until a slot in the concurrency semaphore is available or
-// ctx is cancelled.
+// ctx is canceled.
 func (c *PCloudClient) acquire(ctx context.Context) error {
 	select {
 	case c.sem <- struct{}{}:
@@ -298,6 +298,60 @@ func (c *PCloudClient) authQuery() string {
 	return c.tokenParam + "=" + url.QueryEscape(c.token)
 }
 
+// clearToken drops the cached token so the next relogin fetches a fresh one.
+func (c *PCloudClient) clearToken() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.token = ""
+	c.tokenParam = ""
+}
+
+// retryWithRelogin runs call under the shared pCloud retry policy: up to
+// pcloudMaxRetries attempts with exponential backoff, re-logging in between
+// attempts. Token errors are the only retriable class, so reaching attempt > 1
+// always means the cached token was rejected; anything else returns immediately.
+// It is a free function because Go methods cannot have type parameters.
+func retryWithRelogin[T any](
+	ctx context.Context,
+	c *PCloudClient,
+	op string,
+	call func(context.Context) (T, error),
+) (T, error) {
+	var zero T
+	var lastErr error
+	backoff := pcloudRetryBase
+
+	for attempt := 1; attempt <= pcloudMaxRetries; attempt++ {
+		if attempt > 1 {
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return zero, ctx.Err()
+			}
+			backoff *= 2
+
+			if c.username != "" {
+				if rerr := c.relogin(ctx); rerr != nil {
+					return zero, fmt.Errorf("PCloudClient - %s - relogin: %w", op, rerr)
+				}
+			}
+		}
+
+		out, err := call(ctx)
+		if err == nil {
+			return out, nil
+		}
+		lastErr = err
+
+		if !isTokenErr(err) {
+			return zero, err // non-retriable
+		}
+		c.clearToken() // next attempt re-logs in
+	}
+
+	return zero, fmt.Errorf("PCloudClient - %s - all %d attempts failed: %w", op, pcloudMaxRetries, lastErr)
+}
+
 // ---------------------------------------------------------------------------
 // ListFolder
 // ---------------------------------------------------------------------------
@@ -307,44 +361,9 @@ func (c *PCloudClient) authQuery() string {
 // Files directly inside folderID (root-level, no album subfolder) are skipped.
 // Retries up to pcloudMaxRetries times; re-logs in if the token has expired.
 func (c *PCloudClient) ListFolder(ctx context.Context, folderID int64) ([]repo.PCloudEntry, error) {
-	var lastErr error
-	backoff := pcloudRetryBase
-	needRelogin := false
-
-	for attempt := 1; attempt <= pcloudMaxRetries; attempt++ {
-		if attempt > 1 {
-			select {
-			case <-time.After(backoff):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-			backoff *= 2
-
-			if needRelogin && c.username != "" {
-				if rerr := c.relogin(ctx); rerr != nil {
-					return nil, fmt.Errorf("PCloudClient - ListFolder - relogin: %w", rerr)
-				}
-				needRelogin = false
-			}
-		}
-
-		entries, err := c.doListFolder(ctx, folderID)
-		if err == nil {
-			return entries, nil
-		}
-		lastErr = err
-		if isTokenErr(err) {
-			needRelogin = true
-			// Clear cached token so relogin proceeds.
-			c.mu.Lock()
-			c.token = ""
-			c.tokenParam = ""
-			c.mu.Unlock()
-			continue
-		}
-		return nil, err // non-retriable
-	}
-	return nil, fmt.Errorf("PCloudClient - ListFolder - all %d attempts failed: %w", pcloudMaxRetries, lastErr)
+	return retryWithRelogin(ctx, c, "ListFolder", func(ctx context.Context) ([]repo.PCloudEntry, error) {
+		return c.doListFolder(ctx, folderID)
+	})
 }
 
 func (c *PCloudClient) doListFolder(ctx context.Context, folderID int64) ([]repo.PCloudEntry, error) {
@@ -443,45 +462,16 @@ func (c *PCloudClient) GetFileLink(ctx context.Context, fileID int64) (string, e
 		return url, nil
 	}
 
-	var lastErr error
-	backoff := pcloudRetryBase
-	needRelogin := false
-
-	for attempt := 1; attempt <= pcloudMaxRetries; attempt++ {
-		if attempt > 1 {
-			select {
-			case <-time.After(backoff):
-			case <-ctx.Done():
-				return "", ctx.Err()
-			}
-			backoff *= 2
-
-			if needRelogin && c.username != "" {
-				if rerr := c.relogin(ctx); rerr != nil {
-					return "", fmt.Errorf("PCloudClient - GetFileLink - relogin: %w", rerr)
-				}
-				needRelogin = false
-			}
-		}
-
-		link, err := c.doGetFileLink(ctx, fileID)
-		if err == nil {
-			c.putFileLinkInCache(fileID, link)
-			return link, nil
-		}
-		lastErr = err
-		if isTokenErr(err) {
-			needRelogin = true
-			// Clear cached token so relogin proceeds.
-			c.mu.Lock()
-			c.token = ""
-			c.tokenParam = ""
-			c.mu.Unlock()
-			continue
-		}
-		return "", err // non-retriable
+	link, err := retryWithRelogin(ctx, c, "GetFileLink", func(ctx context.Context) (string, error) {
+		return c.doGetFileLink(ctx, fileID)
+	})
+	if err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("PCloudClient - GetFileLink - all %d attempts failed: %w", pcloudMaxRetries, lastErr)
+
+	c.putFileLinkInCache(fileID, link)
+
+	return link, nil
 }
 
 func (c *PCloudClient) doGetFileLink(ctx context.Context, fileID int64) (string, error) {
@@ -528,44 +518,9 @@ func (c *PCloudClient) doGetFileLink(ctx context.Context, fileID int64) (string,
 // exists for the file, the existing one is returned.
 // Retries up to pcloudMaxRetries times; re-logs in if the token has expired.
 func (c *PCloudClient) GetFilePublicLink(ctx context.Context, fileID int64) (string, error) {
-	var lastErr error
-	backoff := pcloudRetryBase
-	needRelogin := false
-
-	for attempt := 1; attempt <= pcloudMaxRetries; attempt++ {
-		if attempt > 1 {
-			select {
-			case <-time.After(backoff):
-			case <-ctx.Done():
-				return "", ctx.Err()
-			}
-			backoff *= 2
-
-			if needRelogin && c.username != "" {
-				if rerr := c.relogin(ctx); rerr != nil {
-					return "", fmt.Errorf("PCloudClient - GetFilePublicLink - relogin: %w", rerr)
-				}
-				needRelogin = false
-			}
-		}
-
-		link, err := c.doGetFilePublicLink(ctx, fileID)
-		if err == nil {
-			return link, nil
-		}
-		lastErr = err
-		if isTokenErr(err) {
-			needRelogin = true
-			// Clear cached token so relogin proceeds.
-			c.mu.Lock()
-			c.token = ""
-			c.tokenParam = ""
-			c.mu.Unlock()
-			continue
-		}
-		return "", err // non-retriable
-	}
-	return "", fmt.Errorf("PCloudClient - GetFilePublicLink - all %d attempts failed: %w", pcloudMaxRetries, lastErr)
+	return retryWithRelogin(ctx, c, "GetFilePublicLink", func(ctx context.Context) (string, error) {
+		return c.doGetFilePublicLink(ctx, fileID)
+	})
 }
 
 func (c *PCloudClient) doGetFilePublicLink(ctx context.Context, fileID int64) (string, error) {

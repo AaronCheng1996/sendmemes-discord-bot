@@ -1,7 +1,7 @@
 package repo
 
 // AlbumAdminListQuery drives filtered/sorted admin album listing.
-// Zero value: sort by id ascending, no filter (matches legacy behaviour).
+// Zero value: sort by id ascending, no filter (matches legacy behavior).
 type AlbumAdminListQuery struct {
 	SortBy    string // id | name | positive_rating | cover
 	SortAsc   bool

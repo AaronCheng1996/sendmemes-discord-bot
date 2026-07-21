@@ -1,4 +1,4 @@
-// Package sync implements the pCloud image synchronisation use case.
+// Package sync implements the pCloud image synchronization use case.
 package sync
 
 import (
@@ -18,7 +18,7 @@ const (
 	maxEventMedia = 50
 )
 
-// UseCase synchronises the pCloud folder tree with the database.
+// UseCase synchronizes the pCloud folder tree with the database.
 type UseCase struct {
 	pcloud      repo.PCloudAPI
 	albums      repo.AlbumsRepo

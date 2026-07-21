@@ -298,7 +298,7 @@ func (b *Bot) reconcileScheduledRules(running map[int64]scheduledHandle) {
 }
 
 // runScheduledRule fires one scheduled rule on its schedule (a Go duration or a
-// cron expression) until its context or the bot's stop channel is cancelled.
+// cron expression) until its context or the bot's stop channel is canceled.
 func (b *Bot) runScheduledRule(ctx context.Context, rule entity.DeliveryRule) {
 	spec, err := schedulespec.Parse(rule.SendInterval)
 	if err != nil {
