@@ -43,8 +43,6 @@ x-backend-app-environment: &x-backend-app-environment
   PCLOUD_SYNC_INTERVAL: "${PCLOUD_SYNC_INTERVAL:-1h}"
   # Metrics
   METRICS_ENABLED: "true"
-  # Swagger
-  SWAGGER_ENABLED: "true"
 
 
 services:

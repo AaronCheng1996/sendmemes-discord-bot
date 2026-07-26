@@ -7,18 +7,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// NewTranslationRoutes -.
-func NewTranslationRoutes(apiV1Group fiber.Router, t usecase.Translation, a usecase.Admin, l logger.Interface) {
-	r := &V1{t: t, a: a, l: l, v: validator.New(validator.WithRequiredStructEnabled())}
-
-	translationGroup := apiV1Group.Group("/translation")
-
-	{
-		translationGroup.Get("/history", r.history)
-		translationGroup.Post("/do-translate", r.doTranslate)
-	}
-}
-
 // NewAdminRoutes registers admin CRUD routes.
 func NewAdminRoutes(adminGroup fiber.Router, a usecase.Admin, l logger.Interface) {
 	r := &V1{a: a, l: l, v: validator.New(validator.WithRequiredStructEnabled())}

@@ -19,17 +19,6 @@ type PCloudEntry struct {
 }
 
 type (
-	// TranslationRepo -.
-	TranslationRepo interface {
-		Store(context.Context, entity.Translation) error
-		GetHistory(context.Context) ([]entity.Translation, error)
-	}
-
-	// TranslationWebAPI -.
-	TranslationWebAPI interface {
-		Translate(entity.Translation) (entity.Translation, error)
-	}
-
 	// AlbumsRepo manages album persistence.
 	AlbumsRepo interface {
 		List(ctx context.Context, q AlbumAdminListQuery, offset, limit int) ([]entity.Album, error)

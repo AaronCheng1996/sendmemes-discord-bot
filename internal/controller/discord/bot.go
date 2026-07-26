@@ -196,7 +196,6 @@ func entriesToFiles(entries []fileEntry) []*discordgo.File {
 type Bot struct {
 	cfg           *config.Config
 	l             logger.Interface
-	uc            usecase.Translation
 	imagesUC      usecase.Images
 	syncUC        usecase.Sync
 	rulesUC       usecase.Rules
@@ -219,7 +218,6 @@ type Bot struct {
 func NewBot(
 	cfg *config.Config,
 	l logger.Interface,
-	uc usecase.Translation,
 	imagesUC usecase.Images,
 	syncUC usecase.Sync,
 	rulesUC usecase.Rules,
@@ -239,7 +237,6 @@ func NewBot(
 	b := &Bot{
 		cfg:           cfg,
 		l:             l,
-		uc:            uc,
 		imagesUC:      imagesUC,
 		syncUC:        syncUC,
 		rulesUC:       rulesUC,

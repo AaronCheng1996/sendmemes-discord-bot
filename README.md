@@ -80,8 +80,6 @@ container's IP:
 
 - `GET /healthz` — liveness probe
 - `GET /metrics` — Prometheus, when `METRICS_ENABLED=true`
-- `GET /swagger/*` — Swagger UI for the legacy translation routes (kept while
-  those routes remain wired)
 
 ## Project layout
 
@@ -122,7 +120,7 @@ Highlights:
 | `CLOUD_MAIN_FOLDER_ID` | Comma-separated pCloud folder IDs holding album subfolders |
 | `PCLOUD_API_ENDPOINT` | `https://api.pcloud.com` (US) or `https://eapi.pcloud.com` (EU) |
 | `PCLOUD_SYNC_INTERVAL` | Seeds `app_settings.sync_interval` (once); afterwards editable at runtime from the Connection page |
-| `METRICS_ENABLED`, `SWAGGER_ENABLED` | Toggle Prometheus and Swagger handlers |
+| `METRICS_ENABLED` | Toggle the Prometheus metrics handler |
 
 ## Running locally
 
@@ -181,16 +179,11 @@ the browser's `sessionStorage`.
 | Format Go code | `make format` |
 | Lint | `make linter-golangci` |
 | Unit tests | `make test` |
-| Integration test stack (legacy translation API) | `make compose-up-integration-test` |
-| Regenerate Swagger | `make swag-v1` |
 | Regenerate mocks | `make mock` |
 | Pre-commit bundle | `make pre-commit` |
 
 ## Roadmap / known follow-ups
 
-- Drop the legacy translation feature (`/v1/translation/*`, `history` table,
-  `internal/usecase/translation`, `internal/repo/webapi/translation_google`,
-  swagger spec, integration test) once the demo wiring is no longer needed.
 - Weighted album selection that biases toward higher `positive_rating`
   (`ORDER BY RANDOM() * (1 + positive_rating) DESC`).
 - `/album_stats` slash command — surface top-rated albums in Discord.

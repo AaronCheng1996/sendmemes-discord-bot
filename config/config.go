@@ -18,7 +18,6 @@ type (
 		Discord Discord
 		PCloud  PCloud
 		Metrics Metrics
-		Swagger Swagger
 	}
 
 	// App -.
@@ -105,10 +104,6 @@ type (
 		Enabled bool `env:"METRICS_ENABLED" envDefault:"true"`
 	}
 
-	// Swagger -.
-	Swagger struct {
-		Enabled bool `env:"SWAGGER_ENABLED" envDefault:"false"`
-	}
 )
 
 // NewConfig returns app config.

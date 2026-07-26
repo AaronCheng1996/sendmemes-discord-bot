@@ -73,11 +73,3 @@ jobs:
         run: "make test"
       - name: Upload coverage report
         run: bash <(curl -s https://codecov.io/bash)
-
-  integration-tests:
-    name: runner / tests / integration
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Integration tests
-        run: "make compose-up-integration-test"

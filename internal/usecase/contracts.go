@@ -11,11 +11,6 @@ import (
 //go:generate mockgen -source=contracts.go -destination=./mocks_usecase_test.go -package=usecase_test
 
 type (
-	Translation interface {
-		Translate(context.Context, entity.Translation) (entity.Translation, error)
-		History(context.Context) (entity.TranslationHistory, error)
-	}
-
 	Images interface {
 		// GetImage returns the default (fallback) image.
 		GetImage(ctx context.Context) (entity.Image, error)

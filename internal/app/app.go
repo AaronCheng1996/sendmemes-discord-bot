@@ -21,7 +21,6 @@ import (
 	jobsuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/jobs"
 	rulesuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/rules"
 	syncuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/sync"
-	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/translation"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/httpserver"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/logger"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/postgres"
@@ -37,12 +36,6 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		l.Fatal(fmt.Errorf("app - Run - postgres.New: %w", err))
 	}
 	defer pg.Close()
-
-	// Use-Case: translation
-	translationUseCase := translation.New(
-		persistent.New(pg),
-		webapi.New(),
-	)
 
 	// Repos: images & albums
 	imagesRepo := persistent.NewImagesRepo(pg)
@@ -87,7 +80,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	}
 
 	// Discord Bot
-	discordBot, err := discord.NewBot(cfg, l, translationUseCase, imagesUseCase, syncUseCase, rulesUseCase, appSettingsUseCase)
+	discordBot, err := discord.NewBot(cfg, l, imagesUseCase, syncUseCase, rulesUseCase, appSettingsUseCase)
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - discord.NewBot: %w", err))
 	}
@@ -97,7 +90,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	// HTTP Server (REST API)
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
-	restapi.NewRouter(httpServer.App, cfg, translationUseCase, adminUseCase, l)
+	restapi.NewRouter(httpServer.App, cfg, adminUseCase, l)
 	httpServer.Start()
 
 	// Waiting signal
