@@ -8,6 +8,8 @@ jobs:
     steps:
       - name: Check out code into the Go module directory
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # only-new-issues below needs history to diff against the base branch
       - uses: actions/setup-go@v7
         with:
           go-version: '1.25'
@@ -16,6 +18,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           args: --timeout=15m
+          only-new-issues: true
 
   yamllint:
     name: runner / yamllint

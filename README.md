@@ -145,8 +145,9 @@ Highlights:
 
 ## Running locally
 
-The repository ships with a Docker Compose stack that runs PostgreSQL, the bot,
-and an Nginx reverse proxy.
+The repository ships with a Docker Compose stack that runs PostgreSQL, the
+bot, the admin dashboard, and an Nginx reverse proxy — one command gets the
+full stack:
 
 ```sh
 git submodule update --init --recursive
@@ -156,6 +157,11 @@ cp .env.example .env
 docker compose up -d --build
 docker compose logs -f app
 ```
+
+The bot's API is at `http://localhost:8080` and the dashboard at
+`http://localhost:8081` (sign in with `ADMIN_API_KEY`); `*.lvh.me` publicly
+resolves to `127.0.0.1`, so Nginx's `http://app.lvh.me` route also works
+with no `/etc/hosts` changes.
 
 To run just the database and the Go binary on the host (good for debugging):
 
@@ -182,8 +188,9 @@ files normally (`make migrate-create name=<title>`).
 
 ## Admin UI (frontend)
 
-The Vue 3 dashboard lives in the `ui/` submodule. See `ui/README.md` for
-setup. From the repo root:
+The Vue 3 dashboard lives in the `ui/` submodule. `docker compose up` already
+builds and serves it (see Running locally above); for hot-reload development
+instead, run it directly from the repo root (see `ui/README.md` for more):
 
 ```sh
 cd ui

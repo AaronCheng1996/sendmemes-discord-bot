@@ -1,4 +1,10 @@
-# Host deployment for sendmemes-discord-bot.
+# Host deployment for sendmemes-discord-bot against an EXTERNAL PostgreSQL.
+#
+# Most people should use docker-compose.yml instead — it runs its own
+# database and needs no pre-existing network. This file is for a homelab-
+# style setup that already has Postgres and a shared Docker network running
+# for other services, and wants this bot to join them rather than spin up
+# its own database.
 #
 # Pulls the image published by .github/workflows/docker-image.yml and connects
 # to existing shared infrastructure (PostgreSQL) over the external `shared_net`
@@ -13,8 +19,8 @@
 #   - a `.env` file next to this compose supplies the values below
 #
 # Usage:
-#   docker compose -f docker-compose.prod.yml pull
-#   docker compose -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.external-db.yml pull
+#   docker compose -f docker-compose.external-db.yml up -d
 
 services:
   app:

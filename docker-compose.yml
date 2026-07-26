@@ -93,6 +93,22 @@ services:
         aliases:
           - app.lvh.me
 
+  # Vue 3 admin dashboard, built from the ui/ submodule. The browser talks to
+  # the admin API directly — set the API base URL on the dashboard's
+  # Connection page (http://localhost:8080 when using the ports above).
+  ui:
+    container_name: ui
+    build:
+      context: ./ui
+    ports:
+      - "8081:80"
+    depends_on:
+      - app
+    networks:
+      app_network:
+        aliases:
+          - ui.lvh.me
+
   nginx:
     container_name: nginx
     image: nginx:1.31.3-alpine

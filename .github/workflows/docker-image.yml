@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 env:
-  DOCKER_HUB_USERNAME: aaron850130
+  DOCKER_HUB_USERNAME: ${{ vars.DOCKER_HUB_USERNAME || 'aaron850130' }}
   BACKEND_IMAGE: sendmemes-discord-bot
   UI_IMAGE: sendmemes-ui
 
