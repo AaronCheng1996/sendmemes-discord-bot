@@ -86,7 +86,7 @@ func TestResolvePublicURLNonPCloudFallback(t *testing.T) {
 	uc, _, _ := imagesUseCase(t)
 	ctx := context.Background()
 
-	img := entity.Image{ID: 8, Source: "local", URL: "/media/x.png"}
+	img := entity.Image{ID: 8, Source: "manual", URL: "/media/x.png"}
 
 	url, err := uc.ResolvePublicURL(ctx, img)
 	require.NoError(t, err)
@@ -167,7 +167,7 @@ func TestResolvePreviewURLNonPCloudFallback(t *testing.T) {
 	uc, _, _ := imagesUseCase(t)
 	ctx := context.Background()
 
-	img := entity.Image{ID: 8, Source: "local", URL: "/media/x.png"}
+	img := entity.Image{ID: 8, Source: "manual", URL: "/media/x.png"}
 
 	url, err := uc.ResolvePreviewURL(ctx, img)
 	require.NoError(t, err)

@@ -16,6 +16,10 @@ import (
 // sync use case into GetOrCreate; a non-Random value proves it is passed through.
 const testDefaultSendMode = entity.AlbumSendModeSingle
 
+// testSourceName is the source label the test use case is constructed with;
+// asserted against on every upsert/prune call to prove it is passed through.
+const testSourceName = entity.MediaSourcePCloud
+
 func syncUseCase(t *testing.T) (*syncuc.UseCase, *MockMediaSource, *MockAlbumsRepo, *MockImagesRepo, *MockSyncEventsRepo) {
 	t.Helper()
 
@@ -27,7 +31,7 @@ func syncUseCase(t *testing.T) (*syncuc.UseCase, *MockMediaSource, *MockAlbumsRe
 	images := NewMockImagesRepo(mockCtl)
 	events := NewMockSyncEventsRepo(mockCtl)
 
-	useCase := syncuc.New(source, albums, images, events, testDefaultSendMode)
+	useCase := syncuc.New(source, testSourceName, albums, images, events, testDefaultSendMode)
 
 	return useCase, source, albums, images, events
 }
@@ -36,7 +40,7 @@ func syncUseCase(t *testing.T) (*syncuc.UseCase, *MockMediaSource, *MockAlbumsRe
 // an album without a cover image.
 func noCoverCleanup(ctx context.Context, albums *MockAlbumsRepo, images *MockImagesRepo, album entity.Album, fileIDs []int64) {
 	albums.EXPECT().GetByName(ctx, album.Name).Return(album, nil)
-	images.EXPECT().DeleteByAlbumNotInFileIDs(ctx, album.ID, fileIDs).Return(nil)
+	images.EXPECT().DeleteByAlbumNotInFileIDs(ctx, album.ID, testSourceName, fileIDs).Return(nil)
 	images.EXPECT().FindCoverByAlbum(ctx, album.ID).Return(entity.Image{}, false, nil)
 	albums.EXPECT().ClearCover(ctx, album.ID).Return(nil)
 }

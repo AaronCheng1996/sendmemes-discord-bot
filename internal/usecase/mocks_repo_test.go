@@ -302,17 +302,17 @@ func (mr *MockImagesRepoMockRecorder) Delete(ctx, id any) *gomock.Call {
 }
 
 // DeleteByAlbumNotInFileIDs mocks base method.
-func (m *MockImagesRepo) DeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, fileIDs []int64) error {
+func (m *MockImagesRepo) DeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, source string, fileIDs []int64) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteByAlbumNotInFileIDs", ctx, albumID, fileIDs)
+	ret := m.ctrl.Call(m, "DeleteByAlbumNotInFileIDs", ctx, albumID, source, fileIDs)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // DeleteByAlbumNotInFileIDs indicates an expected call of DeleteByAlbumNotInFileIDs.
-func (mr *MockImagesRepoMockRecorder) DeleteByAlbumNotInFileIDs(ctx, albumID, fileIDs any) *gomock.Call {
+func (mr *MockImagesRepoMockRecorder) DeleteByAlbumNotInFileIDs(ctx, albumID, source, fileIDs any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteByAlbumNotInFileIDs", reflect.TypeOf((*MockImagesRepo)(nil).DeleteByAlbumNotInFileIDs), ctx, albumID, fileIDs)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteByAlbumNotInFileIDs", reflect.TypeOf((*MockImagesRepo)(nil).DeleteByAlbumNotInFileIDs), ctx, albumID, source, fileIDs)
 }
 
 // FindCoverByAlbum mocks base method.

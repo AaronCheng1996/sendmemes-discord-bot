@@ -405,13 +405,13 @@ func (r *ImagesRepo) SetPublicLink(ctx context.Context, id int, link string) err
 	return nil
 }
 
-// DeleteByAlbumNotInFileIDs removes pCloud images in albumID whose file_id is not in fileIDs.
-func (r *ImagesRepo) DeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, fileIDs []int64) error {
+// DeleteByAlbumNotInFileIDs removes images in albumID owned by source whose file_id is not in fileIDs.
+func (r *ImagesRepo) DeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, source string, fileIDs []int64) error {
 	q := r.Builder.
 		Delete("images").
 		Where(sq.And{
 			sq.Eq{"album_id": albumID},
-			sq.Eq{"source": "pcloud"},
+			sq.Eq{"source": source},
 			sq.NotEq{"file_id": fileIDs},
 		})
 

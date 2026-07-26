@@ -71,7 +71,10 @@ type (
 		// UpsertByFileID inserts or updates an image record keyed on file_id.
 		// The bool reports whether a new row was inserted (vs. updated).
 		UpsertByFileID(ctx context.Context, img entity.Image) (bool, error)
-		DeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, fileIDs []int64) error
+		// DeleteByAlbumNotInFileIDs removes rows owned by source in albumID whose
+		// file_id is not in fileIDs, scoping pruning to the syncing source so a
+		// local sync never deletes pCloud-sourced rows (or vice versa).
+		DeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, source string, fileIDs []int64) error
 		// FindCoverByAlbum returns the image in albumID whose filename matches
 		// the cover convention (cover.* or _cover.*), case-insensitive.
 		FindCoverByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error)

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -56,23 +55,6 @@ func isTokenErr(err error) bool {
 		strings.Contains(s, "API error 2000") || // Log in failed
 		strings.Contains(s, "API error 2001") || // Invalid auth token
 		strings.Contains(s, "API error 2094") // Invalid access_token
-}
-
-// mediaExtensions maps a lowercased file extension to its media kind
-// (entity.MediaKindImage or entity.MediaKindVideo). Extensions absent from the
-// map are ignored during folder walks.
-var mediaExtensions = map[string]string{
-	".jpg":  entity.MediaKindImage,
-	".jpeg": entity.MediaKindImage,
-	".png":  entity.MediaKindImage,
-	".gif":  entity.MediaKindImage,
-	".webp": entity.MediaKindImage,
-	".mp4":  entity.MediaKindVideo,
-	".webm": entity.MediaKindVideo,
-	".mov":  entity.MediaKindVideo,
-	".m4v":  entity.MediaKindVideo,
-	".mkv":  entity.MediaKindVideo,
-	".avi":  entity.MediaKindVideo,
 }
 
 // pcloudMeta mirrors the JSON structure returned by pCloud's listfolder API.
@@ -429,8 +411,7 @@ func collectMedia(node pcloudMeta, albumName string, out *[]repo.MediaEntry) {
 			collectMedia(child, child.Name, out)
 			continue
 		}
-		ext := strings.ToLower(filepath.Ext(child.Name))
-		kind, ok := mediaExtensions[ext]
+		kind, ok := entity.KindOfExtension(child.Name)
 		if !ok {
 			continue
 		}

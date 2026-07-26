@@ -42,6 +42,9 @@ func NewRouter(app *fiber.App, cfg *config.Config, a usecase.Admin, l logger.Int
 		return ctx.Send(sample.ImagePNG)
 	})
 
+	// Static media route, only registered when MEDIA_SOURCE=local.
+	registerLocalMediaRoute(app, cfg)
+
 	// Routers
 	apiV1Group := app.Group("/v1")
 	{

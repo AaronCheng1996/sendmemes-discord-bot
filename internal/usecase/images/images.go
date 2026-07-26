@@ -236,11 +236,11 @@ func (uc *UseCase) GetAlbumCover(ctx context.Context, albumName string) (entity.
 }
 
 // ResolveURL returns a public URL suitable for a Discord embed.
-// - pCloud images: generates a fresh temporary download link via the media source.
+// - MediaSource-backed images (pCloud/local): resolved via the configured source.
 // - Local/relative paths (starting with "/"): prepends HTTP_PUBLIC_URL.
 // - Already absolute URLs: returned as-is.
 func (uc *UseCase) ResolveURL(ctx context.Context, img entity.Image) (string, error) {
-	if img.Source == "pcloud" {
+	if entity.IsManagedMediaSource(img.Source) {
 		link, err := uc.source.ResolveDownloadURL(ctx, img)
 		if err != nil {
 			return "", fmt.Errorf("ImagesUseCase - ResolveURL - ResolveDownloadURL fileID=%d: %w", img.FileID, err)
@@ -257,10 +257,10 @@ func (uc *UseCase) ResolveURL(ctx context.Context, img entity.Image) (string, er
 // When img already carries a stored PublicLink it is returned directly (no API
 // call). Otherwise a share link is created via the media source, persisted so
 // future lookups skip the call, and returned. Public links are not IP-bound and
-// never expire, unlike the temporary links from ResolveURL. Non-pCloud images
-// fall back to ResolveURL.
+// never expire, unlike the temporary links from ResolveURL. Images not backed
+// by a MediaSource fall back to ResolveURL.
 func (uc *UseCase) ResolvePublicURL(ctx context.Context, img entity.Image) (string, error) {
-	if img.Source != "pcloud" {
+	if !entity.IsManagedMediaSource(img.Source) {
 		return uc.ResolveURL(ctx, img)
 	}
 	if img.PublicLink != "" {
@@ -281,12 +281,12 @@ func (uc *UseCase) ResolvePublicURL(ctx context.Context, img entity.Image) (stri
 // ResolveURL's temporary getfilelink URLs are bound to the *bot container's* IP,
 // so the dashboard running on someone else's machine renders a broken image —
 // the same problem R1 fixed for Discord video links. Public share links are not
-// IP-bound but point at a landing page rather than the file, so pCloud images
-// resolve to a thumbnail built from the (persisted) share link.
-// Non-pCloud images, and share links with no extractable thumbnail, fall back
-// to ResolveURL.
+// IP-bound but point at a landing page rather than the file, so MediaSource-backed
+// images resolve to a thumbnail built from the (persisted) share link.
+// Images not backed by a MediaSource, and share links with no extractable
+// thumbnail, fall back to ResolveURL.
 func (uc *UseCase) ResolvePreviewURL(ctx context.Context, img entity.Image) (string, error) {
-	if img.Source != "pcloud" {
+	if !entity.IsManagedMediaSource(img.Source) {
 		return uc.ResolveURL(ctx, img)
 	}
 	link, err := uc.ResolvePublicURL(ctx, img)

@@ -13,6 +13,8 @@ import (
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/controller/discord"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/controller/restapi"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
+	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo"
+	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo/localfs"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo/persistent"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo/webapi"
 	adminuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/admin"
@@ -46,28 +48,20 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	syncEventsRepo := persistent.NewSyncEventsRepo(pg)
 	systemRepo := persistent.NewSystemRepo(pg)
 
-	// pCloud client + sync use case
-	pcloudClient := webapi.NewPCloudClient(
-		cfg.PCloud.AccessToken,
-		cfg.PCloud.TokenType,
-		cfg.PCloud.Username,
-		cfg.PCloud.Password,
-		cfg.PCloud.APIEndpoint,
-		cfg.PCloud.RootFolderIDs,
-	)
-	// Authenticate once at startup (no-op if access token already set).
-	if err = pcloudClient.Login(context.Background()); err != nil {
-		l.Fatal(fmt.Errorf("app - Run - pcloudClient.Login: %w", err))
+	// MediaSource (pCloud or local filesystem) + sync use case
+	mediaSource, mediaSourceName, err := buildMediaSource(cfg)
+	if err != nil {
+		l.Fatal(fmt.Errorf("app - Run - buildMediaSource: %w", err))
 	}
 	// Validate the configured default album send mode once, fail fast on garbage.
 	defaultSendMode, err := entity.ParseAlbumSendMode(cfg.Discord.AlbumDefaultSendMode)
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - invalid ALBUM_DEFAULT_SEND_MODE: %w", err))
 	}
-	syncUseCase := syncuc.New(pcloudClient, albumsRepo, imagesRepo, syncEventsRepo, defaultSendMode)
+	syncUseCase := syncuc.New(mediaSource, mediaSourceName, albumsRepo, imagesRepo, syncEventsRepo, defaultSendMode)
 
 	// Use-Case: images, delivery rules, app settings
-	imagesUseCase := images.New(imagesRepo, albumsRepo, pcloudClient, cfg.HTTP.PublicURL)
+	imagesUseCase := images.New(imagesRepo, albumsRepo, mediaSource, cfg.HTTP.PublicURL)
 	rulesUseCase := rulesuc.New(deliveryRulesRepo)
 	appSettingsUseCase := appsettingsuc.New(appSettingsRepo, cfg.PCloud.SyncInterval)
 
@@ -111,6 +105,33 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	}
 	if err = httpServer.Shutdown(); err != nil {
 		l.Error(fmt.Errorf("app - Run - httpServer.Shutdown: %w", err))
+	}
+}
+
+// buildMediaSource wires the MediaSource selected by MEDIA_SOURCE ("pcloud",
+// the default, or "local") and returns it alongside its entity.MediaSource*
+// label, which the sync use case stamps on synced images and uses to scope
+// pruning to rows it owns.
+func buildMediaSource(cfg *config.Config) (repo.MediaSource, string, error) {
+	switch strings.ToLower(strings.TrimSpace(cfg.Media.Source)) {
+	case "", entity.MediaSourcePCloud:
+		pcloudClient := webapi.NewPCloudClient(
+			cfg.PCloud.AccessToken,
+			cfg.PCloud.TokenType,
+			cfg.PCloud.Username,
+			cfg.PCloud.Password,
+			cfg.PCloud.APIEndpoint,
+			cfg.PCloud.RootFolderIDs,
+		)
+		// Authenticate once at startup (no-op if access token already set).
+		if err := pcloudClient.Login(context.Background()); err != nil {
+			return nil, "", fmt.Errorf("pcloudClient.Login: %w", err)
+		}
+		return pcloudClient, entity.MediaSourcePCloud, nil
+	case entity.MediaSourceLocal:
+		return localfs.New(cfg.Media.LocalRoot, cfg.HTTP.PublicURL), entity.MediaSourceLocal, nil
+	default:
+		return nil, "", fmt.Errorf("invalid MEDIA_SOURCE: %s", cfg.Media.Source)
 	}
 }
 

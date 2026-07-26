@@ -17,6 +17,7 @@ type (
 		Admin   Admin
 		Discord Discord
 		PCloud  PCloud
+		Media   Media
 		Metrics Metrics
 	}
 
@@ -99,11 +100,19 @@ type (
 		SyncInterval string `env:"PCLOUD_SYNC_INTERVAL" envDefault:"1h"`
 	}
 
+	// Media selects and configures the MediaSource the bot syncs from.
+	Media struct {
+		// Source is "pcloud" (default, backward compatible) or "local".
+		Source string `env:"MEDIA_SOURCE" envDefault:"pcloud"`
+		// LocalRoot is the directory walked and served when Source is "local"
+		// (e.g. a mounted ./media:/media volume).
+		LocalRoot string `env:"MEDIA_LOCAL_ROOT" envDefault:"/media"`
+	}
+
 	// Metrics -.
 	Metrics struct {
 		Enabled bool `env:"METRICS_ENABLED" envDefault:"true"`
 	}
-
 )
 
 // NewConfig returns app config.
