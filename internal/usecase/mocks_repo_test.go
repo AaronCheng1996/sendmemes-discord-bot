@@ -840,85 +840,85 @@ func (mr *MockSystemRepoMockRecorder) Ping(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Ping", reflect.TypeOf((*MockSystemRepo)(nil).Ping), ctx)
 }
 
-// MockPCloudAPI is a mock of PCloudAPI interface.
-type MockPCloudAPI struct {
+// MockMediaSource is a mock of MediaSource interface.
+type MockMediaSource struct {
 	ctrl     *gomock.Controller
-	recorder *MockPCloudAPIMockRecorder
+	recorder *MockMediaSourceMockRecorder
 	isgomock struct{}
 }
 
-// MockPCloudAPIMockRecorder is the mock recorder for MockPCloudAPI.
-type MockPCloudAPIMockRecorder struct {
-	mock *MockPCloudAPI
+// MockMediaSourceMockRecorder is the mock recorder for MockMediaSource.
+type MockMediaSourceMockRecorder struct {
+	mock *MockMediaSource
 }
 
-// NewMockPCloudAPI creates a new mock instance.
-func NewMockPCloudAPI(ctrl *gomock.Controller) *MockPCloudAPI {
-	mock := &MockPCloudAPI{ctrl: ctrl}
-	mock.recorder = &MockPCloudAPIMockRecorder{mock}
+// NewMockMediaSource creates a new mock instance.
+func NewMockMediaSource(ctrl *gomock.Controller) *MockMediaSource {
+	mock := &MockMediaSource{ctrl: ctrl}
+	mock.recorder = &MockMediaSourceMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockPCloudAPI) EXPECT() *MockPCloudAPIMockRecorder {
+func (m *MockMediaSource) EXPECT() *MockMediaSourceMockRecorder {
 	return m.recorder
 }
 
-// GetFileLink mocks base method.
-func (m *MockPCloudAPI) GetFileLink(ctx context.Context, fileID int64) (string, error) {
+// ListMedia mocks base method.
+func (m *MockMediaSource) ListMedia(ctx context.Context) ([]repo.MediaEntry, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetFileLink", ctx, fileID)
+	ret := m.ctrl.Call(m, "ListMedia", ctx)
+	ret0, _ := ret[0].([]repo.MediaEntry)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListMedia indicates an expected call of ListMedia.
+func (mr *MockMediaSourceMockRecorder) ListMedia(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListMedia", reflect.TypeOf((*MockMediaSource)(nil).ListMedia), ctx)
+}
+
+// ResolveDownloadURL mocks base method.
+func (m_2 *MockMediaSource) ResolveDownloadURL(ctx context.Context, m entity.Image) (string, error) {
+	m_2.ctrl.T.Helper()
+	ret := m_2.ctrl.Call(m_2, "ResolveDownloadURL", ctx, m)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// GetFileLink indicates an expected call of GetFileLink.
-func (mr *MockPCloudAPIMockRecorder) GetFileLink(ctx, fileID any) *gomock.Call {
+// ResolveDownloadURL indicates an expected call of ResolveDownloadURL.
+func (mr *MockMediaSourceMockRecorder) ResolveDownloadURL(ctx, m any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFileLink", reflect.TypeOf((*MockPCloudAPI)(nil).GetFileLink), ctx, fileID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveDownloadURL", reflect.TypeOf((*MockMediaSource)(nil).ResolveDownloadURL), ctx, m)
 }
 
-// GetFilePublicLink mocks base method.
-func (m *MockPCloudAPI) GetFilePublicLink(ctx context.Context, fileID int64) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetFilePublicLink", ctx, fileID)
+// ResolveShareURL mocks base method.
+func (m_2 *MockMediaSource) ResolveShareURL(ctx context.Context, m entity.Image) (string, error) {
+	m_2.ctrl.T.Helper()
+	ret := m_2.ctrl.Call(m_2, "ResolveShareURL", ctx, m)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// GetFilePublicLink indicates an expected call of GetFilePublicLink.
-func (mr *MockPCloudAPIMockRecorder) GetFilePublicLink(ctx, fileID any) *gomock.Call {
+// ResolveShareURL indicates an expected call of ResolveShareURL.
+func (mr *MockMediaSourceMockRecorder) ResolveShareURL(ctx, m any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFilePublicLink", reflect.TypeOf((*MockPCloudAPI)(nil).GetFilePublicLink), ctx, fileID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveShareURL", reflect.TypeOf((*MockMediaSource)(nil).ResolveShareURL), ctx, m)
 }
 
-// ListFolder mocks base method.
-func (m *MockPCloudAPI) ListFolder(ctx context.Context, folderID int64) ([]repo.PCloudEntry, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListFolder", ctx, folderID)
-	ret0, _ := ret[0].([]repo.PCloudEntry)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ListFolder indicates an expected call of ListFolder.
-func (mr *MockPCloudAPIMockRecorder) ListFolder(ctx, folderID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListFolder", reflect.TypeOf((*MockPCloudAPI)(nil).ListFolder), ctx, folderID)
-}
-
-// PublicThumbURL mocks base method.
-func (m *MockPCloudAPI) PublicThumbURL(publicLink string, fileID int64, size string) string {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PublicThumbURL", publicLink, fileID, size)
+// ThumbURL mocks base method.
+func (m_2 *MockMediaSource) ThumbURL(shareURL string, m entity.Image, size string) string {
+	m_2.ctrl.T.Helper()
+	ret := m_2.ctrl.Call(m_2, "ThumbURL", shareURL, m, size)
 	ret0, _ := ret[0].(string)
 	return ret0
 }
 
-// PublicThumbURL indicates an expected call of PublicThumbURL.
-func (mr *MockPCloudAPIMockRecorder) PublicThumbURL(publicLink, fileID, size any) *gomock.Call {
+// ThumbURL indicates an expected call of ThumbURL.
+func (mr *MockMediaSourceMockRecorder) ThumbURL(shareURL, m, size any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PublicThumbURL", reflect.TypeOf((*MockPCloudAPI)(nil).PublicThumbURL), publicLink, fileID, size)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ThumbURL", reflect.TypeOf((*MockMediaSource)(nil).ThumbURL), shareURL, m, size)
 }

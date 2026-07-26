@@ -16,20 +16,20 @@ import (
 // sync use case into GetOrCreate; a non-Random value proves it is passed through.
 const testDefaultSendMode = entity.AlbumSendModeSingle
 
-func syncUseCase(t *testing.T) (*syncuc.UseCase, *MockPCloudAPI, *MockAlbumsRepo, *MockImagesRepo, *MockSyncEventsRepo) {
+func syncUseCase(t *testing.T) (*syncuc.UseCase, *MockMediaSource, *MockAlbumsRepo, *MockImagesRepo, *MockSyncEventsRepo) {
 	t.Helper()
 
 	mockCtl := gomock.NewController(t)
 	t.Cleanup(mockCtl.Finish)
 
-	pcloud := NewMockPCloudAPI(mockCtl)
+	source := NewMockMediaSource(mockCtl)
 	albums := NewMockAlbumsRepo(mockCtl)
 	images := NewMockImagesRepo(mockCtl)
 	events := NewMockSyncEventsRepo(mockCtl)
 
-	useCase := syncuc.New(pcloud, albums, images, events, []int64{1}, testDefaultSendMode)
+	useCase := syncuc.New(source, albums, images, events, testDefaultSendMode)
 
-	return useCase, pcloud, albums, images, events
+	return useCase, source, albums, images, events
 }
 
 // noCoverCleanup registers the expectations for the per-album cleanup pass of
@@ -44,14 +44,14 @@ func noCoverCleanup(ctx context.Context, albums *MockAlbumsRepo, images *MockIma
 func TestSyncImagesReportsDiscoveries(t *testing.T) {
 	t.Parallel()
 
-	uc, pcloud, albums, images, events := syncUseCase(t)
+	uc, source, albums, images, events := syncUseCase(t)
 	ctx := context.Background()
 
 	albumA := entity.Album{ID: 1, Name: "AlbumA"}
 	albumB := entity.Album{ID: 2, Name: "AlbumB"}
 
 	albums.EXPECT().Count(ctx, repo.AlbumAdminListQuery{}).Return(1, nil)
-	pcloud.EXPECT().ListFolder(ctx, int64(1)).Return([]repo.PCloudEntry{
+	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
 		{FileID: 11, Name: "1.jpg", ParentFolderName: "AlbumA", Kind: entity.MediaKindImage, Size: 100},
 		{FileID: 12, Name: "clip.mp4", ParentFolderName: "AlbumA", Kind: entity.MediaKindVideo, Size: 2000},
 		{FileID: 21, Name: "old.jpg", ParentFolderName: "AlbumB", Kind: entity.MediaKindImage, Size: 50},
@@ -105,13 +105,13 @@ func TestSyncImagesReportsDiscoveries(t *testing.T) {
 func TestSyncImagesInitialImport(t *testing.T) {
 	t.Parallel()
 
-	uc, pcloud, albums, images, events := syncUseCase(t)
+	uc, source, albums, images, events := syncUseCase(t)
 	ctx := context.Background()
 
 	album := entity.Album{ID: 1, Name: "First"}
 
 	albums.EXPECT().Count(ctx, repo.AlbumAdminListQuery{}).Return(0, nil)
-	pcloud.EXPECT().ListFolder(ctx, int64(1)).Return([]repo.PCloudEntry{
+	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
 		{FileID: 11, Name: "a.jpg", ParentFolderName: "First", Kind: entity.MediaKindImage, Size: 10},
 	}, nil)
 	albums.EXPECT().GetOrCreate(ctx, "First", testDefaultSendMode).Return(album, true, nil)
@@ -136,13 +136,13 @@ func TestSyncImagesInitialImport(t *testing.T) {
 func TestSyncImagesNoNewContent(t *testing.T) {
 	t.Parallel()
 
-	uc, pcloud, albums, images, events := syncUseCase(t)
+	uc, source, albums, images, events := syncUseCase(t)
 	ctx := context.Background()
 
 	album := entity.Album{ID: 3, Name: "Stable"}
 
 	albums.EXPECT().Count(ctx, repo.AlbumAdminListQuery{}).Return(2, nil)
-	pcloud.EXPECT().ListFolder(ctx, int64(1)).Return([]repo.PCloudEntry{
+	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
 		{FileID: 31, Name: "same.jpg", ParentFolderName: "Stable", Kind: entity.MediaKindImage, Size: 10},
 	}, nil)
 	albums.EXPECT().GetOrCreate(ctx, "Stable", testDefaultSendMode).Return(album, false, nil)

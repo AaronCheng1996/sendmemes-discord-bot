@@ -15,16 +15,16 @@ import (
 type UseCase struct {
 	repo      repo.ImagesRepo
 	albums    repo.AlbumsRepo
-	pcloud    repo.PCloudAPI
+	source    repo.MediaSource
 	publicURL string // HTTP_PUBLIC_URL, used for local/default images
 }
 
 // New creates an images use case.
-func New(r repo.ImagesRepo, albums repo.AlbumsRepo, pcloud repo.PCloudAPI, publicURL string) *UseCase {
+func New(r repo.ImagesRepo, albums repo.AlbumsRepo, source repo.MediaSource, publicURL string) *UseCase {
 	return &UseCase{
 		repo:      r,
 		albums:    albums,
-		pcloud:    pcloud,
+		source:    source,
 		publicURL: publicURL,
 	}
 }
@@ -236,14 +236,14 @@ func (uc *UseCase) GetAlbumCover(ctx context.Context, albumName string) (entity.
 }
 
 // ResolveURL returns a public URL suitable for a Discord embed.
-// - pCloud images: generates a fresh temporary download link via GetFileLink.
+// - pCloud images: generates a fresh temporary download link via the media source.
 // - Local/relative paths (starting with "/"): prepends HTTP_PUBLIC_URL.
 // - Already absolute URLs: returned as-is.
 func (uc *UseCase) ResolveURL(ctx context.Context, img entity.Image) (string, error) {
 	if img.Source == "pcloud" {
-		link, err := uc.pcloud.GetFileLink(ctx, img.FileID)
+		link, err := uc.source.ResolveDownloadURL(ctx, img)
 		if err != nil {
-			return "", fmt.Errorf("ImagesUseCase - ResolveURL - GetFileLink fileID=%d: %w", img.FileID, err)
+			return "", fmt.Errorf("ImagesUseCase - ResolveURL - ResolveDownloadURL fileID=%d: %w", img.FileID, err)
 		}
 		return link, nil
 	}
@@ -253,9 +253,9 @@ func (uc *UseCase) ResolveURL(ctx context.Context, img entity.Image) (string, er
 	return img.URL, nil
 }
 
-// ResolvePublicURL returns a permanent pCloud public share URL for img.
+// ResolvePublicURL returns a permanent public share URL for img.
 // When img already carries a stored PublicLink it is returned directly (no API
-// call). Otherwise a public link is created via the pCloud API, persisted so
+// call). Otherwise a share link is created via the media source, persisted so
 // future lookups skip the call, and returned. Public links are not IP-bound and
 // never expire, unlike the temporary links from ResolveURL. Non-pCloud images
 // fall back to ResolveURL.
@@ -266,9 +266,9 @@ func (uc *UseCase) ResolvePublicURL(ctx context.Context, img entity.Image) (stri
 	if img.PublicLink != "" {
 		return img.PublicLink, nil
 	}
-	link, err := uc.pcloud.GetFilePublicLink(ctx, img.FileID)
+	link, err := uc.source.ResolveShareURL(ctx, img)
 	if err != nil {
-		return "", fmt.Errorf("ImagesUseCase - ResolvePublicURL - GetFilePublicLink fileID=%d: %w", img.FileID, err)
+		return "", fmt.Errorf("ImagesUseCase - ResolvePublicURL - ResolveShareURL fileID=%d: %w", img.FileID, err)
 	}
 	if err := uc.repo.SetPublicLink(ctx, img.ID, link); err != nil {
 		return "", fmt.Errorf("ImagesUseCase - ResolvePublicURL - SetPublicLink id=%d: %w", img.ID, err)
@@ -282,8 +282,8 @@ func (uc *UseCase) ResolvePublicURL(ctx context.Context, img entity.Image) (stri
 // so the dashboard running on someone else's machine renders a broken image —
 // the same problem R1 fixed for Discord video links. Public share links are not
 // IP-bound but point at a landing page rather than the file, so pCloud images
-// resolve to a getpubthumb thumbnail built from the (persisted) share link.
-// Non-pCloud images, and pCloud links with no extractable share code, fall back
+// resolve to a thumbnail built from the (persisted) share link.
+// Non-pCloud images, and share links with no extractable thumbnail, fall back
 // to ResolveURL.
 func (uc *UseCase) ResolvePreviewURL(ctx context.Context, img entity.Image) (string, error) {
 	if img.Source != "pcloud" {
@@ -293,7 +293,7 @@ func (uc *UseCase) ResolvePreviewURL(ctx context.Context, img entity.Image) (str
 	if err != nil {
 		return "", fmt.Errorf("ImagesUseCase - ResolvePreviewURL - ResolvePublicURL id=%d: %w", img.ID, err)
 	}
-	if thumb := uc.pcloud.PublicThumbURL(link, img.FileID, ""); thumb != "" {
+	if thumb := uc.source.ThumbURL(link, img, ""); thumb != "" {
 		return thumb, nil
 	}
 	return uc.ResolveURL(ctx, img)

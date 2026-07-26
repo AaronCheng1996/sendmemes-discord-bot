@@ -53,6 +53,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		cfg.PCloud.Username,
 		cfg.PCloud.Password,
 		cfg.PCloud.APIEndpoint,
+		cfg.PCloud.RootFolderIDs,
 	)
 	// Authenticate once at startup (no-op if access token already set).
 	if err = pcloudClient.Login(context.Background()); err != nil {
@@ -63,7 +64,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - invalid ALBUM_DEFAULT_SEND_MODE: %w", err))
 	}
-	syncUseCase := syncuc.New(pcloudClient, albumsRepo, imagesRepo, syncEventsRepo, cfg.PCloud.RootFolderIDs, defaultSendMode)
+	syncUseCase := syncuc.New(pcloudClient, albumsRepo, imagesRepo, syncEventsRepo, defaultSendMode)
 
 	// Use-Case: images, delivery rules, app settings
 	imagesUseCase := images.New(imagesRepo, albumsRepo, pcloudClient, cfg.HTTP.PublicURL)
