@@ -28,6 +28,9 @@ type DeliveryRule struct {
 	SendInterval string    `json:"send_interval,omitempty"` // scheduled only
 	HistorySize  int       `json:"history_size"`            // scheduled only
 	Enabled      bool      `json:"enabled"`
+	// CaptionTemplate overrides the Discord embed description for this rule's
+	// sends. Empty means "use the built-in default caption" (see renderCaption).
+	CaptionTemplate string `json:"caption_template,omitempty"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at,omitempty"`
 

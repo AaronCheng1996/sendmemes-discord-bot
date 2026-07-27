@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
+
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/schedulespec"
 )
@@ -120,6 +122,9 @@ func (b *Bot) notifySyncEvents(ctx context.Context, report entity.SyncReport) {
 // uploaded). Falls back to a plain text summary when nothing can be resolved.
 func (b *Bot) postDiscoveredMedia(ctx context.Context, channelID string, ev entity.SyncEvent) {
 	caption := formatSyncEventMessage(ev)
+	// SyncEvent carries only id+name, not a full Album (no send mode/rating to
+	// look up here) — albumEmbed degrades gracefully for the missing fields.
+	album := entity.Album{ID: ev.AlbumID, Name: ev.AlbumName}
 
 	var images, videos []entity.Image
 	for _, m := range ev.NewMedia {
@@ -142,11 +147,16 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, channelID string, ev enti
 		if err != nil {
 			b.l.Error(fmt.Errorf("postDiscoveredMedia downloadPool %q: %w", ev.AlbumName, err))
 		} else if selected := fitToLimit(b.l, entries, albumBatchSize, discordMsgLimit); len(selected) > 0 {
-			content := caption
+			desc := caption
 			if len(images) > len(selected) {
-				content += fmt.Sprintf(" (showing %d of %d)", len(selected), len(images))
+				desc += fmt.Sprintf(" (showing %d of %d)", len(selected), len(images))
 			}
-			if b.channelSendFilesContent(channelID, content, entriesToFiles(selected)) != nil {
+			files := entriesToFiles(selected)
+			embed := albumEmbed(album, b.resolveThumbURL(ctx, images), desc)
+			if len(files) > 0 {
+				embed.Image = &discordgo.MessageEmbedImage{URL: "attachment://" + files[0].Name}
+			}
+			if b.channelSendEmbed(channelID, embed, files, nil) != nil {
 				posted = true
 			}
 		}
@@ -176,9 +186,8 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, channelID string, ev enti
 			if len(videos) > len(links) {
 				fmt.Fprintf(&sb, "\n…and %d more video(s)", len(videos)-len(links))
 			}
-			if _, err := b.session.ChannelMessageSend(channelID, sb.String()); err != nil {
-				b.l.Error(fmt.Errorf("postDiscoveredMedia video links %q: %w", ev.AlbumName, err))
-			} else {
+			embed := albumEmbed(album, "", sb.String())
+			if b.channelSendEmbed(channelID, embed, nil, nil) != nil {
 				posted = true
 			}
 		}
@@ -186,8 +195,9 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, channelID string, ev enti
 
 	// Nothing resolvable (e.g. counts-only event) — post the text summary.
 	if !posted {
-		if _, err := b.session.ChannelMessageSend(channelID, caption); err != nil {
-			b.l.Error(fmt.Errorf("postDiscoveredMedia fallback %q: %w", ev.AlbumName, err))
+		embed := albumEmbed(album, "", caption)
+		if b.channelSendEmbed(channelID, embed, nil, nil) == nil {
+			b.l.Error(fmt.Errorf("postDiscoveredMedia fallback %q: failed to send", ev.AlbumName))
 		}
 	}
 }
@@ -314,7 +324,7 @@ func (b *Bot) runScheduledRule(ctx context.Context, rule entity.DeliveryRule) {
 		timer := time.NewTimer(time.Until(next))
 		select {
 		case <-timer.C:
-			_, _ = b.doScheduledSend(rule.ChannelID, rule.HistorySize)
+			_, _ = b.doScheduledSend(rule.ChannelID, rule.HistorySize, rule.CaptionTemplate)
 		case <-ctx.Done():
 			timer.Stop()
 			return
@@ -325,7 +335,7 @@ func (b *Bot) runScheduledRule(ctx context.Context, rule entity.DeliveryRule) {
 	}
 }
 
-func (b *Bot) doScheduledSend(channelID string, historySize int) (entity.ManualScheduleTriggerResult, error) {
+func (b *Bot) doScheduledSend(channelID string, historySize int, captionTemplate string) (entity.ManualScheduleTriggerResult, error) {
 	ctx := context.Background()
 	b.vlog("scheduled send: selecting album (history=%d)", historySize)
 	album, err := b.imagesUC.GetScheduledAlbum(ctx, historySize)
@@ -334,7 +344,7 @@ func (b *Bot) doScheduledSend(channelID string, historySize int) (entity.ManualS
 		return entity.ManualScheduleTriggerResult{}, err
 	}
 	b.vlog("scheduled send: album=%q id=%d mode=%s sending to channel %s", album.Name, album.ID, album.SendMode, channelID)
-	msg := b.deliverAlbum(ctx, channelID, album, "")
+	msg := b.deliverAlbum(ctx, channelID, album, "", captionTemplate)
 	result := entity.ManualScheduleTriggerResult{
 		Triggered: msg != nil,
 		AlbumID:   album.ID,

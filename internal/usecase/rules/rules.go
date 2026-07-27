@@ -98,6 +98,7 @@ func normalize(rule *entity.DeliveryRule) error {
 	rule.Name = strings.TrimSpace(rule.Name)
 	rule.GuildID = strings.TrimSpace(rule.GuildID)
 	rule.SendInterval = strings.TrimSpace(rule.SendInterval)
+	rule.CaptionTemplate = strings.TrimSpace(rule.CaptionTemplate)
 
 	if trigger == entity.TriggerScheduled {
 		if _, derr := schedulespec.Parse(rule.SendInterval); derr != nil {
