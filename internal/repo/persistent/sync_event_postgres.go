@@ -3,7 +3,11 @@ package persistent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/postgres"
@@ -103,4 +107,26 @@ func (r *SyncEventsRepo) Count(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("SyncEventsRepo - Count - QueryRow: %w", err)
 	}
 	return n, nil
+}
+
+// LatestAt returns the created_at of the most recent event, or nil when no
+// sync event has ever been recorded.
+func (r *SyncEventsRepo) LatestAt(ctx context.Context) (*time.Time, error) {
+	sql, args, err := r.Builder.
+		Select("created_at").
+		From("sync_events").
+		OrderBy("created_at DESC").
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("SyncEventsRepo - LatestAt - r.Builder: %w", err)
+	}
+	var t time.Time
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&t); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("SyncEventsRepo - LatestAt - QueryRow: %w", err)
+	}
+	return &t, nil
 }

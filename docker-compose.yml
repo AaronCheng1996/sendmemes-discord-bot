@@ -33,6 +33,10 @@ x-backend-app-environment: &x-backend-app-environment
   DISCORD_SEND_HISTORY_SIZE: "${DISCORD_SEND_HISTORY_SIZE:-10}"
   DISCORD_VERBOSE_LOG: "${DISCORD_VERBOSE_LOG:-true}"
   ALBUM_DEFAULT_SEND_MODE: "${ALBUM_DEFAULT_SEND_MODE:-Random}"
+  # Media source: "pcloud" (default) or "local" — see the app service's
+  # volumes for how to mount a folder when using "local".
+  MEDIA_SOURCE: "${MEDIA_SOURCE:-pcloud}"
+  MEDIA_LOCAL_ROOT: "${MEDIA_LOCAL_ROOT:-/media}"
   # pCloud
   PCLOUD_ACCESS_TOKEN: "${PCLOUD_ACCESS_TOKEN}"
   PCLOUD_TOKEN_TYPE: "${PCLOUD_TOKEN_TYPE:-session}"
@@ -43,8 +47,6 @@ x-backend-app-environment: &x-backend-app-environment
   PCLOUD_SYNC_INTERVAL: "${PCLOUD_SYNC_INTERVAL:-1h}"
   # Metrics
   METRICS_ENABLED: "true"
-  # Swagger
-  SWAGGER_ENABLED: "true"
 
 
 services:
@@ -72,6 +74,10 @@ services:
       <<: *x-backend-app-environment
     ports:
       - "8080:8080"
+    # Uncomment when MEDIA_SOURCE=local, pointing at a folder laid out as
+    # <album name>/<file> (nesting under an album is fine):
+    # volumes:
+    #   - ./media:/media
     depends_on:
       - db
     deploy:
@@ -86,6 +92,22 @@ services:
       app_network:
         aliases:
           - app.lvh.me
+
+  # Vue 3 admin dashboard, built from the ui/ submodule. The browser talks to
+  # the admin API directly — set the API base URL on the dashboard's
+  # Connection page (http://localhost:8080 when using the ports above).
+  ui:
+    container_name: ui
+    build:
+      context: ./ui
+    ports:
+      - "8081:80"
+    depends_on:
+      - app
+    networks:
+      app_network:
+        aliases:
+          - ui.lvh.me
 
   nginx:
     container_name: nginx

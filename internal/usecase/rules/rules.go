@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo"
@@ -26,17 +27,55 @@ func New(r repo.DeliveryRulesRepo) *UseCase {
 
 // List returns all rules ordered by id.
 func (uc *UseCase) List(ctx context.Context) ([]entity.DeliveryRule, error) {
-	return uc.repo.List(ctx)
+	rules, err := uc.repo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	decorateAll(rules)
+	return rules, nil
 }
 
 // ListActiveByTrigger returns enabled rules of the given trigger type.
 func (uc *UseCase) ListActiveByTrigger(ctx context.Context, triggerType string) ([]entity.DeliveryRule, error) {
-	return uc.repo.ListActiveByTrigger(ctx, triggerType)
+	rules, err := uc.repo.ListActiveByTrigger(ctx, triggerType)
+	if err != nil {
+		return nil, err
+	}
+	decorateAll(rules)
+	return rules, nil
 }
 
 // Get returns a rule by id.
 func (uc *UseCase) Get(ctx context.Context, id int64) (entity.DeliveryRule, error) {
-	return uc.repo.GetByID(ctx, id)
+	rule, err := uc.repo.GetByID(ctx, id)
+	if err != nil {
+		return entity.DeliveryRule{}, err
+	}
+	decorate(&rule)
+	return rule, nil
+}
+
+// decorateAll runs decorate over a slice in place.
+func decorateAll(rules []entity.DeliveryRule) {
+	for i := range rules {
+		decorate(&rules[i])
+	}
+}
+
+// decorate fills NextRunAt/ScheduleDescription on scheduled rules. It is a
+// read-time computation only: neither field is persisted, and event-triggered
+// rules are left untouched.
+func decorate(rule *entity.DeliveryRule) {
+	if rule.TriggerType != entity.TriggerScheduled || strings.TrimSpace(rule.SendInterval) == "" {
+		return
+	}
+	spec, err := schedulespec.Parse(rule.SendInterval)
+	if err != nil {
+		return
+	}
+	next := spec.Next(time.Now())
+	rule.NextRunAt = &next
+	rule.ScheduleDescription = schedulespec.Describe(rule.SendInterval)
 }
 
 // Count returns the number of configured rules.
@@ -59,6 +98,7 @@ func normalize(rule *entity.DeliveryRule) error {
 	rule.Name = strings.TrimSpace(rule.Name)
 	rule.GuildID = strings.TrimSpace(rule.GuildID)
 	rule.SendInterval = strings.TrimSpace(rule.SendInterval)
+	rule.CaptionTemplate = strings.TrimSpace(rule.CaptionTemplate)
 
 	if trigger == entity.TriggerScheduled {
 		if _, derr := schedulespec.Parse(rule.SendInterval); derr != nil {
@@ -82,7 +122,12 @@ func (uc *UseCase) Create(ctx context.Context, rule entity.DeliveryRule) (entity
 	if err := normalize(&rule); err != nil {
 		return entity.DeliveryRule{}, err
 	}
-	return uc.repo.Create(ctx, rule)
+	out, err := uc.repo.Create(ctx, rule)
+	if err != nil {
+		return entity.DeliveryRule{}, err
+	}
+	decorate(&out)
+	return out, nil
 }
 
 // Update validates and updates an existing rule.
@@ -91,7 +136,12 @@ func (uc *UseCase) Update(ctx context.Context, id int64, rule entity.DeliveryRul
 		return entity.DeliveryRule{}, err
 	}
 	rule.ID = id
-	return uc.repo.Update(ctx, rule)
+	out, err := uc.repo.Update(ctx, rule)
+	if err != nil {
+		return entity.DeliveryRule{}, err
+	}
+	decorate(&out)
+	return out, nil
 }
 
 // Delete removes a rule by id.

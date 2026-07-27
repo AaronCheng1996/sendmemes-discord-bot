@@ -18,25 +18,28 @@ const (
 	maxEventMedia = 50
 )
 
-// UseCase synchronizes the pCloud folder tree with the database.
+// UseCase synchronizes a media source's file tree with the database.
 type UseCase struct {
-	pcloud      repo.PCloudAPI
+	source      repo.MediaSource
+	sourceName  string // entity.MediaSourcePCloud or entity.MediaSourceLocal; stamped on synced images
 	albums      repo.AlbumsRepo
 	images      repo.ImagesRepo
 	events      repo.SyncEventsRepo
-	folderIDs   []int64
 	defaultMode entity.AlbumSendMode // send_mode for albums created during sync
 }
 
 // New creates a new sync use case. defaultMode is the send_mode assigned to
 // albums newly created during a sync (existing albums keep their stored mode).
-func New(pcloud repo.PCloudAPI, albums repo.AlbumsRepo, images repo.ImagesRepo, events repo.SyncEventsRepo, folderIDs []int64, defaultMode entity.AlbumSendMode) *UseCase {
+// sourceName identifies source (entity.MediaSourcePCloud/MediaSourceLocal) and
+// is stamped on every synced image's Source field, and used to scope pruning
+// to rows owned by this source.
+func New(source repo.MediaSource, sourceName string, albums repo.AlbumsRepo, images repo.ImagesRepo, events repo.SyncEventsRepo, defaultMode entity.AlbumSendMode) *UseCase {
 	return &UseCase{
-		pcloud:      pcloud,
+		source:      source,
+		sourceName:  sourceName,
 		albums:      albums,
 		images:      images,
 		events:      events,
-		folderIDs:   folderIDs,
 		defaultMode: defaultMode,
 	}
 }
@@ -65,13 +68,9 @@ func (uc *UseCase) SyncImages(ctx context.Context) (entity.SyncReport, error) {
 	}
 	report := entity.SyncReport{InitialImport: priorAlbums == 0}
 
-	var entries []repo.PCloudEntry
-	for _, folderID := range uc.folderIDs {
-		folderEntries, err := uc.pcloud.ListFolder(ctx, folderID)
-		if err != nil {
-			return report, fmt.Errorf("SyncUseCase - SyncImages - ListFolder folderID=%d: %w", folderID, err)
-		}
-		entries = append(entries, folderEntries...)
+	entries, err := uc.source.ListMedia(ctx)
+	if err != nil {
+		return report, fmt.Errorf("SyncUseCase - SyncImages - ListMedia: %w", err)
 	}
 
 	// Group file IDs per album name so we can prune stale rows and detect covers
@@ -94,8 +93,8 @@ func (uc *UseCase) SyncImages(ctx context.Context) (entity.SyncReport, error) {
 
 		img := entity.Image{
 			FileID:    entry.FileID,
-			URL:       entry.Name, // store filename; full link resolved at send time via GetFileLink
-			Source:    "pcloud",
+			URL:       entry.Name, // store filename; full link resolved at send time via the MediaSource
+			Source:    uc.sourceName,
 			AlbumID:   album.ID,
 			Kind:      entry.Kind,
 			SizeBytes: entry.Size,
@@ -117,8 +116,9 @@ func (uc *UseCase) SyncImages(ctx context.Context) (entity.SyncReport, error) {
 				st.newMedia = append(st.newMedia, entity.Image{
 					FileID:    entry.FileID,
 					URL:       entry.Name,
-					Source:    "pcloud",
+					Source:    uc.sourceName,
 					AlbumID:   st.albumID,
+					AlbumName: entry.ParentFolderName, // no DB round-trip yet, so carry it from the walk
 					Kind:      entry.Kind,
 					SizeBytes: entry.Size,
 				})
@@ -135,7 +135,7 @@ func (uc *UseCase) SyncImages(ctx context.Context) (entity.SyncReport, error) {
 			return report, fmt.Errorf("SyncUseCase - SyncImages - GetByName %q: %w", albumName, err)
 		}
 
-		if err = uc.images.DeleteByAlbumNotInFileIDs(ctx, album.ID, fileIDs); err != nil {
+		if err = uc.images.DeleteByAlbumNotInFileIDs(ctx, album.ID, uc.sourceName, fileIDs); err != nil {
 			return report, fmt.Errorf("SyncUseCase - SyncImages - DeleteByAlbumNotInFileIDs album %q: %w", albumName, err)
 		}
 

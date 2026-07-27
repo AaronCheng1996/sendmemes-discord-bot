@@ -3,6 +3,8 @@ package webapi
 import (
 	"strings"
 	"testing"
+
+	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 )
 
 // TestPCloudClientTokenParam verifies that the token type selects the correct
@@ -28,7 +30,7 @@ func TestPCloudClientTokenParam(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			c := NewPCloudClient("tok123", tc.tokenType, "", "", "https://api.pcloud.com")
+			c := NewPCloudClient("tok123", tc.tokenType, "", "", "https://api.pcloud.com", nil)
 			if got := c.authQuery(); !strings.HasPrefix(got, tc.wantPrefix) {
 				t.Fatalf("authQuery() = %q, want prefix %q", got, tc.wantPrefix)
 			}
@@ -39,9 +41,9 @@ func TestPCloudClientTokenParam(t *testing.T) {
 	}
 }
 
-// TestPublicThumbURL verifies that a share link is turned into a getpubthumb
+// TestThumbURL verifies that a share link is turned into a getpubthumb
 // URL, and that links without a code parameter yield "" so callers fall back.
-func TestPublicThumbURL(t *testing.T) {
+func TestThumbURL(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -78,9 +80,9 @@ func TestPublicThumbURL(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			c := NewPCloudClient("tok123", "session", "", "", "https://api.pcloud.com/")
-			if got := c.PublicThumbURL(tc.publicLink, 42, tc.size); got != tc.want {
-				t.Fatalf("PublicThumbURL() = %q, want %q", got, tc.want)
+			c := NewPCloudClient("tok123", "session", "", "", "https://api.pcloud.com/", nil)
+			if got := c.ThumbURL(tc.publicLink, entity.Image{FileID: 42}, tc.size); got != tc.want {
+				t.Fatalf("ThumbURL() = %q, want %q", got, tc.want)
 			}
 		})
 	}

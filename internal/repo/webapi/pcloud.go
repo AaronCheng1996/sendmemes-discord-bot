@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -58,23 +57,6 @@ func isTokenErr(err error) bool {
 		strings.Contains(s, "API error 2094") // Invalid access_token
 }
 
-// mediaExtensions maps a lowercased file extension to its media kind
-// (entity.MediaKindImage or entity.MediaKindVideo). Extensions absent from the
-// map are ignored during folder walks.
-var mediaExtensions = map[string]string{
-	".jpg":  entity.MediaKindImage,
-	".jpeg": entity.MediaKindImage,
-	".png":  entity.MediaKindImage,
-	".gif":  entity.MediaKindImage,
-	".webp": entity.MediaKindImage,
-	".mp4":  entity.MediaKindVideo,
-	".webm": entity.MediaKindVideo,
-	".mov":  entity.MediaKindVideo,
-	".m4v":  entity.MediaKindVideo,
-	".mkv":  entity.MediaKindVideo,
-	".avi":  entity.MediaKindVideo,
-}
-
 // pcloudMeta mirrors the JSON structure returned by pCloud's listfolder API.
 type pcloudMeta struct {
 	Name     string       `json:"name"`
@@ -123,14 +105,15 @@ type fileLinkCacheEntry struct {
 }
 
 type PCloudClient struct {
-	mu          sync.RWMutex
-	token       string // current token value
-	tokenParam  string // "auth" for session tokens, "access_token" for OAuth tokens
-	oauth       bool   // true when the pre-set token is an OAuth2 access token
-	username    string
-	password    string
-	apiEndpoint string
-	httpClient  *http.Client
+	mu            sync.RWMutex
+	token         string // current token value
+	tokenParam    string // "auth" for session tokens, "access_token" for OAuth tokens
+	oauth         bool   // true when the pre-set token is an OAuth2 access token
+	username      string
+	password      string
+	apiEndpoint   string
+	rootFolderIDs []int64 // pCloud folder IDs walked by ListMedia
+	httpClient    *http.Client
 
 	// sem limits the number of concurrent pCloud API calls to avoid
 	// triggering connection-level rate limiting (EOF responses).
@@ -155,11 +138,13 @@ type PCloudClient struct {
 // OAuth app), anything else → auth= (a session token, e.g. the pcauth cookie).
 // When accessToken is empty, call Login(ctx) once at startup to exchange
 // username/password for a session token (sent as auth=).
-func NewPCloudClient(accessToken, tokenType, username, password, apiEndpoint string) *PCloudClient {
+// rootFolderIDs are the pCloud folder IDs ListMedia walks.
+func NewPCloudClient(accessToken, tokenType, username, password, apiEndpoint string, rootFolderIDs []int64) *PCloudClient {
 	c := &PCloudClient{
 		username:      username,
 		password:      password,
 		apiEndpoint:   strings.TrimSuffix(apiEndpoint, "/"),
+		rootFolderIDs: rootFolderIDs,
 		httpClient:    &http.Client{Timeout: 30 * time.Second},
 		sem:           make(chan struct{}, pcloudMaxConcurrent),
 		fileLinkCache: make(map[int64]fileLinkCacheEntry),
@@ -353,20 +338,33 @@ func retryWithRelogin[T any](
 }
 
 // ---------------------------------------------------------------------------
-// ListFolder
+// ListMedia
 // ---------------------------------------------------------------------------
 
-// ListFolder recursively lists all image files under folderID.
-// Each returned PCloudEntry carries the immediate parent folder name (album name).
-// Files directly inside folderID (root-level, no album subfolder) are skipped.
+// ListMedia recursively lists all media files under every configured root
+// folder. Each returned MediaEntry carries the immediate parent folder name
+// (album name). Files directly inside a root (no album subfolder) are skipped.
+func (c *PCloudClient) ListMedia(ctx context.Context) ([]repo.MediaEntry, error) {
+	var entries []repo.MediaEntry
+	for _, folderID := range c.rootFolderIDs {
+		folderEntries, err := c.listFolder(ctx, folderID)
+		if err != nil {
+			return nil, fmt.Errorf("PCloudClient - ListMedia - folderID=%d: %w", folderID, err)
+		}
+		entries = append(entries, folderEntries...)
+	}
+	return entries, nil
+}
+
+// listFolder recursively lists all media files under folderID.
 // Retries up to pcloudMaxRetries times; re-logs in if the token has expired.
-func (c *PCloudClient) ListFolder(ctx context.Context, folderID int64) ([]repo.PCloudEntry, error) {
-	return retryWithRelogin(ctx, c, "ListFolder", func(ctx context.Context) ([]repo.PCloudEntry, error) {
+func (c *PCloudClient) listFolder(ctx context.Context, folderID int64) ([]repo.MediaEntry, error) {
+	return retryWithRelogin(ctx, c, "ListFolder", func(ctx context.Context) ([]repo.MediaEntry, error) {
 		return c.doListFolder(ctx, folderID)
 	})
 }
 
-func (c *PCloudClient) doListFolder(ctx context.Context, folderID int64) ([]repo.PCloudEntry, error) {
+func (c *PCloudClient) doListFolder(ctx context.Context, folderID int64) ([]repo.MediaEntry, error) {
 	if err := c.acquire(ctx); err != nil {
 		return nil, err
 	}
@@ -394,7 +392,7 @@ func (c *PCloudClient) doListFolder(ctx context.Context, folderID int64) ([]repo
 		return nil, fmt.Errorf("PCloudClient - ListFolder - API error %d: %s", result.Result, result.Error)
 	}
 
-	var entries []repo.PCloudEntry
+	var entries []repo.MediaEntry
 	for _, child := range result.Metadata.Contents {
 		if !child.IsFolder {
 			continue
@@ -407,18 +405,17 @@ func (c *PCloudClient) doListFolder(ctx context.Context, folderID int64) ([]repo
 // collectMedia recursively walks a pCloud folder tree node, collecting image and
 // video files (per mediaExtensions). Unknown extensions and root-level files are
 // skipped. albumName is always the leaf folder name containing the file.
-func collectMedia(node pcloudMeta, albumName string, out *[]repo.PCloudEntry) {
+func collectMedia(node pcloudMeta, albumName string, out *[]repo.MediaEntry) {
 	for _, child := range node.Contents {
 		if child.IsFolder {
 			collectMedia(child, child.Name, out)
 			continue
 		}
-		ext := strings.ToLower(filepath.Ext(child.Name))
-		kind, ok := mediaExtensions[ext]
+		kind, ok := entity.KindOfExtension(child.Name)
 		if !ok {
 			continue
 		}
-		*out = append(*out, repo.PCloudEntry{
+		*out = append(*out, repo.MediaEntry{
 			FileID:           child.FileID,
 			Name:             child.Name,
 			ParentFolderName: albumName,
@@ -429,7 +426,7 @@ func collectMedia(node pcloudMeta, albumName string, out *[]repo.PCloudEntry) {
 }
 
 // ---------------------------------------------------------------------------
-// GetFileLink
+// ResolveDownloadURL
 // ---------------------------------------------------------------------------
 
 // getFileLinkFromCache returns a cached download URL when present and unexpired.
@@ -453,23 +450,23 @@ func (c *PCloudClient) putFileLinkInCache(fileID int64, url string) {
 	}
 }
 
-// GetFileLink returns a temporary download URL for a pCloud file.
+// ResolveDownloadURL returns a temporary download URL for a pCloud file.
 // Retries up to pcloudMaxRetries times; re-logs in if the token has expired.
 // Results are cached in memory for pcloudFileLinkTTL to avoid repeating the
 // API call for the same file_id (e.g. admin list refreshes).
-func (c *PCloudClient) GetFileLink(ctx context.Context, fileID int64) (string, error) {
-	if url, ok := c.getFileLinkFromCache(fileID); ok {
+func (c *PCloudClient) ResolveDownloadURL(ctx context.Context, m entity.Image) (string, error) {
+	if url, ok := c.getFileLinkFromCache(m.FileID); ok {
 		return url, nil
 	}
 
-	link, err := retryWithRelogin(ctx, c, "GetFileLink", func(ctx context.Context) (string, error) {
-		return c.doGetFileLink(ctx, fileID)
+	link, err := retryWithRelogin(ctx, c, "ResolveDownloadURL", func(ctx context.Context) (string, error) {
+		return c.doGetFileLink(ctx, m.FileID)
 	})
 	if err != nil {
 		return "", err
 	}
 
-	c.putFileLinkInCache(fileID, link)
+	c.putFileLinkInCache(m.FileID, link)
 
 	return link, nil
 }
@@ -508,18 +505,18 @@ func (c *PCloudClient) doGetFileLink(ctx context.Context, fileID int64) (string,
 }
 
 // ---------------------------------------------------------------------------
-// GetFilePublicLink
+// ResolveShareURL
 // ---------------------------------------------------------------------------
 
-// GetFilePublicLink returns a permanent public share URL for a pCloud file
-// (getfilepublink). Unlike GetFileLink the URL is not bound to the caller's IP
-// and never expires, so the caller persists it instead of relying on the
-// in-memory TTL cache. getfilepublink is idempotent: if a public link already
-// exists for the file, the existing one is returned.
+// ResolveShareURL returns a permanent public share URL for a pCloud file
+// (getfilepublink). Unlike ResolveDownloadURL the URL is not bound to the
+// caller's IP and never expires, so the caller persists it instead of relying
+// on the in-memory TTL cache. getfilepublink is idempotent: if a public link
+// already exists for the file, the existing one is returned.
 // Retries up to pcloudMaxRetries times; re-logs in if the token has expired.
-func (c *PCloudClient) GetFilePublicLink(ctx context.Context, fileID int64) (string, error) {
-	return retryWithRelogin(ctx, c, "GetFilePublicLink", func(ctx context.Context) (string, error) {
-		return c.doGetFilePublicLink(ctx, fileID)
+func (c *PCloudClient) ResolveShareURL(ctx context.Context, m entity.Image) (string, error) {
+	return retryWithRelogin(ctx, c, "ResolveShareURL", func(ctx context.Context) (string, error) {
+		return c.doGetFilePublicLink(ctx, m.FileID)
 	})
 }
 
@@ -557,21 +554,21 @@ func (c *PCloudClient) doGetFilePublicLink(ctx context.Context, fileID int64) (s
 }
 
 // ---------------------------------------------------------------------------
-// PublicThumbURL
+// ThumbURL
 // ---------------------------------------------------------------------------
 
-// PublicThumbURL builds a direct getpubthumb URL from a public share link.
+// ThumbURL builds a direct getpubthumb URL from a public share link.
 //
-// The link GetFilePublicLink returns (https://u.pcloud.link/publink/show?code=XZ…)
+// The link ResolveShareURL returns (https://u.pcloud.link/publink/show?code=XZ…)
 // is a *landing page*, not the file — dropping it into an <img> tag renders
 // nothing. getpubthumb serves the thumbnail bytes for the same share code,
 // needs no auth token and is not bound to the caller's IP, which makes it the
 // only form a browser on the viewer's machine can actually load.
 //
 // size is a "WxH" geometry; empty means pcloudPublicThumbSize. Returns "" when
-// publicLink carries no code parameter, leaving the fallback to the caller.
-func (c *PCloudClient) PublicThumbURL(publicLink string, fileID int64, size string) string {
-	code := publicLinkCode(publicLink)
+// shareURL carries no code parameter, leaving the fallback to the caller.
+func (c *PCloudClient) ThumbURL(shareURL string, m entity.Image, size string) string {
+	code := publicLinkCode(shareURL)
 	if code == "" {
 		return ""
 	}
@@ -579,7 +576,7 @@ func (c *PCloudClient) PublicThumbURL(publicLink string, fileID int64, size stri
 		size = pcloudPublicThumbSize
 	}
 	return fmt.Sprintf("%s/getpubthumb?code=%s&fileid=%d&size=%s",
-		c.apiEndpoint, url.QueryEscape(code), fileID, url.QueryEscape(size))
+		c.apiEndpoint, url.QueryEscape(code), m.FileID, url.QueryEscape(size))
 }
 
 // publicLinkCode extracts the share code from a pCloud public link.

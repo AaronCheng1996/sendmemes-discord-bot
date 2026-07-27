@@ -11,7 +11,7 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
-func imagesUseCase(t *testing.T) (*images.UseCase, *MockImagesRepo, *MockPCloudAPI) {
+func imagesUseCase(t *testing.T) (*images.UseCase, *MockImagesRepo, *MockMediaSource) {
 	t.Helper()
 
 	mockCtl := gomock.NewController(t)
@@ -19,11 +19,11 @@ func imagesUseCase(t *testing.T) (*images.UseCase, *MockImagesRepo, *MockPCloudA
 
 	repoMock := NewMockImagesRepo(mockCtl)
 	albums := NewMockAlbumsRepo(mockCtl)
-	pcloud := NewMockPCloudAPI(mockCtl)
+	source := NewMockMediaSource(mockCtl)
 
-	uc := images.New(repoMock, albums, pcloud, "https://example.test")
+	uc := images.New(repoMock, albums, source, "https://example.test")
 
-	return uc, repoMock, pcloud
+	return uc, repoMock, source
 }
 
 // A stored PublicLink is returned directly without hitting the pCloud API or
@@ -50,13 +50,13 @@ func TestResolvePublicURLUsesStoredLink(t *testing.T) {
 func TestResolvePublicURLResolvesAndPersists(t *testing.T) {
 	t.Parallel()
 
-	uc, repoMock, pcloud := imagesUseCase(t)
+	uc, repoMock, source := imagesUseCase(t)
 	ctx := context.Background()
 
 	img := entity.Image{ID: 7, Source: "pcloud", FileID: 42}
 	link := "https://u.pcloud.link/publink/show?code=fresh"
 
-	pcloud.EXPECT().GetFilePublicLink(ctx, int64(42)).Return(link, nil)
+	source.EXPECT().ResolveShareURL(ctx, img).Return(link, nil)
 	repoMock.EXPECT().SetPublicLink(ctx, 7, link).Return(nil)
 
 	url, err := uc.ResolvePublicURL(ctx, img)
@@ -68,12 +68,12 @@ func TestResolvePublicURLResolvesAndPersists(t *testing.T) {
 func TestResolvePublicURLAPIError(t *testing.T) {
 	t.Parallel()
 
-	uc, _, pcloud := imagesUseCase(t)
+	uc, _, source := imagesUseCase(t)
 	ctx := context.Background()
 
 	img := entity.Image{ID: 7, Source: "pcloud", FileID: 42}
 
-	pcloud.EXPECT().GetFilePublicLink(ctx, int64(42)).Return("", errors.New("boom"))
+	source.EXPECT().ResolveShareURL(ctx, img).Return("", errors.New("boom"))
 
 	_, err := uc.ResolvePublicURL(ctx, img)
 	require.Error(t, err)
@@ -86,7 +86,7 @@ func TestResolvePublicURLNonPCloudFallback(t *testing.T) {
 	uc, _, _ := imagesUseCase(t)
 	ctx := context.Background()
 
-	img := entity.Image{ID: 8, Source: "local", URL: "/media/x.png"}
+	img := entity.Image{ID: 8, Source: "manual", URL: "/media/x.png"}
 
 	url, err := uc.ResolvePublicURL(ctx, img)
 	require.NoError(t, err)
@@ -98,7 +98,7 @@ func TestResolvePublicURLNonPCloudFallback(t *testing.T) {
 func TestResolvePreviewURLUsesPublicThumb(t *testing.T) {
 	t.Parallel()
 
-	uc, _, pcloud := imagesUseCase(t)
+	uc, _, source := imagesUseCase(t)
 	ctx := context.Background()
 
 	img := entity.Image{
@@ -109,7 +109,7 @@ func TestResolvePreviewURLUsesPublicThumb(t *testing.T) {
 	}
 	thumb := "https://api.pcloud.com/getpubthumb?code=cached&fileid=42&size=512x512"
 
-	pcloud.EXPECT().PublicThumbURL(img.PublicLink, int64(42), "").Return(thumb)
+	source.EXPECT().ThumbURL(img.PublicLink, img, "").Return(thumb)
 
 	url, err := uc.ResolvePreviewURL(ctx, img)
 	require.NoError(t, err)
@@ -121,7 +121,7 @@ func TestResolvePreviewURLUsesPublicThumb(t *testing.T) {
 func TestResolvePreviewURLFallsBackWhenNoThumb(t *testing.T) {
 	t.Parallel()
 
-	uc, _, pcloud := imagesUseCase(t)
+	uc, _, source := imagesUseCase(t)
 	ctx := context.Background()
 
 	img := entity.Image{
@@ -131,8 +131,8 @@ func TestResolvePreviewURLFallsBackWhenNoThumb(t *testing.T) {
 		PublicLink: "https://u.pcloud.link/publink/show",
 	}
 
-	pcloud.EXPECT().PublicThumbURL(img.PublicLink, int64(42), "").Return("")
-	pcloud.EXPECT().GetFileLink(ctx, int64(42)).Return("https://p-def1.pcloud.com/temp.png", nil)
+	source.EXPECT().ThumbURL(img.PublicLink, img, "").Return("")
+	source.EXPECT().ResolveDownloadURL(ctx, img).Return("https://p-def1.pcloud.com/temp.png", nil)
 
 	url, err := uc.ResolvePreviewURL(ctx, img)
 	require.NoError(t, err)
@@ -144,16 +144,16 @@ func TestResolvePreviewURLFallsBackWhenNoThumb(t *testing.T) {
 func TestResolvePreviewURLResolvesLinkFirst(t *testing.T) {
 	t.Parallel()
 
-	uc, repoMock, pcloud := imagesUseCase(t)
+	uc, repoMock, source := imagesUseCase(t)
 	ctx := context.Background()
 
 	img := entity.Image{ID: 7, Source: "pcloud", FileID: 42}
 	link := "https://u.pcloud.link/publink/show?code=fresh"
 	thumb := "https://api.pcloud.com/getpubthumb?code=fresh&fileid=42&size=512x512"
 
-	pcloud.EXPECT().GetFilePublicLink(ctx, int64(42)).Return(link, nil)
+	source.EXPECT().ResolveShareURL(ctx, img).Return(link, nil)
 	repoMock.EXPECT().SetPublicLink(ctx, 7, link).Return(nil)
-	pcloud.EXPECT().PublicThumbURL(link, int64(42), "").Return(thumb)
+	source.EXPECT().ThumbURL(link, img, "").Return(thumb)
 
 	url, err := uc.ResolvePreviewURL(ctx, img)
 	require.NoError(t, err)
@@ -167,7 +167,7 @@ func TestResolvePreviewURLNonPCloudFallback(t *testing.T) {
 	uc, _, _ := imagesUseCase(t)
 	ctx := context.Background()
 
-	img := entity.Image{ID: 8, Source: "local", URL: "/media/x.png"}
+	img := entity.Image{ID: 8, Source: "manual", URL: "/media/x.png"}
 
 	url, err := uc.ResolvePreviewURL(ctx, img)
 	require.NoError(t, err)

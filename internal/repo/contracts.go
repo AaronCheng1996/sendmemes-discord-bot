@@ -3,14 +3,15 @@ package repo
 
 import (
 	"context"
+	"time"
 
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 )
 
 //go:generate mockgen -source=contracts.go -destination=../usecase/mocks_repo_test.go -package=usecase_test
 
-// PCloudEntry is a single media file (image or video) discovered in the pCloud folder tree.
-type PCloudEntry struct {
+// MediaEntry is a single media file (image or video) discovered by a MediaSource.
+type MediaEntry struct {
 	FileID           int64
 	Name             string
 	ParentFolderName string // immediate parent folder name (= album name)
@@ -19,17 +20,6 @@ type PCloudEntry struct {
 }
 
 type (
-	// TranslationRepo -.
-	TranslationRepo interface {
-		Store(context.Context, entity.Translation) error
-		GetHistory(context.Context) ([]entity.Translation, error)
-	}
-
-	// TranslationWebAPI -.
-	TranslationWebAPI interface {
-		Translate(entity.Translation) (entity.Translation, error)
-	}
-
 	// AlbumsRepo manages album persistence.
 	AlbumsRepo interface {
 		List(ctx context.Context, q AlbumAdminListQuery, offset, limit int) ([]entity.Album, error)
@@ -82,12 +72,18 @@ type (
 		// UpsertByFileID inserts or updates an image record keyed on file_id.
 		// The bool reports whether a new row was inserted (vs. updated).
 		UpsertByFileID(ctx context.Context, img entity.Image) (bool, error)
-		DeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, fileIDs []int64) error
+		// DeleteByAlbumNotInFileIDs removes rows owned by source in albumID whose
+		// file_id is not in fileIDs, scoping pruning to the syncing source so a
+		// local sync never deletes pCloud-sourced rows (or vice versa).
+		DeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, source string, fileIDs []int64) error
 		// FindCoverByAlbum returns the image in albumID whose filename matches
 		// the cover convention (cover.* or _cover.*), case-insensitive.
 		FindCoverByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error)
 		// SetPublicLink persists the permanent pCloud public share link for image id.
 		SetPublicLink(ctx context.Context, id int, link string) error
+		// CountByKind returns the number of images with the given kind
+		// (entity.MediaKindImage or entity.MediaKindVideo).
+		CountByKind(ctx context.Context, kind string) (int, error)
 	}
 
 	// DeliveryRulesRepo manages configurable Discord delivery rules.
@@ -120,6 +116,9 @@ type (
 		// List returns events newest-first with offset/limit pagination.
 		List(ctx context.Context, offset, limit int) ([]entity.SyncEvent, error)
 		Count(ctx context.Context) (int, error)
+		// LatestAt returns the created_at of the most recent event, or nil when
+		// no sync event has ever been recorded.
+		LatestAt(ctx context.Context) (*time.Time, error)
 	}
 
 	// SystemRepo provides system-level checks.
@@ -127,18 +126,25 @@ type (
 		Ping(ctx context.Context) error
 	}
 
-	// PCloudAPI abstracts the pCloud REST API.
-	PCloudAPI interface {
-		ListFolder(ctx context.Context, folderID int64) ([]PCloudEntry, error)
-		GetFileLink(ctx context.Context, fileID int64) (string, error)
-		// GetFilePublicLink returns a permanent, non-IP-bound public share URL
-		// for a file (pCloud getfilepublink). The link never expires, so callers
-		// persist it rather than regenerating per request.
-		GetFilePublicLink(ctx context.Context, fileID int64) (string, error)
-		// PublicThumbURL turns a public share link from GetFilePublicLink into a
-		// direct thumbnail URL that renders in an <img> tag without auth. Pass an
-		// empty size for the default geometry. Returns "" when publicLink carries
-		// no usable share code.
-		PublicThumbURL(publicLink string, fileID int64, size string) string
+	// MediaSource abstracts a source of media files (pCloud, local filesystem, ...).
+	// Which roots to walk is the implementation's own concern (e.g. the pCloud
+	// client holds its configured folder IDs) so callers never handle source-specific
+	// identifiers.
+	MediaSource interface {
+		// ListMedia walks every configured root and returns all discovered media
+		// files, each carrying its immediate parent folder name as the album name.
+		ListMedia(ctx context.Context) ([]MediaEntry, error)
+		// ResolveDownloadURL returns a URL suitable for downloading m's file
+		// content. May be temporary/IP-bound depending on the source.
+		ResolveDownloadURL(ctx context.Context, m entity.Image) (string, error)
+		// ResolveShareURL returns a permanent, non-IP-bound public share URL for
+		// m. The link never expires, so callers persist it rather than
+		// regenerating per request.
+		ResolveShareURL(ctx context.Context, m entity.Image) (string, error)
+		// ThumbURL turns a share URL from ResolveShareURL into a direct thumbnail
+		// URL that renders in an <img> tag without auth. Pass an empty size for
+		// the default geometry. Returns "" when shareURL carries no usable
+		// thumbnail, leaving the fallback to the caller.
+		ThumbURL(shareURL string, m entity.Image, size string) string
 	}
 )

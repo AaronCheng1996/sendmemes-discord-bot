@@ -1,8 +1,8 @@
 # sendmemes-discord-bot
 
 A Discord bot that periodically posts albums of memes (sourced from a pCloud
-folder) to a Discord channel, with a small admin REST API and a Vue admin
-dashboard for managing the catalog.
+folder or a local directory) to a Discord channel, with a small admin REST
+API and a Vue admin dashboard for managing the catalog.
 
 The repository started from a Go Clean Architecture template, so the layout
 keeps that structure: `cmd/`, `config/`, `internal/{app,entity,usecase,repo,controller}`,
@@ -40,12 +40,27 @@ keeps that structure: `cmd/`, `config/`, `internal/{app,entity,usecase,repo,cont
 - **Reaction feedback** — any non-bot reaction on a scheduled message
   increments the album's `positive_rating` (in-memory map of the latest 200
   message → album mappings).
-- **pCloud sync** — periodically walks the configured pCloud root folders and
-  reconciles albums, images, and videos (file sizes included). The cadence is
-  runtime-configurable (`app_settings.sync_interval`, seeded from
-  `PCLOUD_SYNC_INTERVAL`) and can be triggered on demand. Download URLs are
-  short-lived, so the bot resolves them on demand and caches them in memory
-  (~50 min TTL) to keep pCloud API usage low.
+- **Media sync** — periodically walks the configured media source (pCloud or
+  a local directory, see below) and reconciles albums, images, and videos
+  (file sizes included). The cadence is runtime-configurable
+  (`app_settings.sync_interval`, seeded from `PCLOUD_SYNC_INTERVAL`) and can
+  be triggered on demand. pCloud download URLs are short-lived, so the bot
+  resolves them on demand and caches them in memory (~50 min TTL) to keep
+  pCloud API usage low; local files have no such expiry.
+
+### Media sources
+
+`MEDIA_SOURCE` selects where the bot syncs media from:
+
+- `pcloud` (default) — walks the pCloud folder IDs in `CLOUD_MAIN_FOLDER_ID`.
+  Needs `PCLOUD_ACCESS_TOKEN` or `PCLOUD_USERNAME`/`PCLOUD_PASSWORD`.
+- `local` — walks `MEDIA_LOCAL_ROOT`, a directory laid out as
+  `<album name>/<file>` (nesting under an album folder is fine; files placed
+  directly under the root, with no album folder, are skipped). No account
+  needed — just mount a folder (`./media:/media` in `docker-compose.yml`) and
+  set `MEDIA_SOURCE=local`. Files are served back to Discord/the dashboard via
+  a read-only `GET /media/*` route (see below), so `HTTP_PUBLIC_URL` must be
+  reachable from wherever the bot's HTTP server is exposed.
 
 ### Admin REST API (`/v1/admin/*`, gated by `X-Admin-Key`)
 
@@ -80,8 +95,9 @@ container's IP:
 
 - `GET /healthz` — liveness probe
 - `GET /metrics` — Prometheus, when `METRICS_ENABLED=true`
-- `GET /swagger/*` — Swagger UI for the legacy translation routes (kept while
-  those routes remain wired)
+- `GET /media/*` — serves files under `MEDIA_LOCAL_ROOT`, only registered
+  when `MEDIA_SOURCE=local`; not behind `X-Admin-Key` since Discord's CDN and
+  the dashboard both need to fetch it anonymously
 
 ## Project layout
 
@@ -96,6 +112,7 @@ internal/usecase        # business logic (admin, images, sync, rules, appsetting
 internal/repo
     persistent          # PostgreSQL implementations
     webapi              # external APIs (pCloud)
+    localfs             # local filesystem MediaSource (MEDIA_SOURCE=local)
 internal/entity         # domain types
 migrations              # single consolidated init migration
 pkg/{httpserver,logger,postgres}
@@ -117,25 +134,34 @@ Highlights:
 | `DISCORD_TOKEN`, `DISCORD_APPLICATION_ID`, `DISCORD_GUILD_ID` | Discord bot identity |
 | `DISCORD_CHANNEL_ID`, `DISCORD_SEND_INTERVAL`, `DISCORD_SEND_HISTORY_SIZE` | Seed the default **scheduled** delivery rule (once, when `delivery_rules` is empty) |
 | `DISCORD_NOTIFY_CHANNEL_ID` | Seeds default **new_album** + **new_files** rules (once, when `delivery_rules` is empty; empty = no notify rules) |
-| `ALBUM_DEFAULT_SEND_MODE` | Default `send_mode` for albums created by pCloud sync and admin creates that omit one (`Order`/`Random`/`Single`/`Video`/`Custom`, default `Random`) |
-| `PCLOUD_ACCESS_TOKEN` *or* `PCLOUD_USERNAME` + `PCLOUD_PASSWORD` | pCloud authentication. `PCLOUD_TOKEN_TYPE=session` (default, sent as `auth=`) or `oauth` (sent as `access_token=`); pCloud's API does not support 2FA |
+| `ALBUM_DEFAULT_SEND_MODE` | Default `send_mode` for albums created by sync and admin creates that omit one (`Order`/`Random`/`Single`/`Video`/`Custom`, default `Random`) |
+| `MEDIA_SOURCE` | `pcloud` (default) or `local` — see [Media sources](#media-sources) |
+| `MEDIA_LOCAL_ROOT` | Directory walked/served when `MEDIA_SOURCE=local` (default `/media`) |
+| `PCLOUD_ACCESS_TOKEN` *or* `PCLOUD_USERNAME` + `PCLOUD_PASSWORD` | pCloud authentication (only when `MEDIA_SOURCE=pcloud`). `PCLOUD_TOKEN_TYPE=session` (default, sent as `auth=`) or `oauth` (sent as `access_token=`); pCloud's API does not support 2FA |
 | `CLOUD_MAIN_FOLDER_ID` | Comma-separated pCloud folder IDs holding album subfolders |
 | `PCLOUD_API_ENDPOINT` | `https://api.pcloud.com` (US) or `https://eapi.pcloud.com` (EU) |
 | `PCLOUD_SYNC_INTERVAL` | Seeds `app_settings.sync_interval` (once); afterwards editable at runtime from the Connection page |
-| `METRICS_ENABLED`, `SWAGGER_ENABLED` | Toggle Prometheus and Swagger handlers |
+| `METRICS_ENABLED` | Toggle the Prometheus metrics handler |
 
 ## Running locally
 
-The repository ships with a Docker Compose stack that runs PostgreSQL, the bot,
-and an Nginx reverse proxy.
+The repository ships with a Docker Compose stack that runs PostgreSQL, the
+bot, the admin dashboard, and an Nginx reverse proxy — one command gets the
+full stack:
 
 ```sh
 git submodule update --init --recursive
 cp .env.example .env
-# Fill in DISCORD_*, PCLOUD_*, ADMIN_API_KEY in .env
+# Fill in DISCORD_*, ADMIN_API_KEY, and either PCLOUD_* or MEDIA_SOURCE=local
+# (+ ./media:/media in docker-compose.yml, see Media sources above) in .env
 docker compose up -d --build
 docker compose logs -f app
 ```
+
+The bot's API is at `http://localhost:8080` and the dashboard at
+`http://localhost:8081` (sign in with `ADMIN_API_KEY`); `*.lvh.me` publicly
+resolves to `127.0.0.1`, so Nginx's `http://app.lvh.me` route also works
+with no `/etc/hosts` changes.
 
 To run just the database and the Go binary on the host (good for debugging):
 
@@ -162,8 +188,9 @@ files normally (`make migrate-create name=<title>`).
 
 ## Admin UI (frontend)
 
-The Vue 3 dashboard lives in the `ui/` submodule. See `ui/README.md` for
-setup. From the repo root:
+The Vue 3 dashboard lives in the `ui/` submodule. `docker compose up` already
+builds and serves it (see Running locally above); for hot-reload development
+instead, run it directly from the repo root (see `ui/README.md` for more):
 
 ```sh
 cd ui
@@ -181,16 +208,11 @@ the browser's `sessionStorage`.
 | Format Go code | `make format` |
 | Lint | `make linter-golangci` |
 | Unit tests | `make test` |
-| Integration test stack (legacy translation API) | `make compose-up-integration-test` |
-| Regenerate Swagger | `make swag-v1` |
 | Regenerate mocks | `make mock` |
 | Pre-commit bundle | `make pre-commit` |
 
 ## Roadmap / known follow-ups
 
-- Drop the legacy translation feature (`/v1/translation/*`, `history` table,
-  `internal/usecase/translation`, `internal/repo/webapi/translation_google`,
-  swagger spec, integration test) once the demo wiring is no longer needed.
 - Weighted album selection that biases toward higher `positive_rating`
   (`ORDER BY RANDOM() * (1 + positive_rating) DESC`).
 - `/album_stats` slash command — surface top-rated albums in Discord.

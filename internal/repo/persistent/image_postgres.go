@@ -152,6 +152,20 @@ func (r *ImagesRepo) Count(ctx context.Context, q repo.ImageAdminListQuery) (int
 	return n, nil
 }
 
+// CountByKind returns the number of images with the given kind
+// (entity.MediaKindImage or entity.MediaKindVideo).
+func (r *ImagesRepo) CountByKind(ctx context.Context, kind string) (int, error) {
+	sql, args, err := r.Builder.Select("COUNT(*)").From("images").Where(sq.Eq{"kind": kind}).ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("ImagesRepo - CountByKind - r.Builder: %w", err)
+	}
+	var n int
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("ImagesRepo - CountByKind - QueryRow: %w", err)
+	}
+	return n, nil
+}
+
 // GetFirstByAlbum returns the lowest-id image in albumID, used as a preview when
 // the album has no explicit cover. Returns (zero, false, nil) when the album has no images.
 func (r *ImagesRepo) GetFirstByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error) {
@@ -405,13 +419,13 @@ func (r *ImagesRepo) SetPublicLink(ctx context.Context, id int, link string) err
 	return nil
 }
 
-// DeleteByAlbumNotInFileIDs removes pCloud images in albumID whose file_id is not in fileIDs.
-func (r *ImagesRepo) DeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, fileIDs []int64) error {
+// DeleteByAlbumNotInFileIDs removes images in albumID owned by source whose file_id is not in fileIDs.
+func (r *ImagesRepo) DeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, source string, fileIDs []int64) error {
 	q := r.Builder.
 		Delete("images").
 		Where(sq.And{
 			sq.Eq{"album_id": albumID},
-			sq.Eq{"source": "pcloud"},
+			sq.Eq{"source": source},
 			sq.NotEq{"file_id": fileIDs},
 		})
 

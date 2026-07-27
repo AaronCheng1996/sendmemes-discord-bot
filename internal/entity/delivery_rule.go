@@ -28,8 +28,16 @@ type DeliveryRule struct {
 	SendInterval string    `json:"send_interval,omitempty"` // scheduled only
 	HistorySize  int       `json:"history_size"`            // scheduled only
 	Enabled      bool      `json:"enabled"`
+	// CaptionTemplate overrides the Discord embed description for this rule's
+	// sends. Empty means "use the built-in default caption" (see renderCaption).
+	CaptionTemplate string `json:"caption_template,omitempty"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+
+	// NextRunAt and ScheduleDescription are computed on read for scheduled
+	// rules (never persisted) so the UI can show when a rule will next fire.
+	NextRunAt           *time.Time `json:"next_run_at,omitempty"`
+	ScheduleDescription string     `json:"schedule_description,omitempty"`
 }
 
 // ParseTriggerType validates a trigger-type string.

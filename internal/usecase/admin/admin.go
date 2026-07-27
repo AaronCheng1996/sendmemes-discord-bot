@@ -352,6 +352,28 @@ func (uc *UseCase) GetSystemStatus(ctx context.Context) (entity.SystemStatus, er
 	if uc.runtime != nil {
 		connected, user = uc.runtime.GetDiscordStatus(ctx)
 	}
+
+	nextRun, err := uc.nextScheduledRun(ctx)
+	if err != nil {
+		return entity.SystemStatus{}, err
+	}
+	lastSync, err := uc.syncEvents.LatestAt(ctx)
+	if err != nil {
+		return entity.SystemStatus{}, err
+	}
+	albumCount, err := uc.albums.Count(ctx, repo.AlbumAdminListQuery{})
+	if err != nil {
+		return entity.SystemStatus{}, err
+	}
+	imageCount, err := uc.images.CountByKind(ctx, entity.MediaKindImage)
+	if err != nil {
+		return entity.SystemStatus{}, err
+	}
+	videoCount, err := uc.images.CountByKind(ctx, entity.MediaKindVideo)
+	if err != nil {
+		return entity.SystemStatus{}, err
+	}
+
 	return entity.SystemStatus{
 		ServerTime:       time.Now().UTC(),
 		DatabaseStatus:   dbStatus,
@@ -359,7 +381,31 @@ func (uc *UseCase) GetSystemStatus(ctx context.Context) (entity.SystemStatus, er
 		DiscordUser:      user,
 		SyncInterval:     interval,
 		RuleCount:        ruleCount,
+		NextScheduledRun: nextRun,
+		LastSyncAt:       lastSync,
+		AlbumCount:       albumCount,
+		ImageCount:       imageCount,
+		VideoCount:       videoCount,
 	}, nil
+}
+
+// nextScheduledRun returns the earliest NextRunAt among enabled scheduled
+// rules, or nil when there are none.
+func (uc *UseCase) nextScheduledRun(ctx context.Context) (*time.Time, error) {
+	scheduled, err := uc.rules.ListActiveByTrigger(ctx, entity.TriggerScheduled)
+	if err != nil {
+		return nil, err
+	}
+	var earliest *time.Time
+	for _, rule := range scheduled {
+		if rule.NextRunAt == nil {
+			continue
+		}
+		if earliest == nil || rule.NextRunAt.Before(*earliest) {
+			earliest = rule.NextRunAt
+		}
+	}
+	return earliest, nil
 }
 
 // resolveTargetChannel returns channelID when non-empty, otherwise the first

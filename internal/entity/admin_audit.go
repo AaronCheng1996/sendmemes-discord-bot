@@ -23,6 +23,15 @@ type SystemStatus struct {
 	SyncInterval string `json:"sync_interval"`
 	// RuleCount is the number of configured delivery rules.
 	RuleCount int `json:"rule_count"`
+	// NextScheduledRun is the earliest next_run_at among enabled scheduled
+	// rules, or nil when there are none.
+	NextScheduledRun *time.Time `json:"next_scheduled_run,omitempty"`
+	// LastSyncAt is the created_at of the most recent sync event, or nil when
+	// no sync has ever run.
+	LastSyncAt *time.Time `json:"last_sync_at,omitempty"`
+	AlbumCount int        `json:"album_count"`
+	ImageCount int        `json:"image_count"`
+	VideoCount int        `json:"video_count"`
 }
 
 // ManualScheduleTriggerResult represents one immediate scheduled send run.
