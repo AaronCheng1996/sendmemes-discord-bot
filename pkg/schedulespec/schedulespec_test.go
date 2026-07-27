@@ -64,6 +64,37 @@ func TestIntervalSpecNext(t *testing.T) {
 	}
 }
 
+func TestDescribe(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "duration hours", input: "6h", want: "every 6h"},
+		{name: "duration composite", input: "1h30m", want: "every 1h30m"},
+		{name: "daily at fixed time", input: "0 9 * * *", want: "at 09:00 every day"},
+		{name: "fixed time zero-padded", input: "5 3 * * *", want: "at 03:05 every day"},
+		{name: "weekday numeric", input: "0 9 * * 1", want: "at 09:00 every Monday"},
+		{name: "weekday name", input: "30 8 * * MON", want: "at 08:30 every Monday"},
+		{name: "every n minutes", input: "*/15 * * * *", want: "every 15 minutes"},
+		{name: "every n hours", input: "0 */2 * * *", want: "every 2 hours"},
+		{name: "descriptor daily", input: "@daily", want: "at 00:00 every day"},
+		{name: "descriptor hourly", input: "@hourly", want: "every hour"},
+		{name: "unrecognized cron falls back verbatim", input: "0 9 1 * *", want: "0 9 1 * *"},
+		{name: "garbage falls back verbatim", input: "not-a-schedule", want: "not-a-schedule"},
+		{name: "empty", input: "", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Describe(tt.input)
+			if got != tt.want {
+				t.Fatalf("Describe(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCronSpecNext(t *testing.T) {
 	spec, err := Parse("0 9 * * *") // every day at 09:00
 	if err != nil {

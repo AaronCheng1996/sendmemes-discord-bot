@@ -152,6 +152,20 @@ func (r *ImagesRepo) Count(ctx context.Context, q repo.ImageAdminListQuery) (int
 	return n, nil
 }
 
+// CountByKind returns the number of images with the given kind
+// (entity.MediaKindImage or entity.MediaKindVideo).
+func (r *ImagesRepo) CountByKind(ctx context.Context, kind string) (int, error) {
+	sql, args, err := r.Builder.Select("COUNT(*)").From("images").Where(sq.Eq{"kind": kind}).ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("ImagesRepo - CountByKind - r.Builder: %w", err)
+	}
+	var n int
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("ImagesRepo - CountByKind - QueryRow: %w", err)
+	}
+	return n, nil
+}
+
 // GetFirstByAlbum returns the lowest-id image in albumID, used as a preview when
 // the album has no explicit cover. Returns (zero, false, nil) when the album has no images.
 func (r *ImagesRepo) GetFirstByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error) {

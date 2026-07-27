@@ -30,6 +30,11 @@ type DeliveryRule struct {
 	Enabled      bool      `json:"enabled"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+
+	// NextRunAt and ScheduleDescription are computed on read for scheduled
+	// rules (never persisted) so the UI can show when a rule will next fire.
+	NextRunAt           *time.Time `json:"next_run_at,omitempty"`
+	ScheduleDescription string     `json:"schedule_description,omitempty"`
 }
 
 // ParseTriggerType validates a trigger-type string.

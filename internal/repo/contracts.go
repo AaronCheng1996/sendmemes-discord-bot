@@ -3,6 +3,7 @@ package repo
 
 import (
 	"context"
+	"time"
 
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 )
@@ -80,6 +81,9 @@ type (
 		FindCoverByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error)
 		// SetPublicLink persists the permanent pCloud public share link for image id.
 		SetPublicLink(ctx context.Context, id int, link string) error
+		// CountByKind returns the number of images with the given kind
+		// (entity.MediaKindImage or entity.MediaKindVideo).
+		CountByKind(ctx context.Context, kind string) (int, error)
 	}
 
 	// DeliveryRulesRepo manages configurable Discord delivery rules.
@@ -112,6 +116,9 @@ type (
 		// List returns events newest-first with offset/limit pagination.
 		List(ctx context.Context, offset, limit int) ([]entity.SyncEvent, error)
 		Count(ctx context.Context) (int, error)
+		// LatestAt returns the created_at of the most recent event, or nil when
+		// no sync event has ever been recorded.
+		LatestAt(ctx context.Context) (*time.Time, error)
 	}
 
 	// SystemRepo provides system-level checks.
