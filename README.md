@@ -24,13 +24,21 @@ rules, and sync status.
 
 ## Screenshots
 
-| Overview | Albums |
-|---|---|
-| ![Overview dashboard](docs/img/overview.png) | ![Albums list](docs/img/albums.png) |
+**Overview dashboard**
 
-| Delivery rules | Discord post |
-|---|---|
-| ![Delivery rules](docs/img/rules.png) | ![Discord embed post](docs/img/discord-post.png) |
+![Overview dashboard](docs/img/overview.png)
+
+**Albums**
+
+![Albums list](docs/img/albums.png)
+
+**Delivery rules**
+
+![Delivery rules](docs/img/rules.png)
+
+**Discord post**
+
+![Discord embed post](docs/img/discord-post.png)
 
 ## Quickstart
 
