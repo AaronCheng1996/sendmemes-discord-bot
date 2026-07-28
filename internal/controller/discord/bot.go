@@ -471,7 +471,7 @@ func (b *Bot) downloadAndFitN(ctx context.Context, imgs []entity.Image, targetCo
 // always). Delivery formats:
 //   - Random/default: a size-fitted batch of random images (cover-first).
 //   - Custom: batch built per the album's send config (see deliverCustom).
-//   - Single: exactly one image.
+//   - Single: exactly one random image (no cover pinning — see deliverSingle).
 //   - Order: an ordered comic; first batch only, /full_album for the rest.
 //   - Video: one random video as an attachment (small) or public link (large).
 func (b *Bot) deliverAlbum(ctx context.Context, channelID string, album entity.Album, captionPrefix, captionTemplate string) *discordgo.Message {
@@ -583,13 +583,16 @@ func (b *Bot) deliverRandom(ctx context.Context, channelID string, album entity.
 	return b.channelSendEmbed(channelID, embed, files, fullAlbumButtonRow(album.ID))
 }
 
-// deliverSingle sends exactly one image from the album (cover when present).
+// deliverSingle sends exactly one *random* image from the album — cover
+// pinning is a batch-mode concept (so the cover always leads a multi-image
+// post); Single has no "rest of the batch" for the cover to lead, so it picks
+// uniformly at random like everything else instead of always being the cover.
 // The image count is fixed by definition, so cfg.BatchSize does not apply;
 // cfg.Caption/cfg.NSFW still do.
 func (b *Bot) deliverSingle(ctx context.Context, channelID string, album entity.Album, captionPrefix, captionTemplate string, cfg entity.AlbumSendConfig) *discordgo.Message {
-	imgs, err := b.imagesUC.GetAlbumBatch(ctx, album, 1)
+	imgs, err := b.imagesUC.GetRandomFromAlbum(ctx, album.ID, 1)
 	if err != nil {
-		b.l.Error(fmt.Errorf("deliverAlbum single GetAlbumBatch %q: %w", album.Name, err))
+		b.l.Error(fmt.Errorf("deliverAlbum single GetRandomFromAlbum %q: %w", album.Name, err))
 		return nil
 	}
 	files, err := b.downloadImages(ctx, imgs)

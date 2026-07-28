@@ -178,6 +178,21 @@ func (mr *MockImagesMockRecorder) GetRandomAlbumImages(ctx, limit any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRandomAlbumImages", reflect.TypeOf((*MockImages)(nil).GetRandomAlbumImages), ctx, limit)
 }
 
+// GetRandomFromAlbum mocks base method.
+func (m *MockImages) GetRandomFromAlbum(ctx context.Context, albumID, limit int) ([]entity.Image, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetRandomFromAlbum", ctx, albumID, limit)
+	ret0, _ := ret[0].([]entity.Image)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetRandomFromAlbum indicates an expected call of GetRandomFromAlbum.
+func (mr *MockImagesMockRecorder) GetRandomFromAlbum(ctx, albumID, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRandomFromAlbum", reflect.TypeOf((*MockImages)(nil).GetRandomFromAlbum), ctx, albumID, limit)
+}
+
 // GetRandomVideo mocks base method.
 func (m *MockImages) GetRandomVideo(ctx context.Context, albumID int) (entity.Image, bool, error) {
 	m.ctrl.T.Helper()

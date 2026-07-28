@@ -31,6 +31,10 @@ type (
 		// GetAlbumBatch returns up to limit images for album using cover-first rules:
 		// cover first (when present), then random non-cover images.
 		GetAlbumBatch(ctx context.Context, album entity.Album, limit int) ([]entity.Image, error)
+		// GetRandomFromAlbum returns up to limit purely random images from albumID,
+		// with no cover pinning (unlike GetAlbumBatch). Used by Single mode, which
+		// wants a random pick each time rather than always the cover.
+		GetRandomFromAlbum(ctx context.Context, albumID, limit int) ([]entity.Image, error)
 		// GetComicPages returns the album's images in reading order: cover first (when
 		// present), then remaining images sorted by natural filename order.
 		GetComicPages(ctx context.Context, album entity.Album) ([]entity.Image, error)

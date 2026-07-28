@@ -194,3 +194,19 @@ func TestTopRatedDelegatesToAlbumsRepo(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 }
+
+// GetRandomFromAlbum ignores cover pinning entirely — it's a plain passthrough
+// to GetRandomByAlbum with excludeID=0, unlike albumImagesWithCover.
+func TestGetRandomFromAlbumIgnoresCoverPinning(t *testing.T) {
+	t.Parallel()
+
+	uc, repoMock, _ := imagesUseCase(t)
+	ctx := context.Background()
+
+	want := []entity.Image{{ID: 3, IsCover: false}}
+	repoMock.EXPECT().GetRandomByAlbum(ctx, 42, 1, 0).Return(want, nil)
+
+	got, err := uc.GetRandomFromAlbum(ctx, 42, 1)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}

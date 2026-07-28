@@ -108,6 +108,17 @@ func (uc *UseCase) albumImagesWithCover(ctx context.Context, album entity.Album,
 	return append([]entity.Image{cover}, rest...), nil
 }
 
+// GetRandomFromAlbum returns up to limit purely random images from albumID,
+// ignoring cover-first pinning entirely (unlike albumImagesWithCover/
+// GetAlbumBatch, which always puts the cover first when present).
+func (uc *UseCase) GetRandomFromAlbum(ctx context.Context, albumID, limit int) ([]entity.Image, error) {
+	imgs, err := uc.repo.GetRandomByAlbum(ctx, albumID, limit, 0)
+	if err != nil {
+		return nil, fmt.Errorf("ImagesUseCase - GetRandomFromAlbum - GetRandomByAlbum: %w", err)
+	}
+	return imgs, nil
+}
+
 // GetScheduledAlbum picks a random album with anti-repeat logic (avoiding the
 // excludeN most recently sent albums). Pass the album's ID to MarkAlbumSent after
 // the message is sent.
