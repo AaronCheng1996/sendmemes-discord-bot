@@ -102,6 +102,23 @@ other options.
   resolves them on demand and caches them in memory (~50 min TTL) to keep
   pCloud API usage low; local files have no such expiry.
 
+### When a source folder disappears
+
+Deleting (or emptying) a folder does not silently delete the album. The next
+sync flags it with `missing_since` and the dashboard shows a **missing** badge:
+
+- The album keeps its `positive_rating`, send mode and config, so nothing is
+  lost if the folder was only moved away temporarily.
+- Missing albums are skipped by scheduled delivery, so the channel stops
+  receiving failed sends for files that no longer exist.
+- If the folder comes back, the next sync clears the flag automatically.
+- To remove it for good, delete the album from the Albums page; its image rows
+  are cascaded away with it.
+
+As a safety net, a sync that finds **no media at all** skips this pass entirely
+and logs a warning — that almost always means a broken source, a wrong root ID
+or expired credentials rather than an intentionally emptied library.
+
 ### Customizing messages
 
 Two layers shape a post. A **delivery rule** sets the caption for everything it

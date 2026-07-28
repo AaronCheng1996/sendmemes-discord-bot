@@ -85,6 +85,13 @@ func (b *Bot) doSync() {
 		return
 	}
 	b.l.Info("pCloud sync completed")
+	if report.EmptyScan {
+		b.l.Warn("sync found no media at all — skipped the missing-album pass (check the source configuration and credentials)")
+	}
+	if len(report.MissingAlbums) > 0 {
+		b.l.Info("sync flagged %d album(s) as missing (excluded from scheduled sends until their folder returns): %s",
+			len(report.MissingAlbums), strings.Join(report.MissingAlbums, ", "))
+	}
 	b.notifySyncEvents(ctx, report)
 }
 

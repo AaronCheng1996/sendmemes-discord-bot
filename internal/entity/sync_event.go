@@ -32,4 +32,12 @@ type SyncReport struct {
 	// InitialImport is true when the database had no albums before this run;
 	// callers should suppress notifications to avoid flooding on first import.
 	InitialImport bool `json:"initial_import"`
+	// MissingAlbums names the albums this run flagged as missing because their
+	// source folder disappeared. They keep their rating and config but are
+	// skipped by scheduled delivery until the folder comes back.
+	MissingAlbums []string `json:"missing_albums,omitempty"`
+	// EmptyScan is true when the source returned no media at all. The missing
+	// pass is skipped in that case, since it almost always means a broken
+	// source rather than an intentionally emptied library.
+	EmptyScan bool `json:"empty_scan,omitempty"`
 }

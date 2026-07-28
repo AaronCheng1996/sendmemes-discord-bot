@@ -47,6 +47,13 @@ type (
 		SetCover(ctx context.Context, albumID, coverImageID int) error
 		// ClearCover removes cover designation from an album.
 		ClearCover(ctx context.Context, albumID int) error
+		// MarkMissingExcept flags albums whose name was not seen in the latest
+		// sync (missing_since = NOW(), already-marked albums keep their original
+		// timestamp) and returns the names it newly marked. It errors on an empty
+		// slice rather than marking everything.
+		MarkMissingExcept(ctx context.Context, seenNames []string) ([]string, error)
+		// ClearMissing unflags albums that reappeared in the latest sync.
+		ClearMissing(ctx context.Context, seenNames []string) error
 		// TopRated returns up to limit albums ordered by positive_rating DESC.
 		TopRated(ctx context.Context, limit int) ([]entity.Album, error)
 	}
