@@ -64,6 +64,8 @@ type (
 		// from the persisted public share link; everything else falls back to
 		// ResolveURL.
 		ResolvePreviewURL(ctx context.Context, img entity.Image) (string, error)
+		// TopRated returns up to limit albums ordered by positive_rating DESC.
+		TopRated(ctx context.Context, limit int) ([]entity.Album, error)
 	}
 
 	Sync interface {

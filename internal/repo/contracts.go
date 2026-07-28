@@ -47,6 +47,8 @@ type (
 		SetCover(ctx context.Context, albumID, coverImageID int) error
 		// ClearCover removes cover designation from an album.
 		ClearCover(ctx context.Context, albumID int) error
+		// TopRated returns up to limit albums ordered by positive_rating DESC.
+		TopRated(ctx context.Context, limit int) ([]entity.Album, error)
 	}
 
 	// ImagesRepo manages image persistence.

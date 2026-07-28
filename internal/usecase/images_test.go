@@ -173,3 +173,24 @@ func TestResolvePreviewURLNonPCloudFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "https://example.test/media/x.png", url)
 }
+
+// TopRated delegates straight through to the albums repo.
+func TestTopRatedDelegatesToAlbumsRepo(t *testing.T) {
+	t.Parallel()
+
+	mockCtl := gomock.NewController(t)
+	t.Cleanup(mockCtl.Finish)
+
+	repoMock := NewMockImagesRepo(mockCtl)
+	albums := NewMockAlbumsRepo(mockCtl)
+	source := NewMockMediaSource(mockCtl)
+	uc := images.New(repoMock, albums, source, "https://example.test")
+
+	ctx := context.Background()
+	want := []entity.Album{{ID: 1, Name: "a", PositiveRating: 9}}
+	albums.EXPECT().TopRated(ctx, 10).Return(want, nil)
+
+	got, err := uc.TopRated(ctx, 10)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}

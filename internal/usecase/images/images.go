@@ -235,6 +235,15 @@ func (uc *UseCase) GetAlbumCover(ctx context.Context, albumName string) (entity.
 	return cover, found, nil
 }
 
+// TopRated returns up to limit albums ordered by positive_rating DESC.
+func (uc *UseCase) TopRated(ctx context.Context, limit int) ([]entity.Album, error) {
+	albums, err := uc.albums.TopRated(ctx, limit)
+	if err != nil {
+		return nil, fmt.Errorf("ImagesUseCase - TopRated - albums.TopRated: %w", err)
+	}
+	return albums, nil
+}
+
 // ResolveURL returns a public URL suitable for a Discord embed.
 // - MediaSource-backed images (pCloud/local): resolved via the configured source.
 // - Local/relative paths (starting with "/"): prepends HTTP_PUBLIC_URL.

@@ -52,6 +52,10 @@ var slashCommands = []*discordgo.ApplicationCommand{
 		},
 	},
 	{
+		Name:        "album_stats",
+		Description: "Show the top 10 albums by positive reaction count",
+	},
+	{
 		Name:        "schedule",
 		Description: "Manage Discord delivery rules",
 		Options: []*discordgo.ApplicationCommandOption{
@@ -133,6 +137,8 @@ func (b *Bot) handleApplicationCommand(s *discordgo.Session, i *discordgo.Intera
 		b.cmdFullAlbum(s, i)
 	case "album_mode":
 		b.cmdAlbumMode(s, i)
+	case "album_stats":
+		b.cmdAlbumStats(s, i)
 	case "schedule":
 		b.cmdSchedule(s, i)
 	}
@@ -402,6 +408,44 @@ func (b *Bot) cmdAlbumMode(s *discordgo.Session, i *discordgo.InteractionCreate)
 		b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** mode set to %s.", album.Name, album.SendMode))
 		b.vlog("/album_mode completed for %s: album=%q mode=%s", user, album.Name, album.SendMode)
 	}()
+}
+
+// albumStatsLimit caps /album_stats to the top N albums by positive_rating.
+const albumStatsLimit = 10
+
+func (b *Bot) cmdAlbumStats(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	user := interactionUser(i)
+	b.vlog("/album_stats received from %s", user)
+	b.deferInteraction(s, i)
+	go func() {
+		ctx := context.Background()
+		albums, err := b.imagesUC.TopRated(ctx, albumStatsLimit)
+		if err != nil {
+			b.l.Error(fmt.Errorf("cmdAlbumStats TopRated: %w", err))
+			b.editInteractionContent(s, i, "Failed to load album stats.")
+			return
+		}
+		b.editInteractionEmbed(s, i, albumStatsEmbed(albums))
+		b.vlog("/album_stats completed for %s: %d albums", user, len(albums))
+	}()
+}
+
+// albumStatsEmbed renders the top-rated albums as a ranked list, one line
+// each, e.g. "1. **Vacation** — 42 👍".
+func albumStatsEmbed(albums []entity.Album) *discordgo.MessageEmbed {
+	desc := "No albums have any reactions yet."
+	if len(albums) > 0 {
+		var sb strings.Builder
+		for idx, a := range albums {
+			fmt.Fprintf(&sb, "%d. **%s** — %d 👍\n", idx+1, a.Name, a.PositiveRating)
+		}
+		desc = sb.String()
+	}
+	return &discordgo.MessageEmbed{
+		Title:       "Top-rated albums",
+		Description: desc,
+		Color:       embedColorDefault,
+	}
 }
 
 func (b *Bot) cmdSchedule(s *discordgo.Session, i *discordgo.InteractionCreate) {

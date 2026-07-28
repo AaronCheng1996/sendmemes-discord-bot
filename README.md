@@ -31,15 +31,20 @@ keeps that structure: `cmd/`, `config/`, `internal/{app,entity,usecase,repo,cont
   filename order; first batch only — `/full_album` posts the rest in a thread),
   `Single` (one image),
   `Video` (one random video — uploaded as an attachment when ≤ 10 MB,
-  otherwise posted as a permanent pCloud public link). Set it from the
-  admin UI or the `/album_mode` slash command.
+  otherwise posted as a permanent pCloud public link),
+  `Custom` (batch built from the album's `send_config_json`: `batch_size`,
+  `include_cover`, `ordered`, `caption`, `nsfw` — see the Config button on the
+  Albums page). `caption` and `nsfw` (spoiler-tagged attachments) apply to
+  every mode, not just `Custom`. Set the mode from the admin UI or the
+  `/album_mode` slash command.
 - **Rich sync notifications** — `new_album` / `new_files` rules post the actual
   discovered media: new images merged into one size-fitted message (up to 10),
   new videos as permanent pCloud public links. The first-ever import is suppressed to
   avoid flooding, and every discovery is also stored for the Activity page.
 - **Reaction feedback** — any non-bot reaction on a scheduled message
   increments the album's `positive_rating` (in-memory map of the latest 200
-  message → album mappings).
+  message → album mappings). The bot auto-adds a 👍 to its own posts so the
+  mechanic is discoverable; `/album_stats` lists the top 10 albums by rating.
 - **Media sync** — periodically walks the configured media source (pCloud or
   a local directory, see below) and reconciles albums, images, and videos
   (file sizes included). The cadence is runtime-configurable
@@ -215,12 +220,9 @@ the browser's `sessionStorage`.
 
 - Weighted album selection that biases toward higher `positive_rating`
   (`ORDER BY RANDOM() * (1 + positive_rating) DESC`).
-- `/album_stats` slash command — surface top-rated albums in Discord.
 - Move in-code tunables (`albumBatchSize`, `reactMapMaxSize`,
   `downloadTimeout`, `videoUploadLimit`, `maxSyncNotifyMessages`,
   `scheduleReconcileInterval`) to env when deployments need to differ.
-- `Custom` send mode semantics driven by `send_config_json` (currently falls
-  back to `Random`).
 - Push scheduled-rule reconciliation on rule change instead of the ~30s poll.
 - Anti-repeat `last_sent_at` is global; consider per-rule send history if
   multiple scheduled rules should not share exclusion state.
