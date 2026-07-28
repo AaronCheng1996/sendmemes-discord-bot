@@ -102,6 +102,71 @@ other options.
   resolves them on demand and caches them in memory (~50 min TTL) to keep
   pCloud API usage low; local files have no such expiry.
 
+### Customizing messages
+
+Two layers shape a post. A **delivery rule** sets the caption for everything it
+sends; an **album** can override parts of that for itself.
+
+#### Per-rule caption template
+
+Every delivery rule has an optional `caption_template` (Schedule page, or the
+field of the same name on the API). Leave it empty to keep the built-in
+wording. Available placeholders:
+
+| Placeholder | Replaced with |
+|---|---|
+| `{album}` | Album name |
+| `{count}` | Number of files in this message |
+| `{total}` | Number of files that were available |
+| `{rating}` | The album's `positive_rating` |
+| `{prefix}` | `[TEST] ` for admin test sends, empty for scheduled posts |
+
+`{prefix}` exists so test sends stay recognizable. The default caption puts it
+in front of the album name, so a custom template that leaves it out makes
+"Send test" posts look exactly like real ones — keep it first if you want the
+marker:
+
+```text
+{prefix}📢 {album} — {count}/{total} pics · ⭐ {rating}
+```
+
+#### Per-album overrides (`send_config_json`)
+
+Each album carries an optional JSON config, edited with the **Config** button on
+the Albums page. Every key is optional; `{}` (or empty) means "use the
+defaults".
+
+| Key | Type | Effect | Applies to |
+|---|---|---|---|
+| `caption` | string | Replaces the rule's caption template for this album (placeholders above still work) | all modes |
+| `nsfw` | bool | Prefixes attachment filenames with `SPOILER_`, so Discord blurs them | all modes |
+| `batch_size` | int | Images per message | `Random`, `Custom` (`Single` sends one by definition) |
+| `ordered` | bool | Natural filename order instead of random | `Custom` |
+| `include_cover` | bool | `false` drops the cover from the batch | `Custom` |
+
+Send a few more images from one album, leaving everything else alone:
+
+```json
+{ "batch_size": 5 }
+```
+
+Blur an adult album and give it its own caption:
+
+```json
+{ "nsfw": true, "caption": "⚠️ NSFW — {album}" }
+```
+
+Post a fixed, cover-less run of pages in filename order:
+
+```json
+{ "ordered": true, "include_cover": false, "batch_size": 8 }
+```
+
+`ordered` and `include_cover` are only read by the `Custom` send mode, so switch
+the album to `Custom` when you need them; `caption`, `nsfw` and `batch_size`
+apply in every mode. An album's `caption` takes precedence over the rule's
+`caption_template`.
+
 ### Media sources
 
 `MEDIA_SOURCE` selects where the bot syncs media from:
