@@ -22,6 +22,18 @@ var embedColorByMode = map[entity.AlbumSendMode]int{
 
 const embedColorDefault = 0x5390ff
 
+// autoReactOnPost controls whether the bot adds a 👍 reaction to every embed
+// post it sends. The reaction itself already counts toward an album's
+// positive_rating (see handleReactionAdd), but nothing told users that
+// reacting at all was useful — this makes the mechanic discoverable. Kept as
+// a constant switch rather than a DB-backed setting since flipping it is a
+// deploy-time/code change, not something that needs runtime UI.
+const autoReactOnPost = true
+
+// autoReactEmoji is the reaction the bot adds to its own posts when
+// autoReactOnPost is enabled.
+const autoReactEmoji = "👍"
+
 // embedColor returns the accent color for mode, falling back to a neutral
 // default for unrecognized/empty modes (e.g. a sync-event embed with no album).
 func embedColor(mode entity.AlbumSendMode) int {
@@ -97,6 +109,11 @@ func (b *Bot) channelSendEmbed(channelID string, embed *discordgo.MessageEmbed, 
 	if err != nil {
 		b.l.Error(fmt.Errorf("channelSendEmbed: %w", err))
 		return nil
+	}
+	if autoReactOnPost {
+		if rerr := b.session.MessageReactionAdd(channelID, msg.ID, autoReactEmoji); rerr != nil {
+			b.l.Error(fmt.Errorf("channelSendEmbed auto-react: %w", rerr))
+		}
 	}
 	return msg
 }

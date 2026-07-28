@@ -434,11 +434,17 @@ func (b *Bot) downloadImages(ctx context.Context, imgs []entity.Image) ([]*disco
 // downloadAndFit downloads imgs as a pool, then applies fitToLimit to produce
 // at most albumBatchSize files that fit within discordMsgLimit.
 func (b *Bot) downloadAndFit(ctx context.Context, imgs []entity.Image) ([]*discordgo.File, error) {
+	return b.downloadAndFitN(ctx, imgs, albumBatchSize)
+}
+
+// downloadAndFitN is downloadAndFit with a caller-chosen target count, used by
+// delivery paths whose per-album send config overrides the batch size.
+func (b *Bot) downloadAndFitN(ctx context.Context, imgs []entity.Image, targetCount int) ([]*discordgo.File, error) {
 	pool, err := b.downloadPool(ctx, imgs)
 	if err != nil {
 		return nil, err
 	}
-	selected := fitToLimit(b.l, pool, albumBatchSize, discordMsgLimit)
+	selected := fitToLimit(b.l, pool, targetCount, discordMsgLimit)
 	if len(selected) == 0 {
 		return nil, fmt.Errorf("downloadAndFit: no images fit within Discord size limit")
 	}
@@ -457,24 +463,83 @@ func (b *Bot) downloadAndFit(ctx context.Context, imgs []entity.Image) ([]*disco
 // the root Discord message (nil on failure). captionPrefix is prepended to the
 // album name in captions (e.g. "[TEST] "); captionTemplate is the delivery
 // rule's caption template (empty for manual triggers/tests, which always use
-// the default caption). Delivery formats:
-//   - Random/Custom/default: a size-fitted batch of random images (cover-first).
-//   - Single: exactly one image.
+// the default caption). album.SendConfigJSON is parsed once here into an
+// AlbumSendConfig and threaded into every delivery path: Custom mode honors
+// all of its fields (BatchSize/IncludeCover/Ordered/Caption/NSFW), while the
+// other modes honor the fields that are meaningful for their fixed shape
+// (BatchSize where the mode has a variable-size batch, Caption and NSFW
+// always). Delivery formats:
+//   - Random/default: a size-fitted batch of random images (cover-first).
+//   - Custom: batch built per the album's send config (see deliverCustom).
+//   - Single: exactly one random image (no cover pinning — see deliverSingle).
 //   - Order: an ordered comic; first batch only, /full_album for the rest.
 //   - Video: one random video as an attachment (small) or public link (large).
 func (b *Bot) deliverAlbum(ctx context.Context, channelID string, album entity.Album, captionPrefix, captionTemplate string) *discordgo.Message {
+	cfg, err := entity.ParseAlbumSendConfig(album.SendConfigJSON)
+	if err != nil {
+		b.l.Error(fmt.Errorf("deliverAlbum %q: invalid send_config_json, using defaults: %w", album.Name, err))
+		cfg = entity.AlbumSendConfig{}
+	}
 	switch album.SendMode {
 	case entity.AlbumSendModeSingle:
-		return b.deliverSingle(ctx, channelID, album, captionPrefix, captionTemplate)
+		return b.deliverSingle(ctx, channelID, album, captionPrefix, captionTemplate, cfg)
 	case entity.AlbumSendModeOrder:
-		return b.deliverComic(ctx, channelID, album, captionPrefix, captionTemplate)
+		return b.deliverComic(ctx, channelID, album, captionPrefix, captionTemplate, cfg)
 	case entity.AlbumSendModeVideo:
-		return b.deliverVideo(ctx, channelID, album, captionPrefix, captionTemplate)
-	case entity.AlbumSendModeRandom, entity.AlbumSendModeCustom:
-		return b.deliverRandom(ctx, channelID, album, captionPrefix, captionTemplate)
+		return b.deliverVideo(ctx, channelID, album, captionPrefix, captionTemplate, cfg)
+	case entity.AlbumSendModeCustom:
+		return b.deliverCustom(ctx, channelID, album, captionPrefix, captionTemplate, cfg)
 	default:
-		return b.deliverRandom(ctx, channelID, album, captionPrefix, captionTemplate)
+		return b.deliverRandom(ctx, channelID, album, captionPrefix, captionTemplate, cfg)
 	}
+}
+
+// effectiveCaptionTemplate lets an album's send-config Caption override the
+// delivery rule's captionTemplate; an empty/whitespace-only Caption keeps the
+// rule's template (or the default caption, if that is empty too).
+func effectiveCaptionTemplate(cfg entity.AlbumSendConfig, captionTemplate string) string {
+	if strings.TrimSpace(cfg.Caption) != "" {
+		return cfg.Caption
+	}
+	return captionTemplate
+}
+
+// batchSizeOrDefault returns cfg.BatchSize when positive, else fall.
+func batchSizeOrDefault(cfg entity.AlbumSendConfig, fall int) int {
+	if cfg.BatchSize > 0 {
+		return cfg.BatchSize
+	}
+	return fall
+}
+
+// spoilerPrefix marks an attachment as a spoiler in Discord (auto-blurred until
+// clicked) when applied as a filename prefix.
+const spoilerPrefix = "SPOILER_"
+
+// applySpoiler prefixes every file's name with spoilerPrefix when nsfw is set,
+// so config.NSFW albums post their attachments blurred behind a click-to-reveal.
+func applySpoiler(files []*discordgo.File, nsfw bool) []*discordgo.File {
+	if !nsfw {
+		return files
+	}
+	for _, f := range files {
+		if !strings.HasPrefix(f.Name, spoilerPrefix) {
+			f.Name = spoilerPrefix + f.Name
+		}
+	}
+	return files
+}
+
+// excludeCover returns imgs without any image flagged as the album cover,
+// used by deliverCustom when send-config IncludeCover is explicitly false.
+func excludeCover(imgs []entity.Image) []entity.Image {
+	out := make([]entity.Image, 0, len(imgs))
+	for _, img := range imgs {
+		if !img.IsCover {
+			out = append(out, img)
+		}
+	}
+	return out
 }
 
 // resolveThumbURL returns a public thumbnail URL for the first of imgs, used
@@ -494,19 +559,23 @@ func (b *Bot) resolveThumbURL(ctx context.Context, imgs []entity.Image) string {
 
 // deliverRandom sends a size-fitted batch of random images (cover-first) with a
 // "Full album" button that expands the whole album into a thread on demand.
-func (b *Bot) deliverRandom(ctx context.Context, channelID string, album entity.Album, captionPrefix, captionTemplate string) *discordgo.Message {
-	imgs, err := b.imagesUC.GetAlbumBatch(ctx, album, albumPoolSize)
+// cfg.BatchSize overrides the batch/pool size and cfg.Caption/cfg.NSFW apply as
+// usual (see effectiveCaptionTemplate/applySpoiler).
+func (b *Bot) deliverRandom(ctx context.Context, channelID string, album entity.Album, captionPrefix, captionTemplate string, cfg entity.AlbumSendConfig) *discordgo.Message {
+	batchSize := batchSizeOrDefault(cfg, albumBatchSize)
+	imgs, err := b.imagesUC.GetAlbumBatch(ctx, album, batchSize*2)
 	if err != nil {
 		b.l.Error(fmt.Errorf("deliverAlbum random GetAlbumBatch %q: %w", album.Name, err))
 		return nil
 	}
-	files, err := b.downloadAndFit(ctx, imgs)
+	files, err := b.downloadAndFitN(ctx, imgs, batchSize)
 	if err != nil {
 		b.l.Error(fmt.Errorf("deliverAlbum random downloadAndFit %q: %w", album.Name, err))
 		_, _ = b.session.ChannelMessageSend(channelID, "Failed to download images.")
 		return nil
 	}
-	desc := renderCaption(captionTemplate, album, len(files), len(imgs), captionPrefix)
+	applySpoiler(files, cfg.NSFW)
+	desc := renderCaption(effectiveCaptionTemplate(cfg, captionTemplate), album, len(files), len(imgs), captionPrefix)
 	embed := albumEmbed(album, b.resolveThumbURL(ctx, imgs), desc)
 	if len(files) > 0 {
 		embed.Image = &discordgo.MessageEmbedImage{URL: "attachment://" + files[0].Name}
@@ -514,11 +583,16 @@ func (b *Bot) deliverRandom(ctx context.Context, channelID string, album entity.
 	return b.channelSendEmbed(channelID, embed, files, fullAlbumButtonRow(album.ID))
 }
 
-// deliverSingle sends exactly one image from the album (cover when present).
-func (b *Bot) deliverSingle(ctx context.Context, channelID string, album entity.Album, captionPrefix, captionTemplate string) *discordgo.Message {
-	imgs, err := b.imagesUC.GetAlbumBatch(ctx, album, 1)
+// deliverSingle sends exactly one *random* image from the album — cover
+// pinning is a batch-mode concept (so the cover always leads a multi-image
+// post); Single has no "rest of the batch" for the cover to lead, so it picks
+// uniformly at random like everything else instead of always being the cover.
+// The image count is fixed by definition, so cfg.BatchSize does not apply;
+// cfg.Caption/cfg.NSFW still do.
+func (b *Bot) deliverSingle(ctx context.Context, channelID string, album entity.Album, captionPrefix, captionTemplate string, cfg entity.AlbumSendConfig) *discordgo.Message {
+	imgs, err := b.imagesUC.GetRandomFromAlbum(ctx, album.ID, 1)
 	if err != nil {
-		b.l.Error(fmt.Errorf("deliverAlbum single GetAlbumBatch %q: %w", album.Name, err))
+		b.l.Error(fmt.Errorf("deliverAlbum single GetRandomFromAlbum %q: %w", album.Name, err))
 		return nil
 	}
 	files, err := b.downloadImages(ctx, imgs)
@@ -526,7 +600,8 @@ func (b *Bot) deliverSingle(ctx context.Context, channelID string, album entity.
 		b.l.Error(fmt.Errorf("deliverAlbum single download %q: %w", album.Name, err))
 		return nil
 	}
-	desc := renderCaption(captionTemplate, album, len(files), len(imgs), captionPrefix)
+	applySpoiler(files, cfg.NSFW)
+	desc := renderCaption(effectiveCaptionTemplate(cfg, captionTemplate), album, len(files), len(imgs), captionPrefix)
 	embed := albumEmbed(album, b.resolveThumbURL(ctx, imgs), desc)
 	if len(files) > 0 {
 		embed.Image = &discordgo.MessageEmbedImage{URL: "attachment://" + files[0].Name}
@@ -539,7 +614,8 @@ func (b *Bot) deliverSingle(ctx context.Context, channelID string, album entity.
 // the channel. When the album has more pages than fit in that batch, the caption
 // points viewers to /full_album (or the full-album button) for the rest; nothing
 // else is sent here. Page order is never shuffled.
-func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.Album, captionPrefix, captionTemplate string) *discordgo.Message {
+func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.Album, captionPrefix, captionTemplate string, cfg entity.AlbumSendConfig) *discordgo.Message {
+	batchSize := batchSizeOrDefault(cfg, albumBatchSize)
 	pages, err := b.imagesUC.GetComicPages(ctx, album)
 	if err != nil {
 		b.l.Error(fmt.Errorf("deliverAlbum comic GetComicPages %q: %w", album.Name, err))
@@ -550,7 +626,7 @@ func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.A
 		b.l.Error(fmt.Errorf("deliverAlbum comic downloadPool %q: %w", album.Name, err))
 		return nil
 	}
-	chunks := chunkOrdered(b.l, pool, albumBatchSize, discordMsgLimit)
+	chunks := chunkOrdered(b.l, pool, batchSize, discordMsgLimit)
 	if len(chunks) == 0 {
 		b.l.Warn("deliverAlbum comic: no pages fit within Discord size limit (album %q)", album.Name)
 		return nil
@@ -559,8 +635,9 @@ func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.A
 	first := chunks[0]
 	totalPages := len(pages)
 	files := entriesToFiles(first)
+	applySpoiler(files, cfg.NSFW)
 
-	desc := renderCaption(captionTemplate, album, len(first), totalPages, captionPrefix)
+	desc := renderCaption(effectiveCaptionTemplate(cfg, captionTemplate), album, len(first), totalPages, captionPrefix)
 	if len(first) < totalPages {
 		desc += "\nUse /full_album (or the button on a random post) for the rest."
 	}
@@ -575,7 +652,7 @@ func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.A
 // videoUploadLimit are uploaded as attachments; larger or unknown-size videos are
 // posted as a permanent pCloud public link. Returns nil (sending nothing) when the
 // album has no videos.
-func (b *Bot) deliverVideo(ctx context.Context, channelID string, album entity.Album, captionPrefix, captionTemplate string) *discordgo.Message {
+func (b *Bot) deliverVideo(ctx context.Context, channelID string, album entity.Album, captionPrefix, captionTemplate string, cfg entity.AlbumSendConfig) *discordgo.Message {
 	video, found, err := b.imagesUC.GetRandomVideo(ctx, album.ID)
 	if err != nil {
 		b.l.Error(fmt.Errorf("deliverAlbum video GetRandomVideo %q: %w", album.Name, err))
@@ -586,7 +663,7 @@ func (b *Bot) deliverVideo(ctx context.Context, channelID string, album entity.A
 		return nil
 	}
 
-	desc := renderCaption(captionTemplate, album, 1, 1, captionPrefix)
+	desc := renderCaption(effectiveCaptionTemplate(cfg, captionTemplate), album, 1, 1, captionPrefix)
 	// Video attachments don't render through embed.Image (Discord embeds only
 	// preview static images), so the video is just a sibling file attachment.
 	if video.SizeBytes > 0 && video.SizeBytes <= videoUploadLimit {
@@ -595,6 +672,7 @@ func (b *Bot) deliverVideo(ctx context.Context, channelID string, album entity.A
 			b.l.Error(fmt.Errorf("deliverAlbum video download %q: %w", album.Name, derr))
 			return nil
 		}
+		applySpoiler(files, cfg.NSFW)
 		embed := albumEmbed(album, "", desc)
 		return b.channelSendEmbed(channelID, embed, files, nil)
 	}
@@ -607,6 +685,67 @@ func (b *Bot) deliverVideo(ctx context.Context, channelID string, album entity.A
 	}
 	embed := albumEmbed(album, "", desc+"\n"+url)
 	return b.channelSendEmbed(channelID, embed, nil, nil)
+}
+
+// deliverCustom builds a batch fully driven by the album's send config: unlike
+// the other modes (which have a fixed shape), Custom mode reads BatchSize,
+// IncludeCover, Ordered, Caption, and NSFW to decide exactly what goes out.
+// Ordered=true walks the album in natural filename order (like Order mode);
+// otherwise images are picked cover-first + random (like Random mode).
+// IncludeCover=false drops the cover from either listing before batching.
+func (b *Bot) deliverCustom(ctx context.Context, channelID string, album entity.Album, captionPrefix, captionTemplate string, cfg entity.AlbumSendConfig) *discordgo.Message {
+	batchSize := batchSizeOrDefault(cfg, albumBatchSize)
+
+	var imgs []entity.Image
+	var err error
+	if cfg.Ordered {
+		imgs, err = b.imagesUC.GetComicPages(ctx, album)
+	} else {
+		imgs, err = b.imagesUC.GetAlbumBatch(ctx, album, batchSize*2)
+	}
+	if err != nil {
+		b.l.Error(fmt.Errorf("deliverAlbum custom fetch %q: %w", album.Name, err))
+		return nil
+	}
+	if cfg.IncludeCover != nil && !*cfg.IncludeCover {
+		imgs = excludeCover(imgs)
+	}
+	if len(imgs) == 0 {
+		b.l.Warn("deliverAlbum custom: album %q has no images to send after config filtering", album.Name)
+		return nil
+	}
+
+	var files []*discordgo.File
+	var sent, total int
+	if cfg.Ordered {
+		pool, derr := b.downloadPool(ctx, imgs)
+		if derr != nil {
+			b.l.Error(fmt.Errorf("deliverAlbum custom downloadPool %q: %w", album.Name, derr))
+			return nil
+		}
+		chunks := chunkOrdered(b.l, pool, batchSize, discordMsgLimit)
+		if len(chunks) == 0 {
+			b.l.Warn("deliverAlbum custom: no images fit within Discord size limit (album %q)", album.Name)
+			return nil
+		}
+		files = entriesToFiles(chunks[0])
+		sent, total = len(chunks[0]), len(imgs)
+	} else {
+		files, err = b.downloadAndFitN(ctx, imgs, batchSize)
+		if err != nil {
+			b.l.Error(fmt.Errorf("deliverAlbum custom downloadAndFit %q: %w", album.Name, err))
+			return nil
+		}
+		sent, total = len(files), len(imgs)
+	}
+	applySpoiler(files, cfg.NSFW)
+
+	desc := renderCaption(effectiveCaptionTemplate(cfg, captionTemplate), album, sent, total, captionPrefix)
+	embed := albumEmbed(album, b.resolveThumbURL(ctx, imgs), desc)
+	if len(files) > 0 {
+		embed.Image = &discordgo.MessageEmbedImage{URL: "attachment://" + files[0].Name}
+	}
+	return b.channelSendEmbed(channelID, embed, files, fullAlbumButtonRow(album.ID))
 }
 
 // sendAlbumToChannel downloads imgs with pool fitting and sends to channel.
@@ -669,6 +808,14 @@ func (b *Bot) editInteractionFiles(s *discordgo.Session, i *discordgo.Interactio
 func (b *Bot) editInteractionContent(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
 	if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &content}); err != nil {
 		b.l.Error(fmt.Errorf("editInteractionContent: %w", err))
+	}
+}
+
+// editInteractionEmbed edits the deferred interaction response with a single embed.
+func (b *Bot) editInteractionEmbed(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed) {
+	embeds := []*discordgo.MessageEmbed{embed}
+	if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Embeds: &embeds}); err != nil {
+		b.l.Error(fmt.Errorf("editInteractionEmbed: %w", err))
 	}
 }
 

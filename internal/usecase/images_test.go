@@ -173,3 +173,40 @@ func TestResolvePreviewURLNonPCloudFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "https://example.test/media/x.png", url)
 }
+
+// TopRated delegates straight through to the albums repo.
+func TestTopRatedDelegatesToAlbumsRepo(t *testing.T) {
+	t.Parallel()
+
+	mockCtl := gomock.NewController(t)
+	t.Cleanup(mockCtl.Finish)
+
+	repoMock := NewMockImagesRepo(mockCtl)
+	albums := NewMockAlbumsRepo(mockCtl)
+	source := NewMockMediaSource(mockCtl)
+	uc := images.New(repoMock, albums, source, "https://example.test")
+
+	ctx := context.Background()
+	want := []entity.Album{{ID: 1, Name: "a", PositiveRating: 9}}
+	albums.EXPECT().TopRated(ctx, 10).Return(want, nil)
+
+	got, err := uc.TopRated(ctx, 10)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+// GetRandomFromAlbum ignores cover pinning entirely — it's a plain passthrough
+// to GetRandomByAlbum with excludeID=0, unlike albumImagesWithCover.
+func TestGetRandomFromAlbumIgnoresCoverPinning(t *testing.T) {
+	t.Parallel()
+
+	uc, repoMock, _ := imagesUseCase(t)
+	ctx := context.Background()
+
+	want := []entity.Image{{ID: 3, IsCover: false}}
+	repoMock.EXPECT().GetRandomByAlbum(ctx, 42, 1, 0).Return(want, nil)
+
+	got, err := uc.GetRandomFromAlbum(ctx, 42, 1)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}

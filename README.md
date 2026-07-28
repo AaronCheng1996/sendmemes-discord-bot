@@ -1,13 +1,62 @@
 # sendmemes-discord-bot
 
-A Discord bot that periodically posts albums of memes (sourced from a pCloud
-folder or a local directory) to a Discord channel, with a small admin REST
-API and a Vue admin dashboard for managing the catalog.
+[![Go Version](https://img.shields.io/github/go-mod/go-version/AaronCheng1996/sendmemes-discord-bot)](go.mod)
+[![CI](https://github.com/AaronCheng1996/sendmemes-discord-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/AaronCheng1996/sendmemes-discord-bot/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/AaronCheng1996/sendmemes-discord-bot)](LICENSE)
 
-The repository started from a Go Clean Architecture template, so the layout
-keeps that structure: `cmd/`, `config/`, `internal/{app,entity,usecase,repo,controller}`,
-`pkg/`, `migrations/`, with the admin UI pulled in as a git submodule under
-`ui/`.
+A self-hostable Discord bot that periodically posts albums of memes to a
+channel, complete with a Vue admin dashboard for managing albums, delivery
+rules, and sync status.
+
+## Highlights
+
+- **No cloud account required** — point it at a local folder
+  (`MEDIA_SOURCE=local`) or a pCloud account; either way, `docker compose up`
+  gets you a running bot + dashboard.
+- **Configurable delivery** — per-album send modes (random batch, ordered
+  comic, single image, video, or a fully custom batch shape), scheduled or
+  event-triggered delivery rules, per-rule caption templates, rich Discord
+  embeds.
+- **Admin dashboard** — an Overview page with live system status, plus
+  CRUD screens for albums, images, delivery rules, and a sync activity feed.
+- **Engagement built in** — reaction-based album ratings, an auto 👍 on every
+  post, and a `/album_stats` leaderboard.
+
+## Screenshots
+
+**Overview dashboard**
+
+![Overview dashboard](docs/img/overview.png)
+
+**Albums**
+
+![Albums list](docs/img/albums.png)
+
+**Delivery rules**
+
+![Delivery rules](docs/img/rules.png)
+
+**Discord post**
+
+![Discord embed post](docs/img/discord-post.png)
+
+## Quickstart
+
+1. Create a Discord application + bot at the
+   [Discord Developer Portal](https://discord.com/developers/applications),
+   invite it to your server (`bot` + `applications.commands` scopes; grant
+   Send Messages, Attach Files, Add Reactions, and Create Public Threads),
+   and copy its token.
+2. `cp .env.example .env` and fill in three variables: `DISCORD_TOKEN`,
+   `ADMIN_API_KEY` (any string — gates the admin API and dashboard sign-in),
+   and `MEDIA_SOURCE=local` (no cloud account needed — drop meme folders into
+   `./media/<album name>/<file>` and uncomment the `./media:/media` volume
+   under the `app` service in `docker-compose.yml`).
+3. `git submodule update --init --recursive && docker compose up -d --build`
+4. Open `http://localhost:8081` and sign in with `ADMIN_API_KEY`.
+
+See [Running locally](#running-locally) below for the pCloud-backed path and
+other options.
 
 ## Features
 
@@ -31,15 +80,20 @@ keeps that structure: `cmd/`, `config/`, `internal/{app,entity,usecase,repo,cont
   filename order; first batch only — `/full_album` posts the rest in a thread),
   `Single` (one image),
   `Video` (one random video — uploaded as an attachment when ≤ 10 MB,
-  otherwise posted as a permanent pCloud public link). Set it from the
-  admin UI or the `/album_mode` slash command.
+  otherwise posted as a permanent pCloud public link),
+  `Custom` (batch built from the album's `send_config_json`: `batch_size`,
+  `include_cover`, `ordered`, `caption`, `nsfw` — see the Config button on the
+  Albums page). `caption` and `nsfw` (spoiler-tagged attachments) apply to
+  every mode, not just `Custom`. Set the mode from the admin UI or the
+  `/album_mode` slash command.
 - **Rich sync notifications** — `new_album` / `new_files` rules post the actual
   discovered media: new images merged into one size-fitted message (up to 10),
   new videos as permanent pCloud public links. The first-ever import is suppressed to
   avoid flooding, and every discovery is also stored for the Activity page.
 - **Reaction feedback** — any non-bot reaction on a scheduled message
   increments the album's `positive_rating` (in-memory map of the latest 200
-  message → album mappings).
+  message → album mappings). The bot auto-adds a 👍 to its own posts so the
+  mechanic is discoverable; `/album_stats` lists the top 10 albums by rating.
 - **Media sync** — periodically walks the configured media source (pCloud or
   a local directory, see below) and reconciles albums, images, and videos
   (file sizes included). The cadence is runtime-configurable
@@ -65,18 +119,22 @@ keeps that structure: `cmd/`, `config/`, `internal/{app,entity,usecase,repo,cont
 ### Admin REST API (`/v1/admin/*`, gated by `X-Admin-Key`)
 
 - Albums CRUD (`/albums`) — including per-album `send_mode` (delivery type)
+  and `send_config_json` (Custom mode overrides)
 - Images CRUD (`/images`, optional `album_id` scope; rows carry `kind` and
   `size_bytes`)
-- Delivery rules CRUD (`/delivery-rules`)
+- Delivery rules CRUD (`/delivery-rules`) — including per-rule
+  `caption_template`
 - Sync settings read/update (`/sync-settings`) and manual sync
   (`/sync/trigger-now`)
 - Manual scheduled send (`/schedule/trigger-now`) and per-album test send
   (`/albums/:id/send-test`) — both take an optional `channel_id`, falling back
-  to the first enabled scheduled rule
+  to the first enabled scheduled rule, and both run as background jobs
+  (`GET /jobs`)
 - Sync activity feed (`/sync-events`) — paginated discovery events for the
   dashboard Activity page
 - Aggregated system status (DB ping + Discord session + sync interval + rule
-  count) at `/system/status`
+  count + next scheduled run + last sync time + album/image/video counts) at
+  `/system/status`
 - Audit trail in `admin_audit_logs` (actor from `X-Admin-Actor`, otherwise
   `api_key`)
 
@@ -99,30 +157,10 @@ container's IP:
   when `MEDIA_SOURCE=local`; not behind `X-Admin-Key` since Discord's CDN and
   the dashboard both need to fetch it anonymously
 
-## Project layout
-
-```
-cmd/app                 # main entry point
-config                  # env-driven config
-internal/app            # wiring (Run) and migration init (build tag: migrate)
-internal/controller
-    restapi             # Fiber HTTP router, middleware, v1 handlers
-    discord             # discordgo bot, scheduler, command handlers
-internal/usecase        # business logic (admin, images, sync, rules, appsettings, ...)
-internal/repo
-    persistent          # PostgreSQL implementations
-    webapi              # external APIs (pCloud)
-    localfs             # local filesystem MediaSource (MEDIA_SOURCE=local)
-internal/entity         # domain types
-migrations              # single consolidated init migration
-pkg/{httpserver,logger,postgres}
-sample                  # default fallback image (embedded)
-ui                      # Vue 3 admin dashboard (git submodule)
-```
-
 ## Configuration
 
-All configuration is driven by environment variables (see `.env.example`).
+All configuration is driven by environment variables (see `.env.example`,
+grouped into required/optional blocks).
 
 Highlights:
 
@@ -173,18 +211,26 @@ make run          # builds with the migrate tag and runs cmd/app
 The bot runs database migrations automatically when built with the `migrate`
 build tag (already enabled in the Dockerfile and `make run`).
 
+`docker-compose.external-db.yml` is an alternate compose file for deploying
+against an already-running external Postgres + reverse-proxy network (the
+author's own homelab layout) instead of the self-contained stack above; most
+people should stick with the default `docker-compose.yml`.
+
 ## Database migrations
 
-`migrations/000001_init.up.sql` is the single source of truth — there are no
-incremental migrations because the project is still pre-production. Reset
-the schema with:
+`migrations/` holds incremental, ordered SQL files
+(`00000N_<name>.{up,down}.sql`); `000001_init` is the baseline schema and
+later files layer on top of it. They apply automatically when the bot is
+built with the `migrate` build tag (the default in the Dockerfile and
+`make run`). To reset a dev database from scratch:
 
 ```sh
-make db-reset       # drops everything, reapplies init
+make db-reset       # drops everything, reapplies every migration in order
 ```
 
-If the schema needs to change after the project goes live, add new migration
-files normally (`make migrate-create name=<title>`).
+Add new schema changes as a new migration file
+(`make migrate-create name=<title>`) — existing, already-applied migrations
+are never edited once the project has real data.
 
 ## Admin UI (frontend)
 
@@ -211,16 +257,37 @@ the browser's `sessionStorage`.
 | Regenerate mocks | `make mock` |
 | Pre-commit bundle | `make pre-commit` |
 
+## Project layout
+
+The repository started from a Go Clean Architecture template, so the layout
+keeps that structure:
+
+```
+cmd/app                 # main entry point
+config                  # env-driven config
+internal/app            # wiring (Run) and migration init (build tag: migrate)
+internal/controller
+    restapi             # Fiber HTTP router, middleware, v1 handlers
+    discord             # discordgo bot, scheduler, command handlers
+internal/usecase        # business logic (admin, images, sync, rules, appsettings, ...)
+internal/repo
+    persistent          # PostgreSQL implementations
+    webapi              # external APIs (pCloud)
+    localfs             # local filesystem MediaSource (MEDIA_SOURCE=local)
+internal/entity         # domain types
+migrations              # incremental SQL migrations
+pkg/{httpserver,logger,postgres}
+sample                  # default fallback image (embedded)
+ui                      # Vue 3 admin dashboard (git submodule)
+```
+
 ## Roadmap / known follow-ups
 
 - Weighted album selection that biases toward higher `positive_rating`
   (`ORDER BY RANDOM() * (1 + positive_rating) DESC`).
-- `/album_stats` slash command — surface top-rated albums in Discord.
 - Move in-code tunables (`albumBatchSize`, `reactMapMaxSize`,
   `downloadTimeout`, `videoUploadLimit`, `maxSyncNotifyMessages`,
   `scheduleReconcileInterval`) to env when deployments need to differ.
-- `Custom` send mode semantics driven by `send_config_json` (currently falls
-  back to `Random`).
 - Push scheduled-rule reconciliation on rule change instead of the ~30s poll.
 - Anti-repeat `last_sent_at` is global; consider per-rule send history if
   multiple scheduled rules should not share exclusion state.

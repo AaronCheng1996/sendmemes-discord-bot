@@ -320,6 +320,42 @@ func (r *AlbumsRepo) GetRandomExcludeRecent(ctx context.Context, excludeN int) (
 	return r.GetRandom(ctx)
 }
 
+// TopRated returns up to limit albums ordered by positive_rating DESC (ties
+// broken by id ASC for stable output).
+func (r *AlbumsRepo) TopRated(ctx context.Context, limit int) ([]entity.Album, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	sql, args, err := albumSelectBuilder(r).
+		OrderBy("positive_rating DESC, id ASC").
+		Limit(uint64(limit)).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("AlbumsRepo - TopRated - r.Builder: %w", err)
+	}
+
+	rows, err := r.Pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlbumsRepo - TopRated - Query: %w", err)
+	}
+	defer rows.Close()
+
+	albums := make([]entity.Album, 0, limit)
+	for rows.Next() {
+		a, scanErr := scanAlbumRow(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("AlbumsRepo - TopRated - Scan: %w", scanErr)
+		}
+		albums = append(albums, a)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("AlbumsRepo - TopRated - rows.Err: %w", rows.Err())
+	}
+
+	return albums, nil
+}
+
 // Update changes album name by id and returns updated row.
 func (r *AlbumsRepo) Update(ctx context.Context, id int, name string, sendMode entity.AlbumSendMode, sendConfigJSON string) (entity.Album, error) {
 	sql, args, err := r.Builder.

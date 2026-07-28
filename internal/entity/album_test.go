@@ -44,3 +44,59 @@ func TestParseAlbumSendMode(t *testing.T) {
 		})
 	}
 }
+
+func TestParseAlbumSendConfig(t *testing.T) {
+	t.Parallel()
+
+	falseVal := false
+	trueVal := true
+
+	tests := []struct {
+		name    string
+		input   string
+		want    entity.AlbumSendConfig
+		wantErr bool
+	}{
+		{name: "empty string is zero value", input: "", want: entity.AlbumSendConfig{}},
+		{name: "empty object is zero value", input: "{}", want: entity.AlbumSendConfig{}},
+		{
+			name:  "all fields",
+			input: `{"batch_size":5,"include_cover":false,"ordered":true,"caption":"hi {album}","nsfw":true}`,
+			want: entity.AlbumSendConfig{
+				BatchSize:    5,
+				IncludeCover: &falseVal,
+				Ordered:      true,
+				Caption:      "hi {album}",
+				NSFW:         true,
+			},
+		},
+		{
+			name:  "include_cover true is distinguishable from unset",
+			input: `{"include_cover":true}`,
+			want:  entity.AlbumSendConfig{IncludeCover: &trueVal},
+		},
+		{
+			name:  "partial fields keep the rest zero",
+			input: `{"batch_size":3}`,
+			want:  entity.AlbumSendConfig{BatchSize: 3},
+		},
+		{name: "malformed JSON is an error", input: `{"batch_size":`, wantErr: true},
+		{name: "wrong type is an error", input: `{"batch_size":"five"}`, wantErr: true},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := entity.ParseAlbumSendConfig(tc.input)
+			if tc.wantErr {
+				require.Error(t, err)
+				require.Equal(t, entity.AlbumSendConfig{}, got)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}

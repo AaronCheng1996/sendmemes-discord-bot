@@ -2,6 +2,7 @@
 package entity
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -30,6 +31,33 @@ func ParseAlbumSendMode(s string) (AlbumSendMode, error) {
 	default:
 		return "", fmt.Errorf("invalid album send mode: %s", mode)
 	}
+}
+
+// AlbumSendConfig holds per-album delivery overrides parsed from
+// Album.SendConfigJSON. All fields are optional; the zero value means "use the
+// mode's default behavior". Custom mode reads every field; other modes honor
+// BatchSize and Caption (see internal/controller/discord.deliverAlbum).
+type AlbumSendConfig struct {
+	BatchSize    int    `json:"batch_size,omitempty"`    // overrides the default per-message image count
+	IncludeCover *bool  `json:"include_cover,omitempty"` // nil = default (include); false = exclude the cover
+	Ordered      bool   `json:"ordered,omitempty"`       // true = natural filename order instead of random
+	Caption      string `json:"caption,omitempty"`       // overrides the delivery rule's caption template
+	NSFW         bool   `json:"nsfw,omitempty"`          // true = prefix attachment filenames with SPOILER_
+}
+
+// ParseAlbumSendConfig decodes raw (an album's stored send_config_json) into an
+// AlbumSendConfig. An empty string or "{}" returns the zero value with no
+// error — that is the common case for albums that have never set any config.
+func ParseAlbumSendConfig(raw string) (AlbumSendConfig, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" {
+		return AlbumSendConfig{}, nil
+	}
+	var cfg AlbumSendConfig
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return AlbumSendConfig{}, fmt.Errorf("invalid album send config: %w", err)
+	}
+	return cfg, nil
 }
 
 // Album represents a named collection of images (derived from folder name).
