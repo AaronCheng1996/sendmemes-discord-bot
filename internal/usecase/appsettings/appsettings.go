@@ -62,3 +62,34 @@ func (uc *UseCase) EnsureSeeded(ctx context.Context) error {
 	}
 	return nil
 }
+
+// Get returns the full settings row with the env fallback applied to the sync
+// interval, so callers always see an effective value.
+func (uc *UseCase) Get(ctx context.Context) (entity.AppSettings, error) {
+	s, found, err := uc.repo.Get(ctx)
+	if err != nil {
+		return entity.AppSettings{}, fmt.Errorf("AppSettingsUseCase - Get - repo.Get: %w", err)
+	}
+	if !found || strings.TrimSpace(s.SyncInterval) == "" {
+		s.SyncInterval = uc.defaultInterval
+	}
+	return s, nil
+}
+
+// SetMessageDefaults stores the app-wide message presentation defaults — the
+// bottom layer that delivery rules and albums override.
+func (uc *UseCase) SetMessageDefaults(ctx context.Context, style entity.MessageStyle) (entity.AppSettings, error) {
+	current, err := uc.Get(ctx)
+	if err != nil {
+		return entity.AppSettings{}, err
+	}
+	current.DefaultUseEmbed = style.UseEmbed
+	current.DefaultTitle = strings.TrimSpace(style.Title)
+	current.DefaultBody = strings.TrimSpace(style.Body)
+
+	out, err := uc.repo.Upsert(ctx, current)
+	if err != nil {
+		return entity.AppSettings{}, fmt.Errorf("AppSettingsUseCase - SetMessageDefaults - repo.Upsert: %w", err)
+	}
+	return out, nil
+}

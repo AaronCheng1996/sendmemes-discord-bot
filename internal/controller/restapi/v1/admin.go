@@ -297,6 +297,10 @@ func ruleFromBody(body request.DeliveryRuleWrite) entity.DeliveryRule {
 		SendInterval: strings.TrimSpace(body.SendInterval),
 		HistorySize:  body.HistorySize,
 		Enabled:      enabled,
+
+		CaptionTemplate: strings.TrimSpace(body.CaptionTemplate),
+		TitleTemplate:   strings.TrimSpace(body.TitleTemplate),
+		UseEmbed:        body.UseEmbed,
 	}
 }
 
@@ -392,6 +396,23 @@ func (r *V1) putSyncSettings(ctx *fiber.Ctx) error {
 	out, err := r.a.UpdateSyncSettings(ctx.UserContext(), body.SyncInterval, actorFromCtx(ctx))
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - putSyncSettings")
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+	return ctx.Status(http.StatusOK).JSON(out)
+}
+
+func (r *V1) putMessageDefaults(ctx *fiber.Ctx) error {
+	var body request.MessageDefaultsPut
+	if err := ctx.BodyParser(&body); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
+	}
+	out, err := r.a.UpdateMessageDefaults(ctx.UserContext(), entity.MessageStyle{
+		UseEmbed: body.UseEmbed,
+		Title:    body.Title,
+		Body:     body.Body,
+	}, actorFromCtx(ctx))
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - putMessageDefaults")
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())
 	}
 	return ctx.Status(http.StatusOK).JSON(out)

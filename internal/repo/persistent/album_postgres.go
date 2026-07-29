@@ -27,7 +27,7 @@ func NewAlbumsRepo(pg *postgres.Postgres) *AlbumsRepo {
 
 func scanAlbumRow(row pgx.Row) (entity.Album, error) {
 	var a entity.Album
-	var lastSentAt *time.Time
+	var lastSentAt, missingSince *time.Time
 	if err := row.Scan(
 		&a.ID,
 		&a.Name,
@@ -37,10 +37,12 @@ func scanAlbumRow(row pgx.Row) (entity.Album, error) {
 		&a.SendConfigJSON,
 		&lastSentAt,
 		&a.PositiveRating,
+		&missingSince,
 	); err != nil {
 		return entity.Album{}, err
 	}
 	a.LastSentAt = lastSentAt
+	a.MissingSince = missingSince
 	return a, nil
 }
 
@@ -55,6 +57,7 @@ func albumSelectBuilder(r *AlbumsRepo) sq.SelectBuilder {
 			"COALESCE(send_config_json::text, '')",
 			"last_sent_at",
 			"COALESCE(positive_rating, 0)",
+			"missing_since",
 		).
 		From("albums")
 }
@@ -207,7 +210,7 @@ func (r *AlbumsRepo) Create(ctx context.Context, name string, sendMode entity.Al
 		Insert("albums").
 		Columns("name", "send_mode", "send_config_json").
 		Values(name, sendMode, sq.Expr("?::jsonb", sendConfigJSON)).
-		Suffix("RETURNING id, name, has_cover, COALESCE(cover_image_id, 0), send_mode, COALESCE(send_config_json::text, ''), last_sent_at, COALESCE(positive_rating, 0)").
+		Suffix("RETURNING id, name, has_cover, COALESCE(cover_image_id, 0), send_mode, COALESCE(send_config_json::text, ''), last_sent_at, COALESCE(positive_rating, 0), missing_since").
 		ToSql()
 	if err != nil {
 		return entity.Album{}, fmt.Errorf("AlbumsRepo - Create - r.Builder: %w", err)
@@ -229,14 +232,14 @@ func (r *AlbumsRepo) GetOrCreate(ctx context.Context, name string, defaultMode e
 		Insert("albums").
 		Columns("name", "send_mode", "send_config_json").
 		Values(name, defaultMode, sq.Expr("'{}'::jsonb")).
-		Suffix("ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id, name, has_cover, COALESCE(cover_image_id, 0), send_mode, COALESCE(send_config_json::text, ''), last_sent_at, COALESCE(positive_rating, 0), (xmax = 0)").
+		Suffix("ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id, name, has_cover, COALESCE(cover_image_id, 0), send_mode, COALESCE(send_config_json::text, ''), last_sent_at, COALESCE(positive_rating, 0), missing_since, (xmax = 0)").
 		ToSql()
 	if err != nil {
 		return entity.Album{}, false, fmt.Errorf("AlbumsRepo - GetOrCreate - r.Builder: %w", err)
 	}
 
 	var a entity.Album
-	var lastSentAt *time.Time
+	var lastSentAt, missingSince *time.Time
 	var created bool
 	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(
 		&a.ID,
@@ -247,11 +250,13 @@ func (r *AlbumsRepo) GetOrCreate(ctx context.Context, name string, defaultMode e
 		&a.SendConfigJSON,
 		&lastSentAt,
 		&a.PositiveRating,
+		&missingSince,
 		&created,
 	); err != nil {
 		return entity.Album{}, false, fmt.Errorf("AlbumsRepo - GetOrCreate - QueryRow: %w", err)
 	}
 	a.LastSentAt = lastSentAt
+	a.MissingSince = missingSince
 	return a, created, nil
 }
 
@@ -278,6 +283,7 @@ func (r *AlbumsRepo) GetByName(ctx context.Context, name string) (entity.Album, 
 // GetRandom returns a random album.
 func (r *AlbumsRepo) GetRandom(ctx context.Context) (entity.Album, error) {
 	sql, args, err := albumSelectBuilder(r).
+		Where("missing_since IS NULL").
 		OrderBy("RANDOM()").
 		Limit(1).
 		ToSql()
@@ -301,6 +307,7 @@ func (r *AlbumsRepo) GetRandom(ctx context.Context) (entity.Album, error) {
 // it falls back to GetRandom so the scheduler never stalls.
 func (r *AlbumsRepo) GetRandomExcludeRecent(ctx context.Context, excludeN int) (entity.Album, error) {
 	sql, args, err := albumSelectBuilder(r).
+		Where("missing_since IS NULL").
 		Where("id NOT IN (SELECT id FROM albums WHERE last_sent_at IS NOT NULL ORDER BY last_sent_at DESC LIMIT ?)", excludeN).
 		OrderBy("RANDOM()").
 		Limit(1).
@@ -364,7 +371,7 @@ func (r *AlbumsRepo) Update(ctx context.Context, id int, name string, sendMode e
 		Set("send_mode", sendMode).
 		Set("send_config_json", sq.Expr("?::jsonb", sendConfigJSON)).
 		Where("id = ?", id).
-		Suffix("RETURNING id, name, has_cover, COALESCE(cover_image_id, 0), send_mode, COALESCE(send_config_json::text, ''), last_sent_at, COALESCE(positive_rating, 0)").
+		Suffix("RETURNING id, name, has_cover, COALESCE(cover_image_id, 0), send_mode, COALESCE(send_config_json::text, ''), last_sent_at, COALESCE(positive_rating, 0), missing_since").
 		ToSql()
 	if err != nil {
 		return entity.Album{}, fmt.Errorf("AlbumsRepo - Update - r.Builder: %w", err)
@@ -461,6 +468,70 @@ func (r *AlbumsRepo) ClearCover(ctx context.Context, albumID int) error {
 	_, err = r.Pool.Exec(ctx, sql, args...)
 	if err != nil {
 		return fmt.Errorf("AlbumsRepo - ClearCover - Exec: %w", err)
+	}
+	return nil
+}
+
+// MarkMissingExcept stamps missing_since = NOW() on every album whose name is
+// not in seenNames, skipping albums already marked so the original timestamp is
+// preserved. It returns the names it newly marked. Callers must not pass an
+// empty slice: "nothing was seen" means the source failed, not that every album
+// vanished (see the sync use case's guard).
+func (r *AlbumsRepo) MarkMissingExcept(ctx context.Context, seenNames []string) ([]string, error) {
+	if len(seenNames) == 0 {
+		return nil, fmt.Errorf("AlbumsRepo - MarkMissingExcept: refusing to mark every album missing on an empty scan")
+	}
+
+	sql, args, err := r.Builder.
+		Update("albums").
+		Set("missing_since", sq.Expr("NOW()")).
+		Where("missing_since IS NULL").
+		Where(sq.NotEq{"name": seenNames}).
+		Suffix("RETURNING name").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("AlbumsRepo - MarkMissingExcept - r.Builder: %w", err)
+	}
+
+	rows, err := r.Pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlbumsRepo - MarkMissingExcept - Query: %w", err)
+	}
+	defer rows.Close()
+
+	var marked []string
+	for rows.Next() {
+		var name string
+		if scanErr := rows.Scan(&name); scanErr != nil {
+			return nil, fmt.Errorf("AlbumsRepo - MarkMissingExcept - Scan: %w", scanErr)
+		}
+		marked = append(marked, name)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("AlbumsRepo - MarkMissingExcept - rows.Err: %w", err)
+	}
+	return marked, nil
+}
+
+// ClearMissing removes the missing flag from albums that were seen again, so a
+// folder that comes back recovers on its own.
+func (r *AlbumsRepo) ClearMissing(ctx context.Context, seenNames []string) error {
+	if len(seenNames) == 0 {
+		return nil
+	}
+
+	sql, args, err := r.Builder.
+		Update("albums").
+		Set("missing_since", nil).
+		Where("missing_since IS NOT NULL").
+		Where(sq.Eq{"name": seenNames}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("AlbumsRepo - ClearMissing - r.Builder: %w", err)
+	}
+
+	if _, err = r.Pool.Exec(ctx, sql, args...); err != nil {
+		return fmt.Errorf("AlbumsRepo - ClearMissing - Exec: %w", err)
 	}
 	return nil
 }

@@ -102,6 +102,113 @@ other options.
   resolves them on demand and caches them in memory (~50 min TTL) to keep
   pCloud API usage low; local files have no such expiry.
 
+### When a source folder disappears
+
+Deleting (or emptying) a folder does not silently delete the album. The next
+sync flags it with `missing_since` and the dashboard shows a **missing** badge:
+
+- The album keeps its `positive_rating`, send mode and config, so nothing is
+  lost if the folder was only moved away temporarily.
+- Missing albums are skipped by scheduled delivery, so the channel stops
+  receiving failed sends for files that no longer exist.
+- If the folder comes back, the next sync clears the flag automatically.
+- To remove it for good, delete the album from the Albums page; its image rows
+  are cascaded away with it.
+
+As a safety net, a sync that finds **no media at all** skips this pass entirely
+and logs a warning — that almost always means a broken source, a wrong root ID
+or expired credentials rather than an intentionally emptied library.
+
+### Customizing messages
+
+Three layers shape a post, each overriding the one below it **per field**:
+
+| Layer | Where | Sets |
+|---|---|---|
+| App defaults | Connection page → Message defaults | format, title, body |
+| Delivery rule | Schedule page → rule form | format, title, body |
+| Album | Albums page → **Config** button (`send_config_json`) | format, title, body |
+
+Because merging is per field, layers combine rather than replace each other —
+e.g. plain text by default, one rule that switches to embeds and sets a shared
+title, and an album under it that supplies only its own body (inheriting that
+rule's title and embed setting).
+
+**Format** — every layer can force embeds on or off (`use_embed`); rules and
+albums may also leave it unset to inherit. **Title and body apply either way**:
+in embed mode they become the embed title and description, in plain mode a bold
+first line and the message text.
+
+An empty title falls back to the album name (embed) or is omitted (plain); an
+empty body falls back to the built-in caption.
+
+#### Placeholders
+
+Title and body share one placeholder set:
+
+| Placeholder | Replaced with |
+|---|---|
+| `{album}` | Album name |
+| `{count}` | Number of files in this message |
+| `{total}` | Number of files that were available |
+| `{rating}` | The album's `positive_rating` |
+| `{prefix}` | `[TEST] ` for admin test sends, empty for scheduled posts |
+
+`{prefix}` exists so test sends stay recognizable. The default caption puts it
+in front of the album name, so a custom template that leaves it out makes
+"Send test" posts look exactly like real ones — keep it first if you want the
+marker:
+
+```text
+{prefix}📢 {album} — {count}/{total} pics · ⭐ {rating}
+```
+
+#### Per-album overrides (`send_config_json`)
+
+Each album carries an optional JSON config, edited with the **Config** button on
+the Albums page. Every key is optional; `{}` (or empty) means "use the
+defaults".
+
+| Key | Type | Effect | Applies to |
+|---|---|---|---|
+| `caption` | string | Message body for this album (placeholders above still work) | all modes |
+| `title` | string | Headline for this album | all modes |
+| `use_embed` | bool | Force embed (`true`) or plain text (`false`); omit to inherit | all modes |
+| `nsfw` | bool | Prefixes attachment filenames with `SPOILER_`, so Discord blurs them | all modes |
+| `batch_size` | int | Images per message | `Random`, `Custom` (`Single` sends one by definition) |
+| `ordered` | bool | Natural filename order instead of random | `Custom` |
+| `include_cover` | bool | `false` drops the cover from the batch | `Custom` |
+
+Send a few more images from one album, leaving everything else alone:
+
+```json
+{ "batch_size": 5 }
+```
+
+Blur an adult album and give it its own caption:
+
+```json
+{ "nsfw": true, "caption": "⚠️ NSFW — {album}" }
+```
+
+Give one album its own headline and drop back to a plain message, inheriting
+everything else:
+
+```json
+{ "title": "📌 Pinned pick", "use_embed": false }
+```
+
+Post a fixed, cover-less run of pages in filename order:
+
+```json
+{ "ordered": true, "include_cover": false, "batch_size": 8 }
+```
+
+`ordered` and `include_cover` are only read by the `Custom` send mode, so switch
+the album to `Custom` when you need them; `caption`, `nsfw` and `batch_size`
+apply in every mode. An album's `caption` takes precedence over the rule's
+`caption_template`.
+
 ### Media sources
 
 `MEDIA_SOURCE` selects where the bot syncs media from:

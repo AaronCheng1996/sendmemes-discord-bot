@@ -147,6 +147,33 @@ func (uc *UseCase) SyncImages(ctx context.Context) (entity.SyncReport, error) {
 		}
 	}
 
+	// Reconcile the missing flag: albums seen this run are cleared, albums that
+	// vanished are marked (never deleted, so ratings and send config survive a
+	// folder being moved away and back).
+	//
+	// Safety valve: a run that found nothing at all is far more likely to mean a
+	// broken source, a wrong root ID or an auth problem than the user emptying
+	// every folder, so skip the pass entirely rather than mark everything.
+	// (A source error already aborts above; this covers "succeeded but empty".)
+	if len(entries) == 0 {
+		report.EmptyScan = true
+	} else {
+		seen := make([]string, 0, len(albumFileIDs))
+		for name := range albumFileIDs {
+			seen = append(seen, name)
+		}
+
+		if err = uc.albums.ClearMissing(ctx, seen); err != nil {
+			return report, fmt.Errorf("SyncUseCase - SyncImages - ClearMissing: %w", err)
+		}
+		marked, merr := uc.albums.MarkMissingExcept(ctx, seen)
+		if merr != nil {
+			return report, fmt.Errorf("SyncUseCase - SyncImages - MarkMissingExcept: %w", merr)
+		}
+		sort.Strings(marked)
+		report.MissingAlbums = marked
+	}
+
 	// Persist one event per album with new content, ordered by album name so
 	// notification output is deterministic.
 	changed := make([]string, 0, len(stats))

@@ -45,6 +45,14 @@ func noCoverCleanup(ctx context.Context, albums *MockAlbumsRepo, images *MockIma
 	albums.EXPECT().ClearCover(ctx, album.ID).Return(nil)
 }
 
+// expectMissingPass registers the missing-flag reconciliation that every
+// non-empty sync run performs. Album order is map-driven, so names are matched
+// loosely and asserted separately where it matters.
+func expectMissingPass(albums *MockAlbumsRepo, marked []string) {
+	albums.EXPECT().ClearMissing(gomock.Any(), gomock.Any()).Return(nil)
+	albums.EXPECT().MarkMissingExcept(gomock.Any(), gomock.Any()).Return(marked, nil)
+}
+
 func TestSyncImagesReportsDiscoveries(t *testing.T) {
 	t.Parallel()
 
@@ -93,6 +101,8 @@ func TestSyncImagesReportsDiscoveries(t *testing.T) {
 		return ev, nil
 	})
 
+	expectMissingPass(albums, nil)
+
 	report, err := uc.SyncImages(ctx)
 
 	require.NoError(t, err)
@@ -130,6 +140,8 @@ func TestSyncImagesInitialImport(t *testing.T) {
 			return ev, nil
 		})
 
+	expectMissingPass(albums, nil)
+
 	report, err := uc.SyncImages(ctx)
 
 	require.NoError(t, err)
@@ -156,9 +168,92 @@ func TestSyncImagesNoNewContent(t *testing.T) {
 	// No events.Insert expectation: nothing new was discovered.
 	_ = events
 
+	expectMissingPass(albums, nil)
+
 	report, err := uc.SyncImages(ctx)
 
 	require.NoError(t, err)
 	require.False(t, report.InitialImport)
 	require.Empty(t, report.Events)
+}
+
+func TestSyncImagesMarksVanishedAlbum(t *testing.T) {
+	t.Parallel()
+
+	uc, source, albums, images, events := syncUseCase(t)
+	ctx := context.Background()
+
+	album := entity.Album{ID: 1, Name: "Kept"}
+
+	albums.EXPECT().Count(ctx, repo.AlbumAdminListQuery{}).Return(2, nil)
+	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
+		{FileID: 11, Name: "a.jpg", ParentFolderName: "Kept", Kind: entity.MediaKindImage, Size: 10},
+	}, nil)
+	albums.EXPECT().GetOrCreate(ctx, "Kept", testDefaultSendMode).Return(album, false, nil)
+	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(false, nil)
+	noCoverCleanup(ctx, albums, images, album, []int64{11})
+	_ = events
+
+	// Only "Kept" was seen, so the album whose folder disappeared is flagged
+	// (and reported) rather than deleted.
+	albums.EXPECT().ClearMissing(ctx, []string{"Kept"}).Return(nil)
+	albums.EXPECT().MarkMissingExcept(ctx, []string{"Kept"}).Return([]string{"Gone"}, nil)
+
+	report, err := uc.SyncImages(ctx)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"Gone"}, report.MissingAlbums)
+	require.False(t, report.EmptyScan)
+}
+
+func TestSyncImagesClearsMissingWhenFolderReturns(t *testing.T) {
+	t.Parallel()
+
+	uc, source, albums, images, events := syncUseCase(t)
+	ctx := context.Background()
+
+	// The album is still flagged missing in the DB; seeing it again must clear it.
+	flagged := time.Now().Add(-24 * time.Hour)
+	album := entity.Album{ID: 5, Name: "Back", MissingSince: &flagged}
+
+	albums.EXPECT().Count(ctx, repo.AlbumAdminListQuery{}).Return(1, nil)
+	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
+		{FileID: 51, Name: "b.jpg", ParentFolderName: "Back", Kind: entity.MediaKindImage, Size: 10},
+	}, nil)
+	albums.EXPECT().GetOrCreate(ctx, "Back", testDefaultSendMode).Return(album, false, nil)
+	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(true, nil)
+	noCoverCleanup(ctx, albums, images, album, []int64{51})
+	events.EXPECT().Insert(ctx, gomock.Any()).
+		DoAndReturn(func(_ context.Context, ev entity.SyncEvent) (entity.SyncEvent, error) {
+			ev.ID = 1
+			return ev, nil
+		})
+
+	albums.EXPECT().ClearMissing(ctx, []string{"Back"}).Return(nil)
+	albums.EXPECT().MarkMissingExcept(ctx, []string{"Back"}).Return(nil, nil)
+
+	report, err := uc.SyncImages(ctx)
+
+	require.NoError(t, err)
+	require.Empty(t, report.MissingAlbums)
+}
+
+func TestSyncImagesEmptyScanSkipsMissingPass(t *testing.T) {
+	t.Parallel()
+
+	uc, source, albums, images, events := syncUseCase(t)
+	ctx := context.Background()
+
+	albums.EXPECT().Count(ctx, repo.AlbumAdminListQuery{}).Return(3, nil)
+	// A source that succeeds but returns nothing almost always means a broken
+	// configuration, so nothing may be flagged: no ClearMissing/MarkMissingExcept
+	// expectations are registered, and the mock controller fails if they are called.
+	source.EXPECT().ListMedia(ctx).Return(nil, nil)
+	_, _ = images, events
+
+	report, err := uc.SyncImages(ctx)
+
+	require.NoError(t, err)
+	require.True(t, report.EmptyScan)
+	require.Empty(t, report.MissingAlbums)
 }

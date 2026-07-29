@@ -81,7 +81,7 @@ func TestRenderCaption(t *testing.T) {
 
 func TestAlbumEmbed(t *testing.T) {
 	album := entity.Album{ID: 7, Name: "Vacation", SendMode: entity.AlbumSendModeOrder}
-	embed := albumEmbed(album, "https://example.com/thumb.png", "some description")
+	embed := albumEmbed(album, "https://example.com/thumb.png", renderedMessage{Body: "some description"})
 
 	if embed.Title != "Vacation" {
 		t.Errorf("Title = %q, want %q", embed.Title, "Vacation")
@@ -99,7 +99,7 @@ func TestAlbumEmbed(t *testing.T) {
 		t.Errorf("Color = %#x, want %#x", embed.Color, embedColorByMode[entity.AlbumSendModeOrder])
 	}
 
-	noThumb := albumEmbed(entity.Album{ID: 1, Name: "X"}, "", "desc")
+	noThumb := albumEmbed(entity.Album{ID: 1, Name: "X"}, "", renderedMessage{Body: "desc"})
 	if noThumb.Thumbnail != nil {
 		t.Errorf("Thumbnail = %+v, want nil when thumbURL is empty", noThumb.Thumbnail)
 	}

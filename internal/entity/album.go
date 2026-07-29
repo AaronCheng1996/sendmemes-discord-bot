@@ -41,8 +41,16 @@ type AlbumSendConfig struct {
 	BatchSize    int    `json:"batch_size,omitempty"`    // overrides the default per-message image count
 	IncludeCover *bool  `json:"include_cover,omitempty"` // nil = default (include); false = exclude the cover
 	Ordered      bool   `json:"ordered,omitempty"`       // true = natural filename order instead of random
-	Caption      string `json:"caption,omitempty"`       // overrides the delivery rule's caption template
+	Caption      string `json:"caption,omitempty"`       // message body; overrides the rule's caption template
 	NSFW         bool   `json:"nsfw,omitempty"`          // true = prefix attachment filenames with SPOILER_
+	Title        string `json:"title,omitempty"`         // headline; overrides the rule's title template
+	UseEmbed     *bool  `json:"use_embed,omitempty"`     // nil = inherit the rule/app preference
+}
+
+// Style exposes the album's presentation overrides as the top message-style
+// layer, applied after the app defaults and the delivery rule.
+func (c AlbumSendConfig) Style() MessageStyle {
+	return MessageStyle{UseEmbed: c.UseEmbed, Title: c.Title, Body: c.Caption}
 }
 
 // ParseAlbumSendConfig decodes raw (an album's stored send_config_json) into an
@@ -70,6 +78,11 @@ type Album struct {
 	SendConfigJSON string        `json:"send_config_json,omitempty"`
 	LastSentAt     *time.Time    `json:"last_sent_at,omitempty"`
 	PositiveRating int           `json:"positive_rating"`
+	// MissingSince is set when a sync run no longer finds the album's source
+	// folder. Missing albums keep their rating and config but are excluded from
+	// scheduled delivery; the field is cleared automatically if the folder
+	// reappears.
+	MissingSince *time.Time `json:"missing_since,omitempty"`
 	// PreviewURL is resolved on demand by the admin list endpoint (cover image
 	// when present, otherwise the lowest-id image in the album). Not persisted.
 	PreviewURL string `json:"preview_url,omitempty"`
