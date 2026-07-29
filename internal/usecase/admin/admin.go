@@ -277,6 +277,37 @@ func (uc *UseCase) UpdateSyncSettings(ctx context.Context, interval, actor strin
 	return out, nil
 }
 
+// TestRule queues a preview of one delivery rule, so operators can see the
+// styling a rule produces without waiting for its trigger.
+func (uc *UseCase) TestRule(ctx context.Context, ruleID int64, albumID int, actor string) (entity.Job, error) {
+	if uc.runtime == nil {
+		return entity.Job{}, fmt.Errorf("runtime trigger is not available")
+	}
+	rule, err := uc.rules.Get(ctx, ruleID)
+	if err != nil {
+		return entity.Job{}, err
+	}
+
+	label := rule.Name
+	if label == "" {
+		label = fmt.Sprintf("rule #%d", rule.ID)
+	}
+
+	return uc.jobs.Start(entity.JobKindSendTest, label, func(jobCtx context.Context) (map[string]any, error) {
+		res, rerr := uc.runtime.SendRuleTest(jobCtx, ruleID, albumID)
+		if rerr != nil {
+			return nil, rerr
+		}
+		_ = uc.RecordAudit(jobCtx, actor, "rule.test", "delivery_rule", strconv.FormatInt(ruleID, 10), map[string]any{
+			"album_id":   res.AlbumID,
+			"album_name": res.AlbumName,
+			"channel_id": res.ChannelID,
+			"message_id": res.MessageID,
+		})
+		return map[string]any{"album": res.AlbumName, "channel_id": res.ChannelID}, nil
+	}), nil
+}
+
 // UpdateMessageDefaults stores the app-wide message presentation defaults.
 func (uc *UseCase) UpdateMessageDefaults(ctx context.Context, style entity.MessageStyle, actor string) (entity.AppSettings, error) {
 	out, err := uc.appSettings.SetMessageDefaults(ctx, style)

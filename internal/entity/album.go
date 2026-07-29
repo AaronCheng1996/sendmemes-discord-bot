@@ -45,12 +45,24 @@ type AlbumSendConfig struct {
 	NSFW         bool   `json:"nsfw,omitempty"`          // true = prefix attachment filenames with SPOILER_
 	Title        string `json:"title,omitempty"`         // headline; overrides the rule's title template
 	UseEmbed     *bool  `json:"use_embed,omitempty"`     // nil = inherit the rule/app preference
+	// Embed-only overrides; see entity.MessageStyle for the full list.
+	Color         string `json:"color,omitempty"`
+	Footer        string `json:"footer,omitempty"`
+	Author        string `json:"author,omitempty"`
+	URL           string `json:"url,omitempty"`
+	ShowImage     *bool  `json:"show_image,omitempty"`
+	ShowThumbnail *bool  `json:"show_thumbnail,omitempty"`
+	ShowTimestamp *bool  `json:"show_timestamp,omitempty"`
 }
 
 // Style exposes the album's presentation overrides as the top message-style
 // layer, applied after the app defaults and the delivery rule.
 func (c AlbumSendConfig) Style() MessageStyle {
-	return MessageStyle{UseEmbed: c.UseEmbed, Title: c.Title, Body: c.Caption}
+	return MessageStyle{
+		UseEmbed: c.UseEmbed, Title: c.Title, Body: c.Caption,
+		Color: c.Color, Footer: c.Footer, Author: c.Author, URL: c.URL,
+		ShowImage: c.ShowImage, ShowThumbnail: c.ShowThumbnail, ShowTimestamp: c.ShowTimestamp,
+	}
 }
 
 // ParseAlbumSendConfig decodes raw (an album's stored send_config_json) into an

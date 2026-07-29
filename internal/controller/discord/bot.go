@@ -607,7 +607,7 @@ func (b *Bot) deliverRandom(ctx context.Context, channelID string, album entity.
 		return nil
 	}
 	applySpoiler(files, cfg.NSFW)
-	msg := renderMessage(style, album, len(files), len(imgs), captionPrefix)
+	msg := renderMessage(style, captionValues{Album: album, Sent: len(files), Total: len(imgs), Prefix: captionPrefix})
 	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, imgs), firstFileName(files), files, fullAlbumButtonRow(album.ID))
 }
 
@@ -629,7 +629,7 @@ func (b *Bot) deliverSingle(ctx context.Context, channelID string, album entity.
 		return nil
 	}
 	applySpoiler(files, cfg.NSFW)
-	msg := renderMessage(style, album, len(files), len(imgs), captionPrefix)
+	msg := renderMessage(style, captionValues{Album: album, Sent: len(files), Total: len(imgs), Prefix: captionPrefix})
 	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, imgs), firstFileName(files), files, nil)
 }
 
@@ -661,7 +661,7 @@ func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.A
 	files := entriesToFiles(first)
 	applySpoiler(files, cfg.NSFW)
 
-	msg := renderMessage(style, album, len(first), totalPages, captionPrefix)
+	msg := renderMessage(style, captionValues{Album: album, Sent: len(first), Total: totalPages, Prefix: captionPrefix})
 	if len(first) < totalPages {
 		msg.Body += "\nUse /full_album (or the button on a random post) for the rest."
 	}
@@ -683,7 +683,7 @@ func (b *Bot) deliverVideo(ctx context.Context, channelID string, album entity.A
 		return nil
 	}
 
-	msg := renderMessage(style, album, 1, 1, captionPrefix)
+	msg := renderMessage(style, captionValues{Album: album, Sent: 1, Total: 1, Prefix: captionPrefix})
 	// Video attachments don't render through embed.Image (Discord embeds only
 	// preview static images), so the video is just a sibling file attachment.
 	if video.SizeBytes > 0 && video.SizeBytes <= videoUploadLimit {
@@ -759,7 +759,7 @@ func (b *Bot) deliverCustom(ctx context.Context, channelID string, album entity.
 	}
 	applySpoiler(files, cfg.NSFW)
 
-	msg := renderMessage(style, album, sent, total, captionPrefix)
+	msg := renderMessage(style, captionValues{Album: album, Sent: sent, Total: total, Prefix: captionPrefix})
 	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, imgs), firstFileName(files), files, fullAlbumButtonRow(album.ID))
 }
 
@@ -901,6 +901,47 @@ func (b *Bot) SendAlbumTest(ctx context.Context, channelID string, albumID int) 
 		ChannelID: ch,
 		MessageID: msg.ID,
 	}, nil
+}
+
+// SendRuleTest posts a preview of one album styled exactly as ruleID would
+// style it, so the Schedule page can show what a rule actually produces —
+// including event rules, which otherwise only fire from a sync.
+func (b *Bot) SendRuleTest(ctx context.Context, ruleID int64, albumID int) (entity.ManualScheduleTriggerResult, error) {
+	rule, err := b.rulesUC.Get(ctx, ruleID)
+	if err != nil {
+		return entity.ManualScheduleTriggerResult{}, err
+	}
+	ch := strings.TrimSpace(rule.ChannelID)
+	if ch == "" {
+		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("rule %d has no channel", ruleID)
+	}
+
+	album, err := b.pickTestAlbum(ctx, albumID, rule.HistorySize)
+	if err != nil {
+		return entity.ManualScheduleTriggerResult{}, err
+	}
+
+	style := entity.MergeMessageStyle(b.appStyle(ctx), rule.Style())
+	msg := b.deliverAlbum(ctx, ch, album, "[TEST] ", style)
+	if msg == nil {
+		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("failed to send rule preview (see server logs)")
+	}
+	return entity.ManualScheduleTriggerResult{
+		Triggered: true,
+		AlbumID:   album.ID,
+		AlbumName: album.Name,
+		ChannelID: ch,
+		MessageID: msg.ID,
+	}, nil
+}
+
+// pickTestAlbum resolves the album a rule preview should use: the requested one
+// when given, otherwise a random album (anti-repeat aware, like a real send).
+func (b *Bot) pickTestAlbum(ctx context.Context, albumID, historySize int) (entity.Album, error) {
+	if albumID > 0 {
+		return b.imagesUC.GetAlbumByID(ctx, albumID)
+	}
+	return b.imagesUC.GetScheduledAlbum(ctx, historySize)
 }
 
 // TriggerSyncNow runs a pCloud sync immediately and posts notifications.

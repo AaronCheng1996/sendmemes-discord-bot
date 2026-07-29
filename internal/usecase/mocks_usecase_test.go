@@ -701,6 +701,21 @@ func (mr *MockAdminRuntimeMockRecorder) SendAlbumTest(ctx, channelID, albumID an
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendAlbumTest", reflect.TypeOf((*MockAdminRuntime)(nil).SendAlbumTest), ctx, channelID, albumID)
 }
 
+// SendRuleTest mocks base method.
+func (m *MockAdminRuntime) SendRuleTest(ctx context.Context, ruleID int64, albumID int) (entity.ManualScheduleTriggerResult, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SendRuleTest", ctx, ruleID, albumID)
+	ret0, _ := ret[0].(entity.ManualScheduleTriggerResult)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SendRuleTest indicates an expected call of SendRuleTest.
+func (mr *MockAdminRuntimeMockRecorder) SendRuleTest(ctx, ruleID, albumID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendRuleTest", reflect.TypeOf((*MockAdminRuntime)(nil).SendRuleTest), ctx, ruleID, albumID)
+}
+
 // TriggerScheduleNow mocks base method.
 func (m *MockAdminRuntime) TriggerScheduleNow(ctx context.Context, channelID string, historySize int) (entity.ManualScheduleTriggerResult, error) {
 	m.ctrl.T.Helper()
@@ -1021,6 +1036,21 @@ func (m *MockAdmin) SendAlbumTest(ctx context.Context, albumID int, channelID, a
 func (mr *MockAdminMockRecorder) SendAlbumTest(ctx, albumID, channelID, actor any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendAlbumTest", reflect.TypeOf((*MockAdmin)(nil).SendAlbumTest), ctx, albumID, channelID, actor)
+}
+
+// TestRule mocks base method.
+func (m *MockAdmin) TestRule(ctx context.Context, ruleID int64, albumID int, actor string) (entity.Job, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TestRule", ctx, ruleID, albumID, actor)
+	ret0, _ := ret[0].(entity.Job)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TestRule indicates an expected call of TestRule.
+func (mr *MockAdminMockRecorder) TestRule(ctx, ruleID, albumID, actor any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TestRule", reflect.TypeOf((*MockAdmin)(nil).TestRule), ctx, ruleID, albumID, actor)
 }
 
 // TriggerScheduleNow mocks base method.

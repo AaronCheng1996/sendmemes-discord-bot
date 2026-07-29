@@ -41,7 +41,15 @@ func (uc *UseCase) SetSyncInterval(ctx context.Context, interval string) (entity
 	if _, err := schedulespec.Parse(interval); err != nil {
 		return entity.AppSettings{}, fmt.Errorf("sync_interval must be a valid duration or cron expression (e.g. 1h or 0 9 * * *): %w", err)
 	}
-	out, err := uc.repo.Upsert(ctx, entity.AppSettings{SyncInterval: interval})
+	// Read-modify-write: the row also holds the message defaults, and upserting
+	// a bare AppSettings would silently wipe them.
+	current, err := uc.Get(ctx)
+	if err != nil {
+		return entity.AppSettings{}, err
+	}
+	current.SyncInterval = interval
+
+	out, err := uc.repo.Upsert(ctx, current)
 	if err != nil {
 		return entity.AppSettings{}, fmt.Errorf("AppSettingsUseCase - SetSyncInterval - repo.Upsert: %w", err)
 	}
@@ -83,9 +91,9 @@ func (uc *UseCase) SetMessageDefaults(ctx context.Context, style entity.MessageS
 	if err != nil {
 		return entity.AppSettings{}, err
 	}
-	current.DefaultUseEmbed = style.UseEmbed
-	current.DefaultTitle = strings.TrimSpace(style.Title)
-	current.DefaultBody = strings.TrimSpace(style.Body)
+	style.Title = strings.TrimSpace(style.Title)
+	style.Body = strings.TrimSpace(style.Body)
+	current.MessageStyle = style
 
 	out, err := uc.repo.Upsert(ctx, current)
 	if err != nil {

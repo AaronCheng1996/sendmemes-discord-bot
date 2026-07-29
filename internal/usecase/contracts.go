@@ -119,6 +119,9 @@ type (
 		// SendAlbumTest posts a preview of albumID to channelID.
 		// It does not update last_sent_at or anti-repeat history.
 		SendAlbumTest(ctx context.Context, channelID string, albumID int) (entity.ManualScheduleTriggerResult, error)
+		// SendRuleTest previews one album styled by ruleID, into that rule's
+		// channel. albumID 0 picks a random album.
+		SendRuleTest(ctx context.Context, ruleID int64, albumID int) (entity.ManualScheduleTriggerResult, error)
 		// TriggerSyncNow runs a pCloud sync immediately and posts notifications.
 		TriggerSyncNow(ctx context.Context) (entity.SyncReport, error)
 		GetDiscordStatus(ctx context.Context) (connected bool, user string)
@@ -151,6 +154,9 @@ type (
 		UpdateMessageDefaults(ctx context.Context, style entity.MessageStyle, actor string) (entity.AppSettings, error)
 		// TriggerSyncNow queues a pCloud sync as a background job and returns it.
 		TriggerSyncNow(ctx context.Context, actor string) (entity.Job, error)
+		// TestRule queues a preview of ruleID (styled exactly as that rule would
+		// style it) as a background job. albumID 0 picks a random album.
+		TestRule(ctx context.Context, ruleID int64, albumID int, actor string) (entity.Job, error)
 		RecordAudit(ctx context.Context, actor, action, targetType, targetID string, metadata map[string]any) error
 		// ListSyncEvents returns paginated sync discovery events, newest first.
 		ListSyncEvents(ctx context.Context, offset, limit int) ([]entity.SyncEvent, int, error)

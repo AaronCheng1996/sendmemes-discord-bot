@@ -142,6 +142,15 @@ first line and the message text.
 An empty title falls back to the album name (embed) or is omitted (plain); an
 empty body falls back to the built-in caption.
 
+**Embed options** — when the resolved format is an embed, each layer can also set
+`color` (`#rrggbb`), `footer`, `author`, `url` (makes the title a link), and the
+`show_image` / `show_thumbnail` / `show_timestamp` toggles. Footer and author
+accept the same placeholders. These are ignored in plain-text mode.
+
+Use the **Test** button on the Schedule page to preview exactly what a rule
+produces — including `new_album` / `new_files` rules, which otherwise only fire
+when a sync finds something.
+
 #### Placeholders
 
 Title and body share one placeholder set:
@@ -149,10 +158,14 @@ Title and body share one placeholder set:
 | Placeholder | Replaced with |
 |---|---|
 | `{album}` | Album name |
+| `{album_id}` | Album id |
+| `{mode}` | The album's send mode |
 | `{count}` | Number of files in this message |
 | `{total}` | Number of files that were available |
 | `{rating}` | The album's `positive_rating` |
+| `{new_images}` / `{new_videos}` / `{new_total}` | Discovery notifications: what this sync found |
 | `{prefix}` | `[TEST] ` for admin test sends, empty for scheduled posts |
+| `{date}` / `{time}` | Current date (`2006-01-02`) / time (`15:04`) |
 
 `{prefix}` exists so test sends stay recognizable. The default caption puts it
 in front of the album name, so a custom template that leaves it out makes

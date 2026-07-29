@@ -1,5 +1,7 @@
 package request
 
+import "github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
+
 type AlbumCreate struct {
 	Name           string `json:"name" validate:"required"`
 	SendMode       string `json:"send_mode"`
@@ -38,11 +40,9 @@ type DeliveryRuleWrite struct {
 	SendInterval string `json:"send_interval"`
 	HistorySize  int    `json:"history_size"`
 	Enabled      *bool  `json:"enabled"`
-	// Message presentation overrides. Empty strings and a nil UseEmbed mean
-	// "inherit the app default" rather than "clear".
-	CaptionTemplate string `json:"caption_template"`
-	TitleTemplate   string `json:"title_template"`
-	UseEmbed        *bool  `json:"use_embed"`
+	// MessageStyle overrides presentation for this rule. Unset fields inherit
+	// the app defaults rather than clearing them.
+	MessageStyle entity.MessageStyle `json:"message_style"`
 }
 
 // SyncSettingsPut updates the global sync cadence.
@@ -53,9 +53,12 @@ type SyncSettingsPut struct {
 // MessageDefaultsPut sets the app-wide message presentation defaults — the
 // bottom layer that delivery rules and albums override.
 type MessageDefaultsPut struct {
-	UseEmbed *bool  `json:"use_embed"`
-	Title    string `json:"title"`
-	Body     string `json:"body"`
+	MessageStyle entity.MessageStyle `json:"message_style"`
+}
+
+// RuleTest previews a delivery rule; album_id 0 picks a random album.
+type RuleTest struct {
+	AlbumID int `json:"album_id"`
 }
 
 // ScheduleTriggerNow sends a random album now; empty channel_id falls back to

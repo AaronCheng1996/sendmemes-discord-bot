@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 
@@ -43,22 +44,40 @@ func embedColor(mode entity.AlbumSendMode) int {
 	return embedColorDefault
 }
 
-// renderCaption fills tmpl's placeholders with per-send values:
-// {album} {count} {total} {rating} {prefix}. An unrecognized placeholder is
+// captionValues carries everything a placeholder can expand to for one send.
+// Callers fill in what they know; zero values simply render as "0"/"".
+type captionValues struct {
+	Album     entity.Album
+	Sent      int // items in this message
+	Total     int // items available
+	NewImages int // discovery notifications only
+	NewVideos int
+	Prefix    string // "[TEST] " for admin test sends
+}
+
+// renderCaption fills tmpl's placeholders from v. An unrecognized placeholder is
 // left as-is (strings.NewReplacer only touches known tokens — no template
 // engine, so there is nothing else for it to do). An empty (or all-whitespace)
 // tmpl falls back to the caption used before embeds were introduced, keeping
 // rules that have never set a template looking the same as before.
-func renderCaption(tmpl string, album entity.Album, sent, total int, prefix string) string {
+func renderCaption(tmpl string, v captionValues) string {
 	if strings.TrimSpace(tmpl) == "" {
-		return defaultCaption(album, sent, total, prefix)
+		return defaultCaption(v)
 	}
+	now := time.Now()
 	replacer := strings.NewReplacer(
-		"{album}", album.Name,
-		"{count}", strconv.Itoa(sent),
-		"{total}", strconv.Itoa(total),
-		"{rating}", strconv.Itoa(album.PositiveRating),
-		"{prefix}", prefix,
+		"{album}", v.Album.Name,
+		"{album_id}", strconv.Itoa(v.Album.ID),
+		"{mode}", string(v.Album.SendMode),
+		"{count}", strconv.Itoa(v.Sent),
+		"{total}", strconv.Itoa(v.Total),
+		"{rating}", strconv.Itoa(v.Album.PositiveRating),
+		"{new_images}", strconv.Itoa(v.NewImages),
+		"{new_videos}", strconv.Itoa(v.NewVideos),
+		"{new_total}", strconv.Itoa(v.NewImages+v.NewVideos),
+		"{prefix}", v.Prefix,
+		"{date}", now.Format("2006-01-02"),
+		"{time}", now.Format("15:04"),
 	)
 	return replacer.Replace(tmpl)
 }
@@ -66,33 +85,47 @@ func renderCaption(tmpl string, album entity.Album, sent, total int, prefix stri
 // defaultCaption is the pre-embed caption text: the album name (with optional
 // prefix like "[TEST] "), plus a "(showing X of Y)" suffix when the album has
 // more content than fit in this send.
-func defaultCaption(album entity.Album, sent, total int, prefix string) string {
-	if total > 0 && sent > 0 && sent < total {
-		return fmt.Sprintf("%s%s (showing %d of %d)", prefix, album.Name, sent, total)
+func defaultCaption(v captionValues) string {
+	if v.Total > 0 && v.Sent > 0 && v.Sent < v.Total {
+		return fmt.Sprintf("%s%s (showing %d of %d)", v.Prefix, v.Album.Name, v.Sent, v.Total)
 	}
-	return prefix + album.Name
+	return v.Prefix + v.Album.Name
 }
 
 // renderedMessage is a message-style layer stack resolved against one send:
 // placeholders filled in, embed preference settled.
 type renderedMessage struct {
+	// Style is the merged style this message came from, kept so the embed
+	// builder can read the non-text options (colour, toggles, link).
+	Style    entity.MessageStyle
 	UseEmbed bool
 	// Title is empty when no layer set one; embeds then fall back to the album
 	// name and plain messages omit the headline entirely.
-	Title string
-	Body  string
+	Title  string
+	Body   string
+	Footer string // empty = default "album #12 · Random"
+	Author string // empty = no author line
 }
 
 // renderMessage resolves the merged style for a single send. Title and Body
 // share the same placeholder set, so a rule can set a common headline while an
 // album supplies its own body.
-func renderMessage(style entity.MessageStyle, album entity.Album, sent, total int, prefix string) renderedMessage {
+func renderMessage(style entity.MessageStyle, v captionValues) renderedMessage {
 	out := renderedMessage{
+		Style:    style,
 		UseEmbed: style.EmbedEnabled(),
-		Body:     renderCaption(style.Body, album, sent, total, prefix),
+		Body:     renderCaption(style.Body, v),
 	}
+	// Title/footer/author are optional: an empty template means "no override",
+	// not "render the default caption", so they are only expanded when set.
 	if strings.TrimSpace(style.Title) != "" {
-		out.Title = renderCaption(style.Title, album, sent, total, prefix)
+		out.Title = renderCaption(style.Title, v)
+	}
+	if strings.TrimSpace(style.Footer) != "" {
+		out.Footer = renderCaption(style.Footer, v)
+	}
+	if strings.TrimSpace(style.Author) != "" {
+		out.Author = renderCaption(style.Author, v)
 	}
 	return out
 }
@@ -117,24 +150,52 @@ func plainContent(m renderedMessage) string {
 // files may additionally set Image to "attachment://<filename>" so the first
 // file renders large inside the embed.
 func albumEmbed(album entity.Album, thumbURL string, m renderedMessage) *discordgo.MessageEmbed {
-	footer := fmt.Sprintf("album #%d", album.ID)
-	if album.SendMode != "" {
-		footer += " · " + string(album.SendMode)
-	}
 	title := m.Title
 	if title == "" {
 		title = album.Name
 	}
+
+	footer := m.Footer
+	if footer == "" {
+		footer = fmt.Sprintf("album #%d", album.ID)
+		if album.SendMode != "" {
+			footer += " · " + string(album.SendMode)
+		}
+	}
+
 	embed := &discordgo.MessageEmbed{
 		Title:       title,
 		Description: m.Body,
-		Color:       embedColor(album.SendMode),
+		Color:       resolveEmbedColor(m.Style.Color, album.SendMode),
 		Footer:      &discordgo.MessageEmbedFooter{Text: footer},
 	}
-	if thumbURL != "" {
+	if m.Style.URL != "" {
+		embed.URL = m.Style.URL
+	}
+	if m.Author != "" {
+		embed.Author = &discordgo.MessageEmbedAuthor{Name: m.Author}
+	}
+	if m.Style.TimestampEnabled() {
+		embed.Timestamp = time.Now().Format(time.RFC3339)
+	}
+	if thumbURL != "" && m.Style.ThumbnailEnabled() {
 		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: thumbURL}
 	}
 	return embed
+}
+
+// resolveEmbedColor parses a "#rrggbb" override, falling back to the send
+// mode's accent colour when it is empty or malformed.
+func resolveEmbedColor(hex string, mode entity.AlbumSendMode) int {
+	hex = strings.TrimPrefix(strings.TrimSpace(hex), "#")
+	if hex == "" {
+		return embedColor(mode)
+	}
+	v, err := strconv.ParseInt(hex, 16, 32)
+	if err != nil || v < 0 {
+		return embedColor(mode)
+	}
+	return int(v)
 }
 
 // sendStyled delivers one album message in whichever shape the resolved style
@@ -155,7 +216,7 @@ func (b *Bot) sendStyled(
 		return b.channelSendPlain(channelID, plainContent(m), files, components)
 	}
 	embed := albumEmbed(album, thumbURL, m)
-	if embedImage != "" {
+	if embedImage != "" && m.Style.ImageEnabled() {
 		embed.Image = &discordgo.MessageEmbedImage{URL: "attachment://" + embedImage}
 	}
 	return b.channelSendEmbed(channelID, embed, files, components)

@@ -298,9 +298,7 @@ func ruleFromBody(body request.DeliveryRuleWrite) entity.DeliveryRule {
 		HistorySize:  body.HistorySize,
 		Enabled:      enabled,
 
-		CaptionTemplate: strings.TrimSpace(body.CaptionTemplate),
-		TitleTemplate:   strings.TrimSpace(body.TitleTemplate),
-		UseEmbed:        body.UseEmbed,
+		MessageStyle: body.MessageStyle,
 	}
 }
 
@@ -401,16 +399,29 @@ func (r *V1) putSyncSettings(ctx *fiber.Ctx) error {
 	return ctx.Status(http.StatusOK).JSON(out)
 }
 
+func (r *V1) testRule(ctx *fiber.Ctx) error {
+	id, err := parseID64Param(ctx)
+	if err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid id")
+	}
+	var body request.RuleTest
+	if err := ctx.BodyParser(&body); err != nil {
+		body = request.RuleTest{}
+	}
+	job, err := r.a.TestRule(ctx.UserContext(), id, body.AlbumID, actorFromCtx(ctx))
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - testRule")
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+	return ctx.Status(http.StatusAccepted).JSON(job)
+}
+
 func (r *V1) putMessageDefaults(ctx *fiber.Ctx) error {
 	var body request.MessageDefaultsPut
 	if err := ctx.BodyParser(&body); err != nil {
 		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
 	}
-	out, err := r.a.UpdateMessageDefaults(ctx.UserContext(), entity.MessageStyle{
-		UseEmbed: body.UseEmbed,
-		Title:    body.Title,
-		Body:     body.Body,
-	}, actorFromCtx(ctx))
+	out, err := r.a.UpdateMessageDefaults(ctx.UserContext(), body.MessageStyle, actorFromCtx(ctx))
 	if err != nil {
 		r.l.Error(err, "restapi - v1 - putMessageDefaults")
 		return errorResponse(ctx, http.StatusBadRequest, err.Error())

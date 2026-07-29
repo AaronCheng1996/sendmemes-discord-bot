@@ -28,6 +28,7 @@ func NewAdminRoutes(adminGroup fiber.Router, a usecase.Admin, l logger.Interface
 	adminGroup.Get("/delivery-rules/:id", r.getRule)
 	adminGroup.Patch("/delivery-rules/:id", r.updateRule)
 	adminGroup.Delete("/delivery-rules/:id", r.deleteRule)
+	adminGroup.Post("/delivery-rules/:id/test", r.testRule)
 
 	adminGroup.Post("/schedule/trigger-now", r.triggerScheduleNow)
 

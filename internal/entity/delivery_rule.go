@@ -28,14 +28,9 @@ type DeliveryRule struct {
 	SendInterval string    `json:"send_interval,omitempty"` // scheduled only
 	HistorySize  int       `json:"history_size"`            // scheduled only
 	Enabled      bool      `json:"enabled"`
-	// CaptionTemplate is this rule's message body. Empty inherits the app
-	// default, and if that is empty too the built-in caption is used.
-	CaptionTemplate string `json:"caption_template,omitempty"`
-	// TitleTemplate overrides the headline for this rule's sends (embed title,
-	// or a bold first line in plain mode). Empty inherits.
-	TitleTemplate string `json:"title_template,omitempty"`
-	// UseEmbed overrides the app default for this rule; nil inherits.
-	UseEmbed *bool `json:"use_embed,omitempty"`
+	// MessageStyle overrides the app defaults for this rule's posts. Unset
+	// fields inherit; the album's own config overrides whatever survives here.
+	MessageStyle MessageStyle `json:"message_style"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at,omitempty"`
 
@@ -67,6 +62,4 @@ func SyncEventTriggerType(eventType string) string {
 
 // Style exposes the rule's presentation overrides as a message-style layer,
 // sitting between the app defaults and the album's own config.
-func (r DeliveryRule) Style() MessageStyle {
-	return MessageStyle{UseEmbed: r.UseEmbed, Title: r.TitleTemplate, Body: r.CaptionTemplate}
-}
+func (r DeliveryRule) Style() MessageStyle { return r.MessageStyle }

@@ -71,7 +71,7 @@ func TestRenderCaption(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := renderCaption(tt.tmpl, album, tt.sent, tt.total, tt.prefix)
+			got := renderCaption(tt.tmpl, captionValues{Album: album, Sent: tt.sent, Total: tt.total, Prefix: tt.prefix})
 			if got != tt.want {
 				t.Fatalf("renderCaption(%q) = %q, want %q", tt.tmpl, got, tt.want)
 			}

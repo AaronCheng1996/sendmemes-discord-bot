@@ -43,9 +43,20 @@ func TestSetSyncIntervalValidation(t *testing.T) {
 	_, err := uc.SetSyncInterval(ctx, "not-a-duration")
 	require.Error(t, err)
 
-	repo.EXPECT().Upsert(gomock.Any(), entity.AppSettings{SyncInterval: "2h"}).
-		Return(entity.AppSettings{SyncInterval: "2h"}, nil)
+	// Saving the interval must preserve the stored message defaults rather than
+	// upserting a bare row over them.
+	stored := entity.AppSettings{
+		SyncInterval: "1h",
+		MessageStyle: entity.MessageStyle{Title: "keep me"},
+	}
+	repo.EXPECT().Get(gomock.Any()).Return(stored, true, nil)
+	repo.EXPECT().Upsert(gomock.Any(), entity.AppSettings{
+		SyncInterval: "2h",
+		MessageStyle: entity.MessageStyle{Title: "keep me"},
+	}).Return(entity.AppSettings{SyncInterval: "2h", MessageStyle: stored.MessageStyle}, nil)
+
 	out, err := uc.SetSyncInterval(ctx, "2h")
 	require.NoError(t, err)
 	require.Equal(t, "2h", out.SyncInterval)
+	require.Equal(t, "keep me", out.MessageStyle.Title)
 }

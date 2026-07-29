@@ -162,7 +162,7 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, rule entity.DeliveryRule,
 				desc += fmt.Sprintf(" (showing %d of %d)", len(selected), len(images))
 			}
 			files := entriesToFiles(selected)
-			msg := syncMessage(style, album, desc)
+			msg := syncMessage(style, ev, album, len(selected), desc)
 			if b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, images), firstFileName(files), files, nil) != nil {
 				posted = true
 			}
@@ -193,7 +193,7 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, rule entity.DeliveryRule,
 			if len(videos) > len(links) {
 				fmt.Fprintf(&sb, "\n…and %d more video(s)", len(videos)-len(links))
 			}
-			msg := syncMessage(style, album, sb.String())
+			msg := syncMessage(style, ev, album, len(links), sb.String())
 			if b.sendStyled(channelID, album, msg, "", "", nil, nil) != nil {
 				posted = true
 			}
@@ -202,7 +202,7 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, rule entity.DeliveryRule,
 
 	// Nothing resolvable (e.g. counts-only event) — post the text summary.
 	if !posted {
-		msg := syncMessage(style, album, caption)
+		msg := syncMessage(style, ev, album, 0, caption)
 		if b.sendStyled(channelID, album, msg, "", "", nil, nil) == nil {
 			b.l.Error(fmt.Errorf("postDiscoveredMedia fallback %q: failed to send", ev.AlbumName))
 		}
@@ -212,8 +212,16 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, rule entity.DeliveryRule,
 // syncMessage applies a discovery notification's resolved style: the rule's
 // title/embed preference are honoured, while the body defaults to the generated
 // summary unless the rule explicitly overrides it.
-func syncMessage(style entity.MessageStyle, album entity.Album, summary string) renderedMessage {
-	msg := renderMessage(style, album, 0, 0, "")
+func syncMessage(style entity.MessageStyle, ev entity.SyncEvent, album entity.Album, shown int, summary string) renderedMessage {
+	// Discovery placeholders come from the event itself: {count} is what this
+	// message shows, {total}/{new_*} describe everything the sync found.
+	msg := renderMessage(style, captionValues{
+		Album:     album,
+		Sent:      shown,
+		Total:     ev.NewImages + ev.NewVideos,
+		NewImages: ev.NewImages,
+		NewVideos: ev.NewVideos,
+	})
 	if strings.TrimSpace(style.Body) == "" {
 		msg.Body = summary
 	}

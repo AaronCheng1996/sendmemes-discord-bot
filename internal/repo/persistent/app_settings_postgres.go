@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	sq "github.com/Masterminds/squirrel"
+
 	"github.com/jackc/pgx/v5"
 
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
@@ -24,8 +26,7 @@ func NewAppSettingsRepo(pg *postgres.Postgres) *AppSettingsRepo {
 // Get returns the settings row, or (zero, false, nil) when none exists yet.
 func (r *AppSettingsRepo) Get(ctx context.Context) (entity.AppSettings, bool, error) {
 	sql, args, err := r.Builder.
-		Select("COALESCE(sync_interval, '')", "default_use_embed",
-			"COALESCE(default_title, '')", "COALESCE(default_body, '')", "updated_at").
+		Select("COALESCE(sync_interval, '')", "COALESCE(message_style::text, '{}')", "updated_at").
 		From("app_settings").
 		Where("id = ?", true).
 		Limit(1).
@@ -34,14 +35,18 @@ func (r *AppSettingsRepo) Get(ctx context.Context) (entity.AppSettings, bool, er
 		return entity.AppSettings{}, false, fmt.Errorf("AppSettingsRepo - Get - r.Builder: %w", err)
 	}
 	var s entity.AppSettings
-	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(
-		&s.SyncInterval, &s.DefaultUseEmbed, &s.DefaultTitle, &s.DefaultBody, &s.UpdatedAt,
-	); err != nil {
+	var styleJSON string
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&s.SyncInterval, &styleJSON, &s.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return entity.AppSettings{}, false, nil
 		}
 		return entity.AppSettings{}, false, fmt.Errorf("AppSettingsRepo - Get - QueryRow: %w", err)
 	}
+	style, perr := entity.ParseMessageStyle(styleJSON)
+	if perr != nil {
+		return entity.AppSettings{}, false, fmt.Errorf("AppSettingsRepo - Get - message_style: %w", perr)
+	}
+	s.MessageStyle = style
 	return s, true, nil
 }
 
@@ -49,21 +54,24 @@ func (r *AppSettingsRepo) Get(ctx context.Context) (entity.AppSettings, bool, er
 func (r *AppSettingsRepo) Upsert(ctx context.Context, s entity.AppSettings) (entity.AppSettings, error) {
 	sql, args, err := r.Builder.
 		Insert("app_settings").
-		Columns("id", "sync_interval", "default_use_embed", "default_title", "default_body").
-		Values(true, s.SyncInterval, s.DefaultUseEmbed, nullableString(s.DefaultTitle), nullableString(s.DefaultBody)).
+		Columns("id", "sync_interval", "message_style").
+		Values(true, s.SyncInterval, sq.Expr("?::jsonb", s.MessageStyle.JSON())).
 		Suffix("ON CONFLICT (id) DO UPDATE SET sync_interval = EXCLUDED.sync_interval, " +
-			"default_use_embed = EXCLUDED.default_use_embed, default_title = EXCLUDED.default_title, " +
-			"default_body = EXCLUDED.default_body, updated_at = NOW() " +
-			"RETURNING COALESCE(sync_interval, ''), default_use_embed, COALESCE(default_title, ''), COALESCE(default_body, ''), updated_at").
+			"message_style = EXCLUDED.message_style, updated_at = NOW() " +
+			"RETURNING COALESCE(sync_interval, ''), COALESCE(message_style::text, '{}'), updated_at").
 		ToSql()
 	if err != nil {
 		return entity.AppSettings{}, fmt.Errorf("AppSettingsRepo - Upsert - r.Builder: %w", err)
 	}
 	var out entity.AppSettings
-	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(
-		&out.SyncInterval, &out.DefaultUseEmbed, &out.DefaultTitle, &out.DefaultBody, &out.UpdatedAt,
-	); err != nil {
+	var outStyle string
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&out.SyncInterval, &outStyle, &out.UpdatedAt); err != nil {
 		return entity.AppSettings{}, fmt.Errorf("AppSettingsRepo - Upsert - QueryRow: %w", err)
 	}
+	style, perr := entity.ParseMessageStyle(outStyle)
+	if perr != nil {
+		return entity.AppSettings{}, fmt.Errorf("AppSettingsRepo - Upsert - message_style: %w", perr)
+	}
+	out.MessageStyle = style
 	return out, nil
 }
