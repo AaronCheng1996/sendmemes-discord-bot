@@ -67,6 +67,15 @@ func (uc *UseCase) GetAlbumByID(ctx context.Context, id int) (entity.Album, erro
 	return album, nil
 }
 
+// CountAlbumMedia returns how many images and videos the album holds.
+func (uc *UseCase) CountAlbumMedia(ctx context.Context, albumID int) (int, int, error) {
+	images, videos, err := uc.repo.CountAlbumMedia(ctx, albumID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("ImagesUseCase - CountAlbumMedia - repo.CountAlbumMedia %d: %w", albumID, err)
+	}
+	return images, videos, nil
+}
+
 // GetAlbumBatch returns up to limit images for album using cover-first rules
 // (cover first when present, then random non-cover images).
 func (uc *UseCase) GetAlbumBatch(ctx context.Context, album entity.Album, limit int) ([]entity.Image, error) {

@@ -93,6 +93,8 @@ type (
 		// CountByKind returns the number of images with the given kind
 		// (entity.MediaKindImage or entity.MediaKindVideo).
 		CountByKind(ctx context.Context, kind string) (int, error)
+		// CountAlbumMedia returns how many images and videos albumID holds.
+		CountAlbumMedia(ctx context.Context, albumID int) (images, videos int, err error)
 	}
 
 	// DeliveryRulesRepo manages configurable Discord delivery rules.

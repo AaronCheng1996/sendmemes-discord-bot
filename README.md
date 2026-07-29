@@ -153,28 +153,44 @@ when a sync finds something.
 
 #### Placeholders
 
-Title and body share one placeholder set:
+Title, body, footer and author share one placeholder set. These work everywhere:
 
 | Placeholder | Replaced with |
 |---|---|
 | `{album}` | Album name |
 | `{album_id}` | Album id |
-| `{mode}` | The album's send mode |
-| `{count}` | Number of files in this message |
-| `{total}` | Number of files that were available |
-| `{rating}` | The album's `positive_rating` |
-| `{new_images}` / `{new_videos}` / `{new_total}` | Discovery notifications: what this sync found |
-| `{prefix}` | `[TEST] ` for admin test sends, empty for scheduled posts |
-| `{date}` / `{time}` | Current date (`2006-01-02`) / time (`15:04`) |
+| `{shown}` | Number of files **in this message** |
+| `{album_images}` / `{album_videos}` / `{album_total}` | How much media the **album** holds |
+| `{rule}` / `{channel}` | Name of the delivery rule that sent this / the target channel |
+| `{date}` / `{time}` / `{datetime}` / `{weekday}` | `2006-01-02` / `15:04` / both / `Monday` |
 
-`{prefix}` exists so test sends stay recognizable. The default caption puts it
-in front of the album name, so a custom template that leaves it out makes
-"Send test" posts look exactly like real ones — keep it first if you want the
-marker:
+Album deliveries (scheduled sends, tests, `/album`) additionally get:
+
+| Placeholder | Replaced with |
+|---|---|
+| `{mode}` | The album's send mode |
+| `{rating}` | The album's `positive_rating` |
+| `{last_sent}` | When this album was last sent |
+
+Discovery notifications (`new_album` / `new_files`) additionally get:
+
+| Placeholder | Replaced with |
+|---|---|
+| `{new_images}` / `{new_videos}` / `{new_total}` | What this sync just found |
 
 ```text
-{prefix}📢 {album} — {count}/{total} pics · ⭐ {rating}
+📢 {album} — {shown} of {album_total} · ⭐ {rating}
+🆕 {album}: +{new_total} new (now {album_total})
 ```
+
+A placeholder outside its context — `{new_images}` in a scheduled send, or a
+typo — is left in the message verbatim rather than rendering as `0`, so a
+mistake is visible instead of quietly wrong. `{album_*}` behaves the same way if
+the album's contents cannot be read.
+
+Test sends from the admin UI are prefixed with `[TEST] ` automatically (on the
+title, or on the body when there is no title), so they stay recognizable no
+matter what the template says.
 
 #### Per-album overrides (`send_config_json`)
 

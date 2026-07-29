@@ -44,52 +44,133 @@ func embedColor(mode entity.AlbumSendMode) int {
 	return embedColorDefault
 }
 
-// captionValues carries everything a placeholder can expand to for one send.
-// Callers fill in what they know; zero values simply render as "0"/"".
-type captionValues struct {
-	Album     entity.Album
-	Sent      int // items in this message
-	Total     int // items available
-	NewImages int // discovery notifications only
-	NewVideos int
-	Prefix    string // "[TEST] " for admin test sends
+// testMarker prefixes admin previews so they can never be mistaken for a real
+// post. It is applied automatically rather than through a placeholder: relying
+// on templates to include one meant forgetting it silently produced posts
+// indistinguishable from the scheduled ones.
+const testMarker = "[TEST] "
+
+// sendContext describes the delivery a message belongs to, as opposed to how it
+// is styled. It supplies the context-dependent placeholders.
+type sendContext struct {
+	Test      bool   // admin preview
+	RuleName  string // delivery rule that triggered this send, if any
+	ChannelID string
 }
 
-// renderCaption fills tmpl's placeholders from v. An unrecognized placeholder is
-// left as-is (strings.NewReplacer only touches known tokens — no template
-// engine, so there is nothing else for it to do). An empty (or all-whitespace)
-// tmpl falls back to the caption used before embeds were introduced, keeping
-// rules that have never set a template looking the same as before.
-func renderCaption(tmpl string, v captionValues) string {
-	if strings.TrimSpace(tmpl) == "" {
-		return defaultCaption(v)
-	}
+// timeTokens are available in every context.
+func timeTokens() map[string]string {
 	now := time.Now()
-	replacer := strings.NewReplacer(
-		"{album}", v.Album.Name,
-		"{album_id}", strconv.Itoa(v.Album.ID),
-		"{mode}", string(v.Album.SendMode),
-		"{count}", strconv.Itoa(v.Sent),
-		"{total}", strconv.Itoa(v.Total),
-		"{rating}", strconv.Itoa(v.Album.PositiveRating),
-		"{new_images}", strconv.Itoa(v.NewImages),
-		"{new_videos}", strconv.Itoa(v.NewVideos),
-		"{new_total}", strconv.Itoa(v.NewImages+v.NewVideos),
-		"{prefix}", v.Prefix,
-		"{date}", now.Format("2006-01-02"),
-		"{time}", now.Format("15:04"),
-	)
-	return replacer.Replace(tmpl)
+	return map[string]string{
+		"{date}":     now.Format("2006-01-02"),
+		"{time}":     now.Format("15:04"),
+		"{datetime}": now.Format("2006-01-02 15:04"),
+		"{weekday}":  now.Format("Monday"),
+	}
 }
 
-// defaultCaption is the pre-embed caption text: the album name (with optional
-// prefix like "[TEST] "), plus a "(showing X of Y)" suffix when the album has
-// more content than fit in this send.
-func defaultCaption(v captionValues) string {
-	if v.Total > 0 && v.Sent > 0 && v.Sent < v.Total {
-		return fmt.Sprintf("%s%s (showing %d of %d)", v.Prefix, v.Album.Name, v.Sent, v.Total)
+// albumCounts is how much media an album actually holds — what people mean by
+// "total", as opposed to {shown}, the number of files in one message. Known is
+// false when the lookup failed, in which case the tokens are left unexpanded
+// rather than reporting a confident zero.
+type albumCounts struct {
+	Images int
+	Videos int
+	Known  bool
+}
+
+// imagesOr/videosOr fall back to a caller-supplied count (usually the size of
+// the listing it already fetched) when the album lookup failed.
+func (c albumCounts) imagesOr(fallback int) int {
+	if c.Known {
+		return c.Images
 	}
-	return v.Prefix + v.Album.Name
+	return fallback
+}
+
+func (c albumCounts) videosOr(fallback int) int {
+	if c.Known {
+		return c.Videos
+	}
+	return fallback
+}
+
+// addAlbumCountTokens exposes the album's real contents. Both scheduled sends
+// and discovery notifications use it, so a caption that reports a running total
+// works the same either way.
+func addAlbumCountTokens(tokens map[string]string, counts albumCounts) {
+	if !counts.Known {
+		return
+	}
+	tokens["{album_images}"] = strconv.Itoa(counts.Images)
+	tokens["{album_videos}"] = strconv.Itoa(counts.Videos)
+	tokens["{album_total}"] = strconv.Itoa(counts.Images + counts.Videos)
+}
+
+// albumTokens describes one album delivery.
+func albumTokens(album entity.Album, shown int, counts albumCounts, sc sendContext) map[string]string {
+	tokens := timeTokens()
+	tokens["{album}"] = album.Name
+	tokens["{album_id}"] = strconv.Itoa(album.ID)
+	tokens["{mode}"] = string(album.SendMode)
+	tokens["{rating}"] = strconv.Itoa(album.PositiveRating)
+	tokens["{shown}"] = strconv.Itoa(shown)
+	if album.LastSentAt != nil {
+		tokens["{last_sent}"] = album.LastSentAt.Format("2006-01-02 15:04")
+	}
+	addAlbumCountTokens(tokens, counts)
+	addContextTokens(tokens, sc)
+	return tokens
+}
+
+// discoveryTokens describes a sync notification: what the sync just found, plus
+// the album totals those files landed in. The album's send mode and rating are
+// absent because a SyncEvent carries only the album's id and name.
+func discoveryTokens(album entity.Album, ev entity.SyncEvent, shown int, counts albumCounts, sc sendContext) map[string]string {
+	tokens := timeTokens()
+	tokens["{album}"] = album.Name
+	tokens["{album_id}"] = strconv.Itoa(album.ID)
+	tokens["{shown}"] = strconv.Itoa(shown)
+	tokens["{new_images}"] = strconv.Itoa(ev.NewImages)
+	tokens["{new_videos}"] = strconv.Itoa(ev.NewVideos)
+	tokens["{new_total}"] = strconv.Itoa(ev.NewImages + ev.NewVideos)
+	addAlbumCountTokens(tokens, counts)
+	addContextTokens(tokens, sc)
+	return tokens
+}
+
+func addContextTokens(tokens map[string]string, sc sendContext) {
+	if sc.RuleName != "" {
+		tokens["{rule}"] = sc.RuleName
+	}
+	if sc.ChannelID != "" {
+		tokens["{channel}"] = "<#" + sc.ChannelID + ">"
+	}
+}
+
+// renderCaption substitutes the placeholders tokens knows about. Anything else —
+// a typo, or a placeholder that belongs to a different context (e.g. {new_images}
+// in a scheduled send) — is deliberately left verbatim, so a wrong placeholder
+// looks wrong instead of quietly rendering "0". An empty template falls back to
+// the built-in caption.
+func renderCaption(tmpl string, tokens map[string]string, fallback string) string {
+	if strings.TrimSpace(tmpl) == "" {
+		return fallback
+	}
+	pairs := make([]string, 0, len(tokens)*2)
+	for k, v := range tokens {
+		pairs = append(pairs, k, v)
+	}
+	return strings.NewReplacer(pairs...).Replace(tmpl)
+}
+
+// defaultCaption is the built-in body: the album name plus a "(showing X of Y)"
+// suffix when the album holds more than this message could carry.
+func defaultCaption(album entity.Album, shown, total int) string {
+	if total > 0 && shown > 0 && shown < total {
+		return fmt.Sprintf("%s (showing %d of %d)", album.Name, shown, total)
+	}
+	return album.Name
 }
 
 // renderedMessage is a message-style layer stack resolved against one send:
@@ -105,27 +186,43 @@ type renderedMessage struct {
 	Body   string
 	Footer string // empty = default "album #12 · Random"
 	Author string // empty = no author line
+	// Test marks an admin preview; the marker is added when the final headline
+	// is assembled, so it shows whether or not a custom title was configured.
+	Test bool
+}
+
+// headline resolves the visible title, applying the test marker.
+func (m renderedMessage) headline(fallback string) string {
+	title := m.Title
+	if title == "" {
+		title = fallback
+	}
+	if m.Test {
+		title = testMarker + title
+	}
+	return title
 }
 
 // renderMessage resolves the merged style for a single send. Title and Body
 // share the same placeholder set, so a rule can set a common headline while an
 // album supplies its own body.
-func renderMessage(style entity.MessageStyle, v captionValues) renderedMessage {
+func renderMessage(style entity.MessageStyle, tokens map[string]string, fallbackBody string, test bool) renderedMessage {
 	out := renderedMessage{
 		Style:    style,
 		UseEmbed: style.EmbedEnabled(),
-		Body:     renderCaption(style.Body, v),
+		Test:     test,
+		Body:     renderCaption(style.Body, tokens, fallbackBody),
 	}
 	// Title/footer/author are optional: an empty template means "no override",
-	// not "render the default caption", so they are only expanded when set.
+	// not "render the default caption", so they expand only when set.
 	if strings.TrimSpace(style.Title) != "" {
-		out.Title = renderCaption(style.Title, v)
+		out.Title = renderCaption(style.Title, tokens, "")
 	}
 	if strings.TrimSpace(style.Footer) != "" {
-		out.Footer = renderCaption(style.Footer, v)
+		out.Footer = renderCaption(style.Footer, tokens, "")
 	}
 	if strings.TrimSpace(style.Author) != "" {
-		out.Author = renderCaption(style.Author, v)
+		out.Author = renderCaption(style.Author, tokens, "")
 	}
 	return out
 }
@@ -133,14 +230,19 @@ func renderMessage(style entity.MessageStyle, v captionValues) renderedMessage {
 // plainContent assembles a non-embed message: the headline (bold, when set) on
 // its own line above the body.
 func plainContent(m renderedMessage) string {
-	switch {
-	case m.Title != "" && m.Body != "":
-		return "**" + m.Title + "**\n" + m.Body
-	case m.Title != "":
-		return "**" + m.Title + "**"
-	default:
+	// With no configured title a plain message is just the body, so the test
+	// marker goes in front of the text instead of an invented headline.
+	if m.Title == "" {
+		if m.Test {
+			return testMarker + m.Body
+		}
 		return m.Body
 	}
+	head := "**" + m.headline("") + "**"
+	if m.Body == "" {
+		return head
+	}
+	return head + "\n" + m.Body
 }
 
 // albumEmbed builds the shared embed shape for album deliveries: title is the
@@ -150,10 +252,7 @@ func plainContent(m renderedMessage) string {
 // files may additionally set Image to "attachment://<filename>" so the first
 // file renders large inside the embed.
 func albumEmbed(album entity.Album, thumbURL string, m renderedMessage) *discordgo.MessageEmbed {
-	title := m.Title
-	if title == "" {
-		title = album.Name
-	}
+	title := m.headline(album.Name)
 
 	footer := m.Footer
 	if footer == "" {

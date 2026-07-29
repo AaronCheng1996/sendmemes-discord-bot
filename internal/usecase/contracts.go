@@ -70,6 +70,10 @@ type (
 		ResolvePreviewURL(ctx context.Context, img entity.Image) (string, error)
 		// TopRated returns up to limit albums ordered by positive_rating DESC.
 		TopRated(ctx context.Context, limit int) ([]entity.Album, error)
+		// CountAlbumMedia returns how many images and videos the album holds.
+		// Used by the {album_images}/{album_videos}/{album_total} caption
+		// placeholders, which describe the album rather than the message.
+		CountAlbumMedia(ctx context.Context, albumID int) (images, videos int, err error)
 	}
 
 	Sync interface {

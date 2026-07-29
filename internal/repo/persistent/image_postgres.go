@@ -166,6 +166,26 @@ func (r *ImagesRepo) CountByKind(ctx context.Context, kind string) (int, error) 
 	return n, nil
 }
 
+// CountAlbumMedia returns albumID's image and video counts. Both come back from
+// one round trip because the captions that mention one usually mention the other.
+func (r *ImagesRepo) CountAlbumMedia(ctx context.Context, albumID int) (int, int, error) {
+	sql, args, err := r.Builder.
+		Select().
+		Column("COUNT(*) FILTER (WHERE kind = ?)", entity.MediaKindImage).
+		Column("COUNT(*) FILTER (WHERE kind = ?)", entity.MediaKindVideo).
+		From("images").
+		Where(sq.Eq{"album_id": albumID}).
+		ToSql()
+	if err != nil {
+		return 0, 0, fmt.Errorf("ImagesRepo - CountAlbumMedia - r.Builder: %w", err)
+	}
+	var images, videos int
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&images, &videos); err != nil {
+		return 0, 0, fmt.Errorf("ImagesRepo - CountAlbumMedia - QueryRow: %w", err)
+	}
+	return images, videos, nil
+}
+
 // GetFirstByAlbum returns the lowest-id image in albumID, used as a preview when
 // the album has no explicit cover. Returns (zero, false, nil) when the album has no images.
 func (r *ImagesRepo) GetFirstByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error) {

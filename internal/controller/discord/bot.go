@@ -460,10 +460,10 @@ func (b *Bot) downloadAndFitN(ctx context.Context, imgs []entity.Image, targetCo
 // ---------------------------------------------------------------------------
 
 // deliverAlbum sends album to channelID according to album.SendMode and returns
-// the root Discord message (nil on failure). captionPrefix is prepended to the
-// album name in captions (e.g. "[TEST] "); captionTemplate is the delivery
-// rule's caption template (empty for manual triggers/tests, which always use
-// the default caption). album.SendConfigJSON is parsed once here into an
+// the root Discord message (nil on failure). sc describes the delivery itself
+// (test preview, originating rule) and supplies the context-dependent caption
+// placeholders; base is the app defaults merged with the delivery rule, on top
+// of which the album's own style wins. album.SendConfigJSON is parsed once here into an
 // AlbumSendConfig and threaded into every delivery path: Custom mode honors
 // all of its fields (BatchSize/IncludeCover/Ordered/Caption/NSFW), while the
 // other modes honor the fields that are meaningful for their fixed shape
@@ -474,7 +474,7 @@ func (b *Bot) downloadAndFitN(ctx context.Context, imgs []entity.Image, targetCo
 //   - Single: exactly one random image (no cover pinning — see deliverSingle).
 //   - Order: an ordered comic; first batch only, /full_album for the rest.
 //   - Video: one random video as an attachment (small) or public link (large).
-func (b *Bot) deliverAlbum(ctx context.Context, channelID string, album entity.Album, captionPrefix string, base entity.MessageStyle) *discordgo.Message {
+func (b *Bot) deliverAlbum(ctx context.Context, channelID string, album entity.Album, sc sendContext, base entity.MessageStyle) *discordgo.Message {
 	cfg, err := entity.ParseAlbumSendConfig(album.SendConfigJSON)
 	if err != nil {
 		b.l.Error(fmt.Errorf("deliverAlbum %q: invalid send_config_json, using defaults: %w", album.Name, err))
@@ -485,15 +485,15 @@ func (b *Bot) deliverAlbum(ctx context.Context, channelID string, album entity.A
 	style := entity.MergeMessageStyle(base, cfg.Style())
 	switch album.SendMode {
 	case entity.AlbumSendModeSingle:
-		return b.deliverSingle(ctx, channelID, album, captionPrefix, style, cfg)
+		return b.deliverSingle(ctx, channelID, album, sc, style, cfg)
 	case entity.AlbumSendModeOrder:
-		return b.deliverComic(ctx, channelID, album, captionPrefix, style, cfg)
+		return b.deliverComic(ctx, channelID, album, sc, style, cfg)
 	case entity.AlbumSendModeVideo:
-		return b.deliverVideo(ctx, channelID, album, captionPrefix, style, cfg)
+		return b.deliverVideo(ctx, channelID, album, sc, style, cfg)
 	case entity.AlbumSendModeCustom:
-		return b.deliverCustom(ctx, channelID, album, captionPrefix, style, cfg)
+		return b.deliverCustom(ctx, channelID, album, sc, style, cfg)
 	default:
-		return b.deliverRandom(ctx, channelID, album, captionPrefix, style, cfg)
+		return b.deliverRandom(ctx, channelID, album, sc, style, cfg)
 	}
 }
 
@@ -512,19 +512,39 @@ func (b *Bot) appStyle(ctx context.Context) entity.MessageStyle {
 // that targets channelID, if any. Test sends and manual triggers use it so the
 // preview matches what the real scheduled post will look like — without it a
 // rule's title/body/embed settings would be silently ignored.
-func (b *Bot) baseStyleForChannel(ctx context.Context, channelID string) entity.MessageStyle {
+func (b *Bot) baseStyleForChannel(ctx context.Context, channelID string) (entity.MessageStyle, string) {
 	style := b.appStyle(ctx)
 	rules, err := b.rulesUC.ListActiveByTrigger(ctx, entity.TriggerScheduled)
 	if err != nil {
 		b.l.Error(fmt.Errorf("baseStyleForChannel: %w", err))
-		return style
+		return style, ""
 	}
 	for _, rule := range rules {
 		if rule.ChannelID == channelID {
-			return entity.MergeMessageStyle(style, rule.Style())
+			return entity.MergeMessageStyle(style, rule.Style()), rule.Name
 		}
 	}
-	return style
+	return style, ""
+}
+
+// albumCounts reads how much media the album holds, for the {album_*}
+// placeholders. A failure is not worth aborting a send over: the counts come
+// back unknown, which leaves those placeholders unexpanded.
+func (b *Bot) albumCounts(ctx context.Context, albumID int) albumCounts {
+	images, videos, err := b.imagesUC.CountAlbumMedia(ctx, albumID)
+	if err != nil {
+		b.l.Error(fmt.Errorf("albumCounts %d: %w", albumID, err))
+		return albumCounts{}
+	}
+	return albumCounts{Images: images, Videos: videos, Known: true}
+}
+
+// albumMessage resolves style for one album delivery. defaultTotal is what the
+// built-in "(showing X of Y)" caption compares shown against — the album's
+// images for the image modes, its videos for Video mode.
+func albumMessage(style entity.MessageStyle, album entity.Album, shown, defaultTotal int, counts albumCounts, sc sendContext) renderedMessage {
+	tokens := albumTokens(album, shown, counts, sc)
+	return renderMessage(style, tokens, defaultCaption(album, shown, defaultTotal), sc.Test)
 }
 
 // firstFileName names the attachment an embed should render large, or "" when
@@ -593,7 +613,7 @@ func (b *Bot) resolveThumbURL(ctx context.Context, imgs []entity.Image) string {
 // "Full album" button that expands the whole album into a thread on demand.
 // cfg.BatchSize overrides the batch/pool size and cfg.Caption/cfg.NSFW apply as
 // usual (see effectiveCaptionTemplate/applySpoiler).
-func (b *Bot) deliverRandom(ctx context.Context, channelID string, album entity.Album, captionPrefix string, style entity.MessageStyle, cfg entity.AlbumSendConfig) *discordgo.Message {
+func (b *Bot) deliverRandom(ctx context.Context, channelID string, album entity.Album, sc sendContext, style entity.MessageStyle, cfg entity.AlbumSendConfig) *discordgo.Message {
 	batchSize := batchSizeOrDefault(cfg, albumBatchSize)
 	imgs, err := b.imagesUC.GetAlbumBatch(ctx, album, batchSize*2)
 	if err != nil {
@@ -607,7 +627,8 @@ func (b *Bot) deliverRandom(ctx context.Context, channelID string, album entity.
 		return nil
 	}
 	applySpoiler(files, cfg.NSFW)
-	msg := renderMessage(style, captionValues{Album: album, Sent: len(files), Total: len(imgs), Prefix: captionPrefix})
+	counts := b.albumCounts(ctx, album.ID)
+	msg := albumMessage(style, album, len(files), counts.imagesOr(len(imgs)), counts, sc)
 	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, imgs), firstFileName(files), files, fullAlbumButtonRow(album.ID))
 }
 
@@ -617,7 +638,7 @@ func (b *Bot) deliverRandom(ctx context.Context, channelID string, album entity.
 // uniformly at random like everything else instead of always being the cover.
 // The image count is fixed by definition, so cfg.BatchSize does not apply;
 // cfg.Caption/cfg.NSFW still do.
-func (b *Bot) deliverSingle(ctx context.Context, channelID string, album entity.Album, captionPrefix string, style entity.MessageStyle, cfg entity.AlbumSendConfig) *discordgo.Message {
+func (b *Bot) deliverSingle(ctx context.Context, channelID string, album entity.Album, sc sendContext, style entity.MessageStyle, cfg entity.AlbumSendConfig) *discordgo.Message {
 	imgs, err := b.imagesUC.GetRandomFromAlbum(ctx, album.ID, 1)
 	if err != nil {
 		b.l.Error(fmt.Errorf("deliverAlbum single GetRandomFromAlbum %q: %w", album.Name, err))
@@ -629,7 +650,8 @@ func (b *Bot) deliverSingle(ctx context.Context, channelID string, album entity.
 		return nil
 	}
 	applySpoiler(files, cfg.NSFW)
-	msg := renderMessage(style, captionValues{Album: album, Sent: len(files), Total: len(imgs), Prefix: captionPrefix})
+	counts := b.albumCounts(ctx, album.ID)
+	msg := albumMessage(style, album, len(files), counts.imagesOr(len(imgs)), counts, sc)
 	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, imgs), firstFileName(files), files, nil)
 }
 
@@ -638,7 +660,7 @@ func (b *Bot) deliverSingle(ctx context.Context, channelID string, album entity.
 // the channel. When the album has more pages than fit in that batch, the caption
 // points viewers to /full_album (or the full-album button) for the rest; nothing
 // else is sent here. Page order is never shuffled.
-func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.Album, captionPrefix string, style entity.MessageStyle, cfg entity.AlbumSendConfig) *discordgo.Message {
+func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.Album, sc sendContext, style entity.MessageStyle, cfg entity.AlbumSendConfig) *discordgo.Message {
 	batchSize := batchSizeOrDefault(cfg, albumBatchSize)
 	pages, err := b.imagesUC.GetComicPages(ctx, album)
 	if err != nil {
@@ -661,7 +683,8 @@ func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.A
 	files := entriesToFiles(first)
 	applySpoiler(files, cfg.NSFW)
 
-	msg := renderMessage(style, captionValues{Album: album, Sent: len(first), Total: totalPages, Prefix: captionPrefix})
+	counts := b.albumCounts(ctx, album.ID)
+	msg := albumMessage(style, album, len(first), counts.imagesOr(totalPages), counts, sc)
 	if len(first) < totalPages {
 		msg.Body += "\nUse /full_album (or the button on a random post) for the rest."
 	}
@@ -672,7 +695,7 @@ func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.A
 // videoUploadLimit are uploaded as attachments; larger or unknown-size videos are
 // posted as a permanent pCloud public link. Returns nil (sending nothing) when the
 // album has no videos.
-func (b *Bot) deliverVideo(ctx context.Context, channelID string, album entity.Album, captionPrefix string, style entity.MessageStyle, cfg entity.AlbumSendConfig) *discordgo.Message {
+func (b *Bot) deliverVideo(ctx context.Context, channelID string, album entity.Album, sc sendContext, style entity.MessageStyle, cfg entity.AlbumSendConfig) *discordgo.Message {
 	video, found, err := b.imagesUC.GetRandomVideo(ctx, album.ID)
 	if err != nil {
 		b.l.Error(fmt.Errorf("deliverAlbum video GetRandomVideo %q: %w", album.Name, err))
@@ -683,7 +706,8 @@ func (b *Bot) deliverVideo(ctx context.Context, channelID string, album entity.A
 		return nil
 	}
 
-	msg := renderMessage(style, captionValues{Album: album, Sent: 1, Total: 1, Prefix: captionPrefix})
+	counts := b.albumCounts(ctx, album.ID)
+	msg := albumMessage(style, album, 1, counts.videosOr(1), counts, sc)
 	// Video attachments don't render through embed.Image (Discord embeds only
 	// preview static images), so the video is just a sibling file attachment.
 	if video.SizeBytes > 0 && video.SizeBytes <= videoUploadLimit {
@@ -712,7 +736,7 @@ func (b *Bot) deliverVideo(ctx context.Context, channelID string, album entity.A
 // Ordered=true walks the album in natural filename order (like Order mode);
 // otherwise images are picked cover-first + random (like Random mode).
 // IncludeCover=false drops the cover from either listing before batching.
-func (b *Bot) deliverCustom(ctx context.Context, channelID string, album entity.Album, captionPrefix string, style entity.MessageStyle, cfg entity.AlbumSendConfig) *discordgo.Message {
+func (b *Bot) deliverCustom(ctx context.Context, channelID string, album entity.Album, sc sendContext, style entity.MessageStyle, cfg entity.AlbumSendConfig) *discordgo.Message {
 	batchSize := batchSizeOrDefault(cfg, albumBatchSize)
 
 	var imgs []entity.Image
@@ -759,7 +783,8 @@ func (b *Bot) deliverCustom(ctx context.Context, channelID string, album entity.
 	}
 	applySpoiler(files, cfg.NSFW)
 
-	msg := renderMessage(style, captionValues{Album: album, Sent: sent, Total: total, Prefix: captionPrefix})
+	counts := b.albumCounts(ctx, album.ID)
+	msg := albumMessage(style, album, sent, counts.imagesOr(total), counts, sc)
 	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, imgs), firstFileName(files), files, fullAlbumButtonRow(album.ID))
 }
 
@@ -876,7 +901,8 @@ func (b *Bot) TriggerScheduleNow(ctx context.Context, channelID string, historyS
 	}
 	// Manual triggers are not tied to a rule, so reuse whichever scheduled rule
 	// targets this channel to preview the real styling.
-	return b.doScheduledSend(ch, historySize, b.baseStyleForChannel(ctx, ch))
+	style, ruleName := b.baseStyleForChannel(ctx, ch)
+	return b.doScheduledSend(sendContext{RuleName: ruleName, ChannelID: ch}, historySize, style)
 }
 
 // SendAlbumTest posts a one-off preview of albumID to channelID.
@@ -890,7 +916,8 @@ func (b *Bot) SendAlbumTest(ctx context.Context, channelID string, albumID int) 
 	if err != nil {
 		return entity.ManualScheduleTriggerResult{}, err
 	}
-	msg := b.deliverAlbum(ctx, ch, album, "[TEST] ", b.baseStyleForChannel(ctx, ch))
+	style, ruleName := b.baseStyleForChannel(ctx, ch)
+	msg := b.deliverAlbum(ctx, ch, album, sendContext{Test: true, RuleName: ruleName, ChannelID: ch}, style)
 	if msg == nil {
 		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("failed to send test preview (see server logs)")
 	}
@@ -922,7 +949,7 @@ func (b *Bot) SendRuleTest(ctx context.Context, ruleID int64, albumID int) (enti
 	}
 
 	style := entity.MergeMessageStyle(b.appStyle(ctx), rule.Style())
-	msg := b.deliverAlbum(ctx, ch, album, "[TEST] ", style)
+	msg := b.deliverAlbum(ctx, ch, album, sendContext{Test: true, RuleName: rule.Name, ChannelID: ch}, style)
 	if msg == nil {
 		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("failed to send rule preview (see server logs)")
 	}

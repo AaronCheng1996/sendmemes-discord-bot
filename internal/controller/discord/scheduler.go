@@ -131,10 +131,14 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, rule entity.DeliveryRule,
 	// the album layer (a SyncEvent has no send config). An unset body keeps the
 	// generated "N new images" summary.
 	style := entity.MergeMessageStyle(b.appStyle(ctx), rule.Style())
+	sc := sendContext{RuleName: rule.Name, ChannelID: channelID}
 	caption := formatSyncEventMessage(ev)
 	// SyncEvent carries only id+name, not a full Album (no send mode/rating to
 	// look up here) — albumEmbed degrades gracefully for the missing fields.
 	album := entity.Album{ID: ev.AlbumID, Name: ev.AlbumName}
+	// The album totals are what a caption's "now at N files" line reports, so
+	// they are read once per notification rather than per message below.
+	counts := b.albumCounts(ctx, ev.AlbumID)
 
 	var images, videos []entity.Image
 	for _, m := range ev.NewMedia {
@@ -162,7 +166,7 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, rule entity.DeliveryRule,
 				desc += fmt.Sprintf(" (showing %d of %d)", len(selected), len(images))
 			}
 			files := entriesToFiles(selected)
-			msg := syncMessage(style, ev, album, len(selected), desc)
+			msg := syncMessage(style, ev, album, len(selected), counts, sc, desc)
 			if b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, images), firstFileName(files), files, nil) != nil {
 				posted = true
 			}
@@ -193,7 +197,7 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, rule entity.DeliveryRule,
 			if len(videos) > len(links) {
 				fmt.Fprintf(&sb, "\n…and %d more video(s)", len(videos)-len(links))
 			}
-			msg := syncMessage(style, ev, album, len(links), sb.String())
+			msg := syncMessage(style, ev, album, len(links), counts, sc, sb.String())
 			if b.sendStyled(channelID, album, msg, "", "", nil, nil) != nil {
 				posted = true
 			}
@@ -202,7 +206,7 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, rule entity.DeliveryRule,
 
 	// Nothing resolvable (e.g. counts-only event) — post the text summary.
 	if !posted {
-		msg := syncMessage(style, ev, album, 0, caption)
+		msg := syncMessage(style, ev, album, 0, counts, sc, caption)
 		if b.sendStyled(channelID, album, msg, "", "", nil, nil) == nil {
 			b.l.Error(fmt.Errorf("postDiscoveredMedia fallback %q: failed to send", ev.AlbumName))
 		}
@@ -212,20 +216,9 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, rule entity.DeliveryRule,
 // syncMessage applies a discovery notification's resolved style: the rule's
 // title/embed preference are honoured, while the body defaults to the generated
 // summary unless the rule explicitly overrides it.
-func syncMessage(style entity.MessageStyle, ev entity.SyncEvent, album entity.Album, shown int, summary string) renderedMessage {
-	// Discovery placeholders come from the event itself: {count} is what this
-	// message shows, {total}/{new_*} describe everything the sync found.
-	msg := renderMessage(style, captionValues{
-		Album:     album,
-		Sent:      shown,
-		Total:     ev.NewImages + ev.NewVideos,
-		NewImages: ev.NewImages,
-		NewVideos: ev.NewVideos,
-	})
-	if strings.TrimSpace(style.Body) == "" {
-		msg.Body = summary
-	}
-	return msg
+func syncMessage(style entity.MessageStyle, ev entity.SyncEvent, album entity.Album, shown int, counts albumCounts, sc sendContext, summary string) renderedMessage {
+	tokens := discoveryTokens(album, ev, shown, counts, sc)
+	return renderMessage(style, tokens, summary, sc.Test)
 }
 
 // formatSyncEventMessage renders one sync event as a Discord message line, e.g.
@@ -350,7 +343,9 @@ func (b *Bot) runScheduledRule(ctx context.Context, rule entity.DeliveryRule) {
 		timer := time.NewTimer(time.Until(next))
 		select {
 		case <-timer.C:
-			_, _ = b.doScheduledSend(rule.ChannelID, rule.HistorySize,
+			_, _ = b.doScheduledSend(
+				sendContext{RuleName: rule.Name, ChannelID: rule.ChannelID},
+				rule.HistorySize,
 				entity.MergeMessageStyle(b.appStyle(context.Background()), rule.Style()))
 		case <-ctx.Done():
 			timer.Stop()
@@ -362,8 +357,9 @@ func (b *Bot) runScheduledRule(ctx context.Context, rule entity.DeliveryRule) {
 	}
 }
 
-func (b *Bot) doScheduledSend(channelID string, historySize int, style entity.MessageStyle) (entity.ManualScheduleTriggerResult, error) {
+func (b *Bot) doScheduledSend(sc sendContext, historySize int, style entity.MessageStyle) (entity.ManualScheduleTriggerResult, error) {
 	ctx := context.Background()
+	channelID := sc.ChannelID
 	b.vlog("scheduled send: selecting album (history=%d)", historySize)
 	album, err := b.imagesUC.GetScheduledAlbum(ctx, historySize)
 	if err != nil {
@@ -371,7 +367,7 @@ func (b *Bot) doScheduledSend(channelID string, historySize int, style entity.Me
 		return entity.ManualScheduleTriggerResult{}, err
 	}
 	b.vlog("scheduled send: album=%q id=%d mode=%s sending to channel %s", album.Name, album.ID, album.SendMode, channelID)
-	msg := b.deliverAlbum(ctx, channelID, album, "", style)
+	msg := b.deliverAlbum(ctx, channelID, album, sc, style)
 	result := entity.ManualScheduleTriggerResult{
 		Triggered: msg != nil,
 		AlbumID:   album.ID,
