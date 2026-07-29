@@ -73,20 +73,61 @@ func defaultCaption(album entity.Album, sent, total int, prefix string) string {
 	return prefix + album.Name
 }
 
+// renderedMessage is a message-style layer stack resolved against one send:
+// placeholders filled in, embed preference settled.
+type renderedMessage struct {
+	UseEmbed bool
+	// Title is empty when no layer set one; embeds then fall back to the album
+	// name and plain messages omit the headline entirely.
+	Title string
+	Body  string
+}
+
+// renderMessage resolves the merged style for a single send. Title and Body
+// share the same placeholder set, so a rule can set a common headline while an
+// album supplies its own body.
+func renderMessage(style entity.MessageStyle, album entity.Album, sent, total int, prefix string) renderedMessage {
+	out := renderedMessage{
+		UseEmbed: style.EmbedEnabled(),
+		Body:     renderCaption(style.Body, album, sent, total, prefix),
+	}
+	if strings.TrimSpace(style.Title) != "" {
+		out.Title = renderCaption(style.Title, album, sent, total, prefix)
+	}
+	return out
+}
+
+// plainContent assembles a non-embed message: the headline (bold, when set) on
+// its own line above the body.
+func plainContent(m renderedMessage) string {
+	switch {
+	case m.Title != "" && m.Body != "":
+		return "**" + m.Title + "**\n" + m.Body
+	case m.Title != "":
+		return "**" + m.Title + "**"
+	default:
+		return m.Body
+	}
+}
+
 // albumEmbed builds the shared embed shape for album deliveries: title is the
-// album name, description is the (already-rendered) caption, footer identifies
-// the album and its send mode, and thumbURL (when non-empty) becomes the
-// small corner thumbnail. Callers that attach files may additionally set
-// Image to "attachment://<filename>" so the first file renders large inside
-// the embed.
-func albumEmbed(album entity.Album, thumbURL, description string) *discordgo.MessageEmbed {
+// resolved headline (falling back to the album name), description is the
+// rendered body, footer identifies the album and its send mode, and thumbURL
+// (when non-empty) becomes the small corner thumbnail. Callers that attach
+// files may additionally set Image to "attachment://<filename>" so the first
+// file renders large inside the embed.
+func albumEmbed(album entity.Album, thumbURL string, m renderedMessage) *discordgo.MessageEmbed {
 	footer := fmt.Sprintf("album #%d", album.ID)
 	if album.SendMode != "" {
 		footer += " · " + string(album.SendMode)
 	}
+	title := m.Title
+	if title == "" {
+		title = album.Name
+	}
 	embed := &discordgo.MessageEmbed{
-		Title:       album.Name,
-		Description: description,
+		Title:       title,
+		Description: m.Body,
 		Color:       embedColor(album.SendMode),
 		Footer:      &discordgo.MessageEmbedFooter{Text: footer},
 	}
@@ -94,6 +135,56 @@ func albumEmbed(album entity.Album, thumbURL, description string) *discordgo.Mes
 		embed.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: thumbURL}
 	}
 	return embed
+}
+
+// sendStyled delivers one album message in whichever shape the resolved style
+// asked for: a rich embed, or a plain text message with the same title/body.
+// Attachments and components (e.g. the Full-album button) work either way.
+//
+// embedImage names the attachment to render large inside the embed; it is
+// ignored in plain mode, where Discord previews attachments on its own.
+func (b *Bot) sendStyled(
+	channelID string,
+	album entity.Album,
+	m renderedMessage,
+	thumbURL, embedImage string,
+	files []*discordgo.File,
+	components []discordgo.MessageComponent,
+) *discordgo.Message {
+	if !m.UseEmbed {
+		return b.channelSendPlain(channelID, plainContent(m), files, components)
+	}
+	embed := albumEmbed(album, thumbURL, m)
+	if embedImage != "" {
+		embed.Image = &discordgo.MessageEmbedImage{URL: "attachment://" + embedImage}
+	}
+	return b.channelSendEmbed(channelID, embed, files, components)
+}
+
+// channelSendPlain is the non-embed counterpart of channelSendEmbed: same
+// attachments, components and auto-reaction, just no embed wrapper.
+func (b *Bot) channelSendPlain(channelID, content string, files []*discordgo.File, components []discordgo.MessageComponent) *discordgo.Message {
+	msg, err := b.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+		Content:    content,
+		Files:      files,
+		Components: components,
+	})
+	if err != nil {
+		b.l.Error(fmt.Errorf("channelSendPlain: %w", err))
+		return nil
+	}
+	b.autoReact(channelID, msg.ID)
+	return msg
+}
+
+// autoReact adds the discoverability reaction to a post the bot just made.
+func (b *Bot) autoReact(channelID, messageID string) {
+	if !autoReactOnPost {
+		return
+	}
+	if err := b.session.MessageReactionAdd(channelID, messageID, autoReactEmoji); err != nil {
+		b.l.Error(fmt.Errorf("autoReact: %w", err))
+	}
 }
 
 // channelSendEmbed sends embed alongside optional file attachments and
@@ -110,10 +201,6 @@ func (b *Bot) channelSendEmbed(channelID string, embed *discordgo.MessageEmbed, 
 		b.l.Error(fmt.Errorf("channelSendEmbed: %w", err))
 		return nil
 	}
-	if autoReactOnPost {
-		if rerr := b.session.MessageReactionAdd(channelID, msg.ID, autoReactEmoji); rerr != nil {
-			b.l.Error(fmt.Errorf("channelSendEmbed auto-react: %w", rerr))
-		}
-	}
+	b.autoReact(channelID, msg.ID)
 	return msg
 }

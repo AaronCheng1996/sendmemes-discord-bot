@@ -8,23 +8,24 @@ import (
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 )
 
-func TestEffectiveCaptionTemplate(t *testing.T) {
+func TestAlbumBodyOverridesRuleBody(t *testing.T) {
 	tests := []struct {
-		name     string
-		caption  string
-		fallback string
-		want     string
+		name    string
+		caption string
+		rule    string
+		want    string
 	}{
-		{name: "empty caption keeps fallback", caption: "", fallback: "{album}", want: "{album}"},
-		{name: "whitespace-only caption keeps fallback", caption: "   ", fallback: "{album}", want: "{album}"},
-		{name: "caption overrides fallback", caption: "custom {album}", fallback: "{album}", want: "custom {album}"},
-		{name: "caption overrides empty fallback", caption: "custom", fallback: "", want: "custom"},
+		{name: "empty caption keeps rule body", caption: "", rule: "{album}", want: "{album}"},
+		{name: "whitespace-only caption keeps rule body", caption: "   ", rule: "{album}", want: "{album}"},
+		{name: "caption overrides rule body", caption: "custom {album}", rule: "{album}", want: "custom {album}"},
+		{name: "caption overrides empty rule body", caption: "custom", rule: "", want: "custom"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := effectiveCaptionTemplate(entity.AlbumSendConfig{Caption: tt.caption}, tt.fallback)
+			cfg := entity.AlbumSendConfig{Caption: tt.caption}
+			got := entity.MergeMessageStyle(entity.MessageStyle{Body: tt.rule}, cfg.Style()).Body
 			if got != tt.want {
-				t.Errorf("effectiveCaptionTemplate(%q, %q) = %q, want %q", tt.caption, tt.fallback, got, tt.want)
+				t.Errorf("merged body for caption %q over rule %q = %q, want %q", tt.caption, tt.rule, got, tt.want)
 			}
 		})
 	}

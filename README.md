@@ -121,14 +121,30 @@ or expired credentials rather than an intentionally emptied library.
 
 ### Customizing messages
 
-Two layers shape a post. A **delivery rule** sets the caption for everything it
-sends; an **album** can override parts of that for itself.
+Three layers shape a post, each overriding the one below it **per field**:
 
-#### Per-rule caption template
+| Layer | Where | Sets |
+|---|---|---|
+| App defaults | Connection page → Message defaults | format, title, body |
+| Delivery rule | Schedule page → rule form | format, title, body |
+| Album | Albums page → **Config** button (`send_config_json`) | format, title, body |
 
-Every delivery rule has an optional `caption_template` (Schedule page, or the
-field of the same name on the API). Leave it empty to keep the built-in
-wording. Available placeholders:
+Because merging is per field, layers combine rather than replace each other —
+e.g. plain text by default, one rule that switches to embeds and sets a shared
+title, and an album under it that supplies only its own body (inheriting that
+rule's title and embed setting).
+
+**Format** — every layer can force embeds on or off (`use_embed`); rules and
+albums may also leave it unset to inherit. **Title and body apply either way**:
+in embed mode they become the embed title and description, in plain mode a bold
+first line and the message text.
+
+An empty title falls back to the album name (embed) or is omitted (plain); an
+empty body falls back to the built-in caption.
+
+#### Placeholders
+
+Title and body share one placeholder set:
 
 | Placeholder | Replaced with |
 |---|---|
@@ -155,7 +171,9 @@ defaults".
 
 | Key | Type | Effect | Applies to |
 |---|---|---|---|
-| `caption` | string | Replaces the rule's caption template for this album (placeholders above still work) | all modes |
+| `caption` | string | Message body for this album (placeholders above still work) | all modes |
+| `title` | string | Headline for this album | all modes |
+| `use_embed` | bool | Force embed (`true`) or plain text (`false`); omit to inherit | all modes |
 | `nsfw` | bool | Prefixes attachment filenames with `SPOILER_`, so Discord blurs them | all modes |
 | `batch_size` | int | Images per message | `Random`, `Custom` (`Single` sends one by definition) |
 | `ordered` | bool | Natural filename order instead of random | `Custom` |
@@ -171,6 +189,13 @@ Blur an adult album and give it its own caption:
 
 ```json
 { "nsfw": true, "caption": "⚠️ NSFW — {album}" }
+```
+
+Give one album its own headline and drop back to a plain message, inheriting
+everything else:
+
+```json
+{ "title": "📌 Pinned pick", "use_embed": false }
 ```
 
 Post a fixed, cover-less run of pages in filename order:

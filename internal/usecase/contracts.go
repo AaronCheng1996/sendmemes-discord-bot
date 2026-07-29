@@ -98,6 +98,10 @@ type (
 		// GetSyncInterval returns the effective sync cadence (stored value or env default).
 		GetSyncInterval(ctx context.Context) (string, error)
 		SetSyncInterval(ctx context.Context, interval string) (entity.AppSettings, error)
+		// Get returns the full settings row, including the app-wide message
+		// defaults that delivery rules and albums layer on top of.
+		Get(ctx context.Context) (entity.AppSettings, error)
+		SetMessageDefaults(ctx context.Context, style entity.MessageStyle) (entity.AppSettings, error)
 	}
 
 	// Jobs runs long-running deliveries in the background and exposes their state.
@@ -143,6 +147,8 @@ type (
 		// Sync settings + manual trigger.
 		GetSyncSettings(ctx context.Context) (entity.AppSettings, error)
 		UpdateSyncSettings(ctx context.Context, interval, actor string) (entity.AppSettings, error)
+		// UpdateMessageDefaults sets the app-wide message presentation defaults.
+		UpdateMessageDefaults(ctx context.Context, style entity.MessageStyle, actor string) (entity.AppSettings, error)
 		// TriggerSyncNow queues a pCloud sync as a background job and returns it.
 		TriggerSyncNow(ctx context.Context, actor string) (entity.Job, error)
 		RecordAudit(ctx context.Context, actor, action, targetType, targetID string, metadata map[string]any) error

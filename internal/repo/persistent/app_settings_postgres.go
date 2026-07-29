@@ -24,7 +24,8 @@ func NewAppSettingsRepo(pg *postgres.Postgres) *AppSettingsRepo {
 // Get returns the settings row, or (zero, false, nil) when none exists yet.
 func (r *AppSettingsRepo) Get(ctx context.Context) (entity.AppSettings, bool, error) {
 	sql, args, err := r.Builder.
-		Select("COALESCE(sync_interval, '')", "updated_at").
+		Select("COALESCE(sync_interval, '')", "default_use_embed",
+			"COALESCE(default_title, '')", "COALESCE(default_body, '')", "updated_at").
 		From("app_settings").
 		Where("id = ?", true).
 		Limit(1).
@@ -33,7 +34,9 @@ func (r *AppSettingsRepo) Get(ctx context.Context) (entity.AppSettings, bool, er
 		return entity.AppSettings{}, false, fmt.Errorf("AppSettingsRepo - Get - r.Builder: %w", err)
 	}
 	var s entity.AppSettings
-	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&s.SyncInterval, &s.UpdatedAt); err != nil {
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(
+		&s.SyncInterval, &s.DefaultUseEmbed, &s.DefaultTitle, &s.DefaultBody, &s.UpdatedAt,
+	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return entity.AppSettings{}, false, nil
 		}
@@ -46,15 +49,20 @@ func (r *AppSettingsRepo) Get(ctx context.Context) (entity.AppSettings, bool, er
 func (r *AppSettingsRepo) Upsert(ctx context.Context, s entity.AppSettings) (entity.AppSettings, error) {
 	sql, args, err := r.Builder.
 		Insert("app_settings").
-		Columns("id", "sync_interval").
-		Values(true, s.SyncInterval).
-		Suffix("ON CONFLICT (id) DO UPDATE SET sync_interval = EXCLUDED.sync_interval, updated_at = NOW() RETURNING COALESCE(sync_interval, ''), updated_at").
+		Columns("id", "sync_interval", "default_use_embed", "default_title", "default_body").
+		Values(true, s.SyncInterval, s.DefaultUseEmbed, nullableString(s.DefaultTitle), nullableString(s.DefaultBody)).
+		Suffix("ON CONFLICT (id) DO UPDATE SET sync_interval = EXCLUDED.sync_interval, " +
+			"default_use_embed = EXCLUDED.default_use_embed, default_title = EXCLUDED.default_title, " +
+			"default_body = EXCLUDED.default_body, updated_at = NOW() " +
+			"RETURNING COALESCE(sync_interval, ''), default_use_embed, COALESCE(default_title, ''), COALESCE(default_body, ''), updated_at").
 		ToSql()
 	if err != nil {
 		return entity.AppSettings{}, fmt.Errorf("AppSettingsRepo - Upsert - r.Builder: %w", err)
 	}
 	var out entity.AppSettings
-	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(&out.SyncInterval, &out.UpdatedAt); err != nil {
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(
+		&out.SyncInterval, &out.DefaultUseEmbed, &out.DefaultTitle, &out.DefaultBody, &out.UpdatedAt,
+	); err != nil {
 		return entity.AppSettings{}, fmt.Errorf("AppSettingsRepo - Upsert - QueryRow: %w", err)
 	}
 	return out, nil

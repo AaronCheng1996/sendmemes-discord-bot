@@ -41,8 +41,16 @@ type AlbumSendConfig struct {
 	BatchSize    int    `json:"batch_size,omitempty"`    // overrides the default per-message image count
 	IncludeCover *bool  `json:"include_cover,omitempty"` // nil = default (include); false = exclude the cover
 	Ordered      bool   `json:"ordered,omitempty"`       // true = natural filename order instead of random
-	Caption      string `json:"caption,omitempty"`       // overrides the delivery rule's caption template
+	Caption      string `json:"caption,omitempty"`       // message body; overrides the rule's caption template
 	NSFW         bool   `json:"nsfw,omitempty"`          // true = prefix attachment filenames with SPOILER_
+	Title        string `json:"title,omitempty"`         // headline; overrides the rule's title template
+	UseEmbed     *bool  `json:"use_embed,omitempty"`     // nil = inherit the rule/app preference
+}
+
+// Style exposes the album's presentation overrides as the top message-style
+// layer, applied after the app defaults and the delivery rule.
+func (c AlbumSendConfig) Style() MessageStyle {
+	return MessageStyle{UseEmbed: c.UseEmbed, Title: c.Title, Body: c.Caption}
 }
 
 // ParseAlbumSendConfig decodes raw (an album's stored send_config_json) into an

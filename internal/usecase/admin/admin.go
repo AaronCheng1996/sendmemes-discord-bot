@@ -277,6 +277,20 @@ func (uc *UseCase) UpdateSyncSettings(ctx context.Context, interval, actor strin
 	return out, nil
 }
 
+// UpdateMessageDefaults stores the app-wide message presentation defaults.
+func (uc *UseCase) UpdateMessageDefaults(ctx context.Context, style entity.MessageStyle, actor string) (entity.AppSettings, error) {
+	out, err := uc.appSettings.SetMessageDefaults(ctx, style)
+	if err != nil {
+		return entity.AppSettings{}, err
+	}
+	_ = uc.RecordAudit(ctx, actor, "settings.message_defaults", "app_settings", "message_defaults", map[string]any{
+		"use_embed": style.UseEmbed,
+		"title":     style.Title,
+		"body":      style.Body,
+	})
+	return out, nil
+}
+
 func (uc *UseCase) TriggerSyncNow(ctx context.Context, actor string) (entity.Job, error) {
 	if uc.runtime == nil {
 		return entity.Job{}, fmt.Errorf("runtime trigger is not available")

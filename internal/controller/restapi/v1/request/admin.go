@@ -38,11 +38,24 @@ type DeliveryRuleWrite struct {
 	SendInterval string `json:"send_interval"`
 	HistorySize  int    `json:"history_size"`
 	Enabled      *bool  `json:"enabled"`
+	// Message presentation overrides. Empty strings and a nil UseEmbed mean
+	// "inherit the app default" rather than "clear".
+	CaptionTemplate string `json:"caption_template"`
+	TitleTemplate   string `json:"title_template"`
+	UseEmbed        *bool  `json:"use_embed"`
 }
 
 // SyncSettingsPut updates the global sync cadence.
 type SyncSettingsPut struct {
 	SyncInterval string `json:"sync_interval" validate:"required"`
+}
+
+// MessageDefaultsPut sets the app-wide message presentation defaults — the
+// bottom layer that delivery rules and albums override.
+type MessageDefaultsPut struct {
+	UseEmbed *bool  `json:"use_embed"`
+	Title    string `json:"title"`
+	Body     string `json:"body"`
 }
 
 // ScheduleTriggerNow sends a random album now; empty channel_id falls back to
