@@ -42,7 +42,7 @@ func TestChunkOrdered(t *testing.T) {
 	t.Run("order preserved across count-capped chunks", func(t *testing.T) {
 		t.Parallel()
 		pool := []fileEntry{fe("a", 1), fe("b", 1), fe("c", 1), fe("d", 1), fe("e", 1)}
-		chunks := chunkOrdered(l, pool, 2, 1000)
+		chunks, _ := chunkOrdered(l, pool, 2, 1000)
 
 		want := [][]string{{"a", "b"}, {"c", "d"}, {"e"}}
 		if len(chunks) != len(want) {
@@ -59,7 +59,7 @@ func TestChunkOrdered(t *testing.T) {
 		t.Parallel()
 		// a+b = 20 exactly fits maxBytes; adding c would exceed it.
 		pool := []fileEntry{fe("a", 10), fe("b", 10), fe("c", 10)}
-		chunks := chunkOrdered(l, pool, 100, 20)
+		chunks, _ := chunkOrdered(l, pool, 100, 20)
 
 		if len(chunks) != 2 {
 			t.Fatalf("got %d chunks, want 2", len(chunks))
@@ -72,10 +72,10 @@ func TestChunkOrdered(t *testing.T) {
 		}
 	})
 
-	t.Run("oversize single file is skipped", func(t *testing.T) {
+	t.Run("oversize single file is skipped and reported", func(t *testing.T) {
 		t.Parallel()
 		pool := []fileEntry{fe("a", 5), fe("huge", 50), fe("b", 5)}
-		chunks := chunkOrdered(l, pool, 100, 20)
+		chunks, oversized := chunkOrdered(l, pool, 100, 20)
 
 		if len(chunks) != 1 {
 			t.Fatalf("got %d chunks, want 1", len(chunks))
@@ -83,12 +83,43 @@ func TestChunkOrdered(t *testing.T) {
 		if got := chunkNames(chunks[0]); !equalStrings(got, []string{"a", "b"}) {
 			t.Fatalf("chunk 0 = %v, want [a b] (huge should be skipped)", got)
 		}
+		// The caller has to be able to name it: a silently dropped file is
+		// indistinguishable from the album not containing it.
+		if got := chunkNames(oversized); !equalStrings(got, []string{"huge"}) {
+			t.Fatalf("oversized = %v, want [huge]", got)
+		}
+	})
+
+	t.Run("every file that fits is emitted", func(t *testing.T) {
+		t.Parallel()
+		// The full-album path relies on this: a pool larger than one message
+		// must span several chunks rather than have the remainder dropped.
+		pool := make([]fileEntry, 0, 25)
+		for i := range 25 {
+			pool = append(pool, fe(string(rune('a'+i%26)), 1))
+		}
+		chunks, oversized := chunkOrdered(l, pool, 10, 1000)
+
+		total := 0
+		for _, ch := range chunks {
+			total += len(ch)
+		}
+		if total != len(pool) {
+			t.Fatalf("emitted %d of %d files", total, len(pool))
+		}
+		if len(oversized) != 0 {
+			t.Fatalf("oversized = %v, want none", chunkNames(oversized))
+		}
 	})
 
 	t.Run("empty pool yields no chunks", func(t *testing.T) {
 		t.Parallel()
-		if chunks := chunkOrdered(l, nil, 10, 100); len(chunks) != 0 {
+		chunks, oversized := chunkOrdered(l, nil, 10, 100)
+		if len(chunks) != 0 {
 			t.Fatalf("got %d chunks, want 0", len(chunks))
+		}
+		if len(oversized) != 0 {
+			t.Fatalf("got %d oversized, want 0", len(oversized))
 		}
 	})
 }

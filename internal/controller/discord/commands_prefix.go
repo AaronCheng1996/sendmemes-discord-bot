@@ -227,9 +227,8 @@ func (b *Bot) msgFullAlbum(ctx context.Context, s *discordgo.Session, channelID,
 		total++
 	}
 	b.vlog("!full_album %q: total=%d images, hasCover=%v", albumName, total, hasCover)
-	b.sendFullAlbumToThread(ctx, thread.ID, albumName, cover, hasCover, imgs)
+	sent, remaining := b.sendFullAlbumPage(ctx, thread.ID, albumRefFrom(albumName, cover, hasCover, imgs), cover, hasCover, imgs, 0)
 
-	content := fmt.Sprintf("Full album **%s** — %d images posted in <#%s>.", albumName, total, thread.ID)
-	_, _ = s.ChannelMessageEdit(channelID, initMsg.ID, content)
+	_, _ = s.ChannelMessageEdit(channelID, initMsg.ID, fullAlbumSummary(albumName, thread.ID, sent, remaining))
 	b.vlog("!full_album completed in channel %s: album=%q total=%d", channelID, albumName, total)
 }

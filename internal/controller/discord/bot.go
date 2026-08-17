@@ -151,15 +151,19 @@ func fitToLimit(l logger.Interface, pool []fileEntry, targetCount, maxBytes int)
 
 // chunkOrdered packs pool into sequential chunks WITHOUT reordering or shuffling.
 // A new chunk begins when adding the next file would exceed maxCount files or
-// maxBytes total bytes. A single file larger than maxBytes on its own cannot fit
-// any chunk and is skipped with a warning. Input order is always preserved.
-func chunkOrdered(l logger.Interface, pool []fileEntry, maxCount, maxBytes int) [][]fileEntry {
-	var chunks [][]fileEntry
+// maxBytes total bytes. Input order is always preserved.
+//
+// A single file larger than maxBytes cannot fit any chunk and is returned in
+// oversized instead. Callers that post to a channel are expected to tell the
+// reader which files those were: dropping them silently looks identical to the
+// album simply not containing them.
+func chunkOrdered(l logger.Interface, pool []fileEntry, maxCount, maxBytes int) (chunks [][]fileEntry, oversized []fileEntry) {
 	var cur []fileEntry
 	curBytes := 0
 	for _, fe := range pool {
 		if fe.size() > maxBytes {
 			l.Warn("chunkOrdered: file %q (%d bytes) exceeds Discord size limit, skipping", fe.name, fe.size())
+			oversized = append(oversized, fe)
 			continue
 		}
 		if len(cur) > 0 && (len(cur) >= maxCount || curBytes+fe.size() > maxBytes) {
@@ -173,7 +177,7 @@ func chunkOrdered(l logger.Interface, pool []fileEntry, maxCount, maxBytes int) 
 	if len(cur) > 0 {
 		chunks = append(chunks, cur)
 	}
-	return chunks
+	return chunks, oversized
 }
 
 // entriesToFiles converts fileEntry slice to discordgo.File slice.
@@ -332,46 +336,159 @@ func (b *Bot) trackScheduledMsg(msgID string, albumID int) {
 // Shared full-album thread sender
 // ---------------------------------------------------------------------------
 
-func (b *Bot) sendFullAlbumToThread(
+// albumRefFrom builds the minimal album identity a full-album post needs — the
+// id for the continue button, the name for captions — out of rows already
+// fetched, so the name-only entry points need no extra lookup.
+func albumRefFrom(name string, cover entity.Image, hasCover bool, imgs []entity.Image) entity.Album {
+	album := entity.Album{Name: name}
+	switch {
+	case len(imgs) > 0:
+		album.ID = imgs[0].AlbumID
+	case hasCover:
+		album.ID = cover.AlbumID
+	}
+	return album
+}
+
+// fullAlbumPageSizeFallback is used when FULL_ALBUM_PAGE_SIZE is misconfigured
+// (below 1), which would otherwise make a page hold nothing and the continue
+// button never advance.
+const fullAlbumPageSizeFallback = 100
+
+// fullAlbumPaging resolves the configured page threshold and size.
+// paged is false when the album is small enough to post in one go.
+func (b *Bot) fullAlbumPaging(total int) (pageSize int, paged bool) {
+	threshold := b.cfg.Discord.FullAlbumPageThreshold
+	if threshold <= 0 || total <= threshold {
+		return total, false
+	}
+	pageSize = b.cfg.Discord.FullAlbumPageSize
+	if pageSize < 1 {
+		b.l.Warn("full_album: FULL_ALBUM_PAGE_SIZE=%d is invalid, using %d", pageSize, fullAlbumPageSizeFallback)
+		pageSize = fullAlbumPageSizeFallback
+	}
+	return pageSize, true
+}
+
+// sendFullAlbumPage posts album images into channelID starting at offset (an
+// index into imgs, which holds the album's non-cover images in a stable order).
+//
+// Every image that downloads and fits within Discord's per-message limit is
+// posted — the pool is packed sequentially into as many messages as it takes,
+// rather than selecting a subset of it. Only a file too large to share a message
+// with nothing else is skipped, and those are named in a trailing notice.
+//
+// Albums above the configured threshold stop after one page and close with a
+// button that resumes here at the next offset, so a thousand-image album does
+// not dump a thousand images into one thread unasked.
+//
+// Returns how many images this page posted and how many the album still has
+// waiting, so the caller can report the page rather than the whole album.
+func (b *Bot) sendFullAlbumPage(
 	ctx context.Context,
-	threadID, albumName string,
+	channelID string,
+	album entity.Album,
 	cover entity.Image,
 	hasCover bool,
 	imgs []entity.Image,
-) {
-	totalBatches := (len(imgs) + albumPoolSize - 1) / albumPoolSize
-	if hasCover {
-		totalBatches++ // cover is batch 0
+	offset int,
+) (sent, remaining int) {
+	if offset < 0 || offset > len(imgs) {
+		b.l.Error(fmt.Errorf("sendFullAlbumPage %q: offset %d out of range (have %d images)", album.Name, offset, len(imgs)))
+		return 0, 0
 	}
-	batchNum := 0
 
-	if hasCover {
-		batchNum++
-		b.vlog("full_album %q: sending cover (batch %d/%d)", albumName, batchNum, totalBatches)
+	pageSize, paged := b.fullAlbumPaging(len(imgs))
+	end := offset + pageSize
+	if end > len(imgs) {
+		end = len(imgs)
+	}
+
+	// The cover leads the album, so it belongs to the first page only.
+	if hasCover && offset == 0 {
+		b.vlog("full_album %q: sending cover", album.Name)
 		cover.IsCover = true
 		files, err := b.downloadImages(ctx, []entity.Image{cover})
 		if err != nil {
-			b.l.Error(fmt.Errorf("sendFullAlbumToThread cover %q: %w", albumName, err))
+			b.l.Error(fmt.Errorf("sendFullAlbumPage cover %q: %w", album.Name, err))
 		} else {
-			b.channelSendFiles(b.session, threadID, albumName+" — Cover", files)
+			b.channelSendFiles(b.session, channelID, album.Name+" — Cover", files)
 		}
 	}
 
-	// Process non-cover images in pool-sized batches, fitting each to albumBatchSize.
-	for start := 0; start < len(imgs); start += albumPoolSize {
-		end := start + albumPoolSize
-		if end > len(imgs) {
-			end = len(imgs)
+	var oversized []fileEntry
+	// Download in pool-sized windows to bound memory, but post every window in
+	// full: chunkOrdered splits it across as many messages as needed.
+	for start := offset; start < end; start += albumPoolSize {
+		stop := start + albumPoolSize
+		if stop > end {
+			stop = end
 		}
-		batchNum++
-		b.vlog("full_album %q: sending batch %d/%d (images %d–%d)", albumName, batchNum, totalBatches, start+1, end)
-		files, err := b.downloadAndFit(ctx, imgs[start:end])
+		b.vlog("full_album %q: downloading images %d–%d of %d", album.Name, start+1, stop, len(imgs))
+		pool, err := b.downloadPool(ctx, imgs[start:stop])
 		if err != nil {
-			b.l.Error(fmt.Errorf("sendFullAlbumToThread batch %d %q: %w", batchNum, albumName, err))
+			b.l.Error(fmt.Errorf("sendFullAlbumPage window %d–%d %q: %w", start+1, stop, album.Name, err))
 			continue
 		}
-		b.channelSendFiles(b.session, threadID, "", files)
-		b.vlog("full_album %q: batch %d/%d sent (%d files)", albumName, batchNum, totalBatches, len(files))
+		chunks, tooBig := chunkOrdered(b.l, pool, albumBatchSize, discordMsgLimit)
+		oversized = append(oversized, tooBig...)
+		for _, chunk := range chunks {
+			b.channelSendFiles(b.session, channelID, "", entriesToFiles(chunk))
+			sent += len(chunk)
+		}
+	}
+	b.vlog("full_album %q: posted %d image(s) from offset %d (%d skipped as oversized)",
+		album.Name, sent, offset, len(oversized))
+
+	if len(oversized) > 0 {
+		if _, err := b.session.ChannelMessageSend(channelID, oversizedNotice(oversized)); err != nil {
+			b.l.Error(fmt.Errorf("sendFullAlbumPage oversized notice %q: %w", album.Name, err))
+		}
+	}
+
+	remaining = len(imgs) - end
+	if paged && remaining > 0 {
+		content := fmt.Sprintf("Posted %d of %d images. %d left.", end, len(imgs), remaining)
+		if b.channelSendPlain(channelID, content, nil, fullAlbumMoreButtonRow(album.ID, end, remaining)) == nil {
+			b.l.Error(fmt.Errorf("sendFullAlbumPage %q: failed to post the continue button at offset %d", album.Name, end))
+		}
+	}
+	return sent, remaining
+}
+
+// fullAlbumSummary words the "done" reply for a full-album post. A paged album
+// has only posted its first page, so reporting the album's total would claim
+// more than actually went out.
+func fullAlbumSummary(albumName, threadID string, sent, remaining int) string {
+	if remaining > 0 {
+		return fmt.Sprintf("Full album **%s** — %d images posted in <#%s>, %d more behind the button there.",
+			albumName, sent, threadID, remaining)
+	}
+	return fmt.Sprintf("Full album **%s** — %d images posted in <#%s>.", albumName, sent, threadID)
+}
+
+// oversizedNotice renders the "these files were skipped" message. Sizes are
+// included because the fix is on the reader's side — they have to go shrink or
+// fetch the file themselves.
+func oversizedNotice(oversized []fileEntry) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "⚠️ Skipped %d file(s) too large for Discord (limit %s):",
+		len(oversized), humanBytes(discordMsgLimit))
+	for _, fe := range oversized {
+		fmt.Fprintf(&sb, "\n• `%s` — %s", fe.name, humanBytes(fe.size()))
+	}
+	return sb.String()
+}
+
+// humanBytes renders a byte count as MB/KB for a Discord message.
+func humanBytes(n int) string {
+	switch {
+	case n >= 1024*1024:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1024*1024))
+	case n >= 1024:
+		return fmt.Sprintf("%.1f KB", float64(n)/1024)
+	default:
+		return fmt.Sprintf("%d B", n)
 	}
 }
 
@@ -672,7 +789,7 @@ func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.A
 		b.l.Error(fmt.Errorf("deliverAlbum comic downloadPool %q: %w", album.Name, err))
 		return nil
 	}
-	chunks := chunkOrdered(b.l, pool, batchSize, discordMsgLimit)
+	chunks, _ := chunkOrdered(b.l, pool, batchSize, discordMsgLimit)
 	if len(chunks) == 0 {
 		b.l.Warn("deliverAlbum comic: no pages fit within Discord size limit (album %q)", album.Name)
 		return nil
@@ -766,7 +883,7 @@ func (b *Bot) deliverCustom(ctx context.Context, channelID string, album entity.
 			b.l.Error(fmt.Errorf("deliverAlbum custom downloadPool %q: %w", album.Name, derr))
 			return nil
 		}
-		chunks := chunkOrdered(b.l, pool, batchSize, discordMsgLimit)
+		chunks, _ := chunkOrdered(b.l, pool, batchSize, discordMsgLimit)
 		if len(chunks) == 0 {
 			b.l.Warn("deliverAlbum custom: no images fit within Discord size limit (album %q)", album.Name)
 			return nil

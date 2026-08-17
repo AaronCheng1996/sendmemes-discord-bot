@@ -86,6 +86,13 @@ other options.
   Albums page). `caption` and `nsfw` (spoiler-tagged attachments) apply to
   every mode, not just `Custom`. Set the mode from the admin UI or the
   `/album_mode` slash command.
+- **Full album posts** — the 📖 button on a random post (or `/full_album`) opens
+  a thread and posts every image in the album, 10 per message, in order. Files
+  too large for a single Discord message are the only ones skipped, and the
+  thread says which ones they were. Albums larger than
+  `FULL_ALBUM_PAGE_THRESHOLD` (default 200) stop after `FULL_ALBUM_PAGE_SIZE`
+  images (default 100) and close with a button that posts the next page, so a
+  thousand-image album does not arrive all at once.
 - **Rich sync notifications** — `new_album` / `new_files` rules post the actual
   discovered media: new images merged into one size-fitted message (up to 10),
   new videos as permanent pCloud public links. The first-ever import is suppressed to

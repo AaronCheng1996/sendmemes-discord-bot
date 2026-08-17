@@ -150,6 +150,10 @@ func (b *Bot) handleMessageComponent(s *discordgo.Session, i *discordgo.Interact
 	customID := i.MessageComponentData().CustomID
 	if albumID, ok := parseFullAlbumCustomID(customID); ok {
 		b.cmdFullAlbumButton(s, i, albumID)
+		return
+	}
+	if albumID, offset, ok := parseFullAlbumMoreCustomID(customID); ok {
+		b.cmdFullAlbumMore(s, i, albumID, offset)
 	}
 }
 
@@ -219,10 +223,76 @@ func (b *Bot) cmdFullAlbumButton(s *discordgo.Session, i *discordgo.InteractionC
 			return
 		}
 
-		b.sendFullAlbumToThread(ctx, thread.ID, album.Name, cover, hasCover, imgs)
-		b.editInteractionContent(s, i,
-			fmt.Sprintf("Full album **%s** — %d images posted in <#%s>.", album.Name, total, thread.ID))
+		sent, remaining := b.sendFullAlbumPage(ctx, thread.ID, album, cover, hasCover, imgs, 0)
+		b.editInteractionContent(s, i, fullAlbumSummary(album.Name, thread.ID, sent, remaining))
 		b.vlog("full-album button completed for %s: album=%q total=%d", user, album.Name, total)
+	}()
+}
+
+// cmdFullAlbumMore posts the next page of a paged full-album thread. Unlike the
+// Full-album button it creates no thread: the button it came from already lives
+// in one, so the page goes into the same channel.
+//
+// The album is re-read rather than cached between presses — GetFullAlbum orders
+// by id, so an offset stays meaningful across a sync that appends new images.
+func (b *Bot) cmdFullAlbumMore(s *discordgo.Session, i *discordgo.InteractionCreate, albumID, offset int) {
+	user := interactionUser(i)
+	b.vlog("full-album continue pressed by %s: albumID=%d offset=%d", user, albumID, offset)
+
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Flags:   discordgo.MessageFlagsEphemeral,
+			Content: "Posting the next batch…",
+		},
+	}); err != nil {
+		b.l.Error(fmt.Errorf("cmdFullAlbumMore ack: %w", err))
+		return
+	}
+
+	channelID := i.ChannelID
+	// Retire the button that was just pressed so the page cannot be posted twice
+	// by a second click. A failure here is not fatal — the worst case is a stale
+	// button, and sendFullAlbumPage still bounds the offset.
+	if i.Message != nil {
+		if _, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+			Channel:    channelID,
+			ID:         i.Message.ID,
+			Components: &[]discordgo.MessageComponent{},
+		}); err != nil {
+			b.vlog("cmdFullAlbumMore: could not clear the pressed button: %v", err)
+		}
+	}
+
+	go func() {
+		ctx := context.Background()
+
+		album, err := b.imagesUC.GetAlbumByID(ctx, albumID)
+		if err != nil {
+			b.l.Error(fmt.Errorf("cmdFullAlbumMore GetAlbumByID %d: %w", albumID, err))
+			b.editInteractionContent(s, i, "Album not found.")
+			return
+		}
+		imgs, err := b.imagesUC.GetFullAlbum(ctx, album.Name)
+		if err != nil {
+			b.l.Error(fmt.Errorf("cmdFullAlbumMore GetFullAlbum %q: %w", album.Name, err))
+			b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** not found.", album.Name))
+			return
+		}
+		if offset >= len(imgs) {
+			b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** has nothing left to post.", album.Name))
+			return
+		}
+
+		sent, remaining := b.sendFullAlbumPage(ctx, channelID, album, entity.Image{}, false, imgs, offset)
+		if remaining > 0 {
+			b.editInteractionContent(s, i,
+				fmt.Sprintf("Posted %d more from **%s** — %d still left.", sent, album.Name, remaining))
+		} else {
+			b.editInteractionContent(s, i,
+				fmt.Sprintf("Posted the last %d images of **%s**.", sent, album.Name))
+		}
+		b.vlog("full-album continue completed for %s: album=%q offset=%d", user, album.Name, offset)
 	}()
 }
 
@@ -367,9 +437,8 @@ func (b *Bot) cmdFullAlbum(s *discordgo.Session, i *discordgo.InteractionCreate)
 			return
 		}
 
-		b.sendFullAlbumToThread(ctx, thread.ID, albumName, cover, hasCover, imgs)
-		b.editInteractionContent(s, i,
-			fmt.Sprintf("Full album **%s** — %d images posted in <#%s>.", albumName, total, thread.ID))
+		sent, remaining := b.sendFullAlbumPage(ctx, thread.ID, albumRefFrom(albumName, cover, hasCover, imgs), cover, hasCover, imgs, 0)
+		b.editInteractionContent(s, i, fullAlbumSummary(albumName, thread.ID, sent, remaining))
 		b.vlog("/full_album completed for %s: album=%q total=%d", user, albumName, total)
 	}()
 }

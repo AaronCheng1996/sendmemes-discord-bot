@@ -75,6 +75,13 @@ type (
 		// pCloud sync and to admin CreateAlbum calls that omit a mode. Validated at
 		// startup; one of Order/Random/Single/Video/Custom.
 		AlbumDefaultSendMode string `env:"ALBUM_DEFAULT_SEND_MODE" envDefault:"Random"`
+		// FullAlbumPageThreshold is the album size above which a full-album post
+		// is split into pages behind a "post more" button. Albums at or below it
+		// are posted in one go. Zero or negative disables paging entirely.
+		FullAlbumPageThreshold int `env:"FULL_ALBUM_PAGE_THRESHOLD" envDefault:"200"`
+		// FullAlbumPageSize is how many images one such page carries. Values below
+		// 1 fall back to fullAlbumPageSizeFallback.
+		FullAlbumPageSize int `env:"FULL_ALBUM_PAGE_SIZE" envDefault:"100"`
 	}
 
 	// Admin controls privileged API access.
