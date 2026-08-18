@@ -70,8 +70,8 @@ func TestAlbumRefFrom(t *testing.T) {
 func TestOversizedNotice(t *testing.T) {
 	t.Parallel()
 
-	notice := oversizedNotice([]fileEntry{fe("huge.png", 30*1024*1024), fe("big.gif", 2048)})
-	for _, want := range []string{"2 file(s)", "huge.png", "30.0 MB", "big.gif", "2.0 KB"} {
+	notice := oversizedNotice([]fileEntry{fe("huge.png", 30*1024*1024), fe("big.gif", 2048)}, 20*1024*1024)
+	for _, want := range []string{"2 file(s)", "20.0 MB", "huge.png", "30.0 MB", "big.gif", "2.0 KB"} {
 		if !strings.Contains(notice, want) {
 			t.Errorf("notice missing %q:\n%s", want, notice)
 		}
@@ -88,10 +88,64 @@ func TestHumanBytes(t *testing.T) {
 		{0, "0 B"},
 		{512, "512 B"},
 		{1536, "1.5 KB"},
-		{discordMsgLimit, "24.0 MB"},
+		{20 * 1024 * 1024, "20.0 MB"},
 	} {
 		if got := humanBytes(tt.in); got != tt.want {
 			t.Errorf("humanBytes(%d) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+func limitBot(mb int) *Bot {
+	cfg := &config.Config{}
+	cfg.Discord.UploadLimitMB = mb
+	return &Bot{cfg: cfg, l: noopLogger{}}
+}
+
+func TestUploadLimit(t *testing.T) {
+	t.Parallel()
+
+	// No session, so the boost lookup always misses and the configured floor
+	// stands — the path every DM and uncached thread takes.
+	tests := []struct {
+		name string
+		mb   int
+		want int
+	}{
+		{name: "free tier", mb: 20, want: 20*1024*1024 - uploadOverheadBytes},
+		{name: "nitro basic", mb: 50, want: 50*1024*1024 - uploadOverheadBytes},
+		{name: "the old 10 MB cap", mb: 10, want: 10*1024*1024 - uploadOverheadBytes},
+		// Misconfiguration must not yield a budget nothing fits in.
+		{name: "zero falls back", mb: 0, want: minUploadBudget},
+		{name: "negative falls back", mb: -5, want: minUploadBudget},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := limitBot(tt.mb).uploadLimit("chan"); got != tt.want {
+				t.Fatalf("uploadLimit() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+// The budget must stay strictly under what Discord advertises: the API rejects
+// an over-budget request whole, losing every attachment in it.
+func TestUploadLimitLeavesHeadroom(t *testing.T) {
+	t.Parallel()
+
+	for _, mb := range []int{10, 20, 50, 100} {
+		if got := limitBot(mb).uploadLimit("chan"); got >= mb*1024*1024 {
+			t.Errorf("uploadLimit() = %d for a %d MB cap, want headroom below it", got, mb)
+		}
+	}
+}
+
+func TestGuildBoostLimitWithoutSession(t *testing.T) {
+	t.Parallel()
+
+	if _, ok := limitBot(20).guildBoostLimit("chan"); ok {
+		t.Error("guildBoostLimit reported a limit with no session state")
 	}
 }

@@ -354,7 +354,7 @@ func (b *Bot) cmdRngAlbum(s *discordgo.Session, i *discordgo.InteractionCreate) 
 			b.editInteractionContent(s, i, "Failed to get random album.")
 			return
 		}
-		files, err := b.downloadAndFit(ctx, imgs)
+		files, err := b.downloadAndFit(ctx, i.ChannelID, imgs)
 		if err != nil {
 			b.l.Error(fmt.Errorf("cmdRngAlbum downloadAndFit: %w", err))
 			b.editInteractionContent(s, i, "Failed to download images.")
@@ -378,7 +378,7 @@ func (b *Bot) cmdAlbum(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			b.editInteractionContent(s, i, fmt.Sprintf("Album %q not found or empty.", albumName))
 			return
 		}
-		files, err := b.downloadAndFit(ctx, imgs)
+		files, err := b.downloadAndFit(ctx, i.ChannelID, imgs)
 		if err != nil {
 			b.l.Error(fmt.Errorf("cmdAlbum downloadAndFit %q: %w", albumName, err))
 			b.editInteractionContent(s, i, "Failed to download images.")

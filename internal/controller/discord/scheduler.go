@@ -160,7 +160,7 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, rule entity.DeliveryRule,
 		entries, err := b.downloadPool(ctx, pool)
 		if err != nil {
 			b.l.Error(fmt.Errorf("postDiscoveredMedia downloadPool %q: %w", ev.AlbumName, err))
-		} else if selected := fitToLimit(b.l, entries, albumBatchSize, discordMsgLimit); len(selected) > 0 {
+		} else if selected := fitToLimit(b.l, entries, albumBatchSize, b.uploadLimit(channelID)); len(selected) > 0 {
 			desc := caption
 			if len(images) > len(selected) {
 				desc += fmt.Sprintf(" (showing %d of %d)", len(selected), len(images))

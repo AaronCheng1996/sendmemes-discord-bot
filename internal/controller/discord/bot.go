@@ -26,14 +26,15 @@ const (
 	// size-based trimming we still have candidates to refill back to albumBatchSize.
 	albumPoolSize = albumBatchSize * 2
 
-	// discordMsgLimit is the safe total file-size limit per Discord message.
-	// Discord's hard cap is 25 MB; we use 24 MB to leave room for JSON overhead.
-	discordMsgLimit = 24 * 1024 * 1024
+	// uploadOverheadBytes is held back from Discord's advertised attachment
+	// limit. That limit applies to the whole multipart request rather than the
+	// file bytes alone, and a message rejected for being slightly over loses
+	// every attachment in it, not just the one that pushed it over.
+	uploadOverheadBytes = 512 * 1024
 
-	// videoUploadLimit is a conservative default bot attachment cap for
-	// non-boosted guilds. Videos larger than this (or of unknown size) are
-	// delivered as a permanent pCloud public link instead of a file attachment.
-	videoUploadLimit = 10 * 1024 * 1024
+	// minUploadBudget keeps a misconfigured DISCORD_UPLOAD_LIMIT_MB from
+	// producing a budget nothing can fit in.
+	minUploadBudget = 1024 * 1024
 
 	// downloadTimeout is used for both pCloud downloads and Discord uploads.
 	// Large albums can have multi-MB images; give plenty of headroom.
@@ -43,6 +44,52 @@ const (
 	// for reaction-based feedback.  Oldest entries are evicted when full.
 	reactMapMaxSize = 200
 )
+
+// boostTierUploadLimits is the attachment limit a server's boost level grants
+// everyone posting in it. Levels below 2 grant nothing beyond the poster's own
+// account limit, so they are absent here.
+var boostTierUploadLimits = map[discordgo.PremiumTier]int{
+	discordgo.PremiumTier2: 50 * 1024 * 1024,
+	discordgo.PremiumTier3: 100 * 1024 * 1024,
+}
+
+// uploadLimit is the byte budget for one message posted to channelID.
+//
+// Guessing high is the expensive mistake here: Discord rejects an over-budget
+// request outright with 40005, so the whole batch is lost rather than trimmed,
+// which looks exactly like the images never existing. The configured floor is
+// therefore treated as authoritative unless the channel's guild is known to
+// grant more.
+func (b *Bot) uploadLimit(channelID string) int {
+	limit := b.cfg.Discord.UploadLimitMB * 1024 * 1024
+	if boost, ok := b.guildBoostLimit(channelID); ok && boost > limit {
+		limit = boost
+	}
+	if budget := limit - uploadOverheadBytes; budget >= minUploadBudget {
+		return budget
+	}
+	return minUploadBudget
+}
+
+// guildBoostLimit resolves channelID's guild boost allowance from the gateway
+// state cache (populated by IntentsGuilds). Not found -- a DM, or a thread the
+// cache has not seen -- leaves the configured floor standing, which is the safe
+// direction to be wrong in.
+func (b *Bot) guildBoostLimit(channelID string) (int, bool) {
+	if b.session == nil || b.session.State == nil {
+		return 0, false
+	}
+	ch, err := b.session.State.Channel(channelID)
+	if err != nil || ch.GuildID == "" {
+		return 0, false
+	}
+	guild, err := b.session.State.Guild(ch.GuildID)
+	if err != nil {
+		return 0, false
+	}
+	limit, ok := boostTierUploadLimits[guild.PremiumTier]
+	return limit, ok
+}
 
 // fileEntry is an already-downloaded image file, kept in memory so that
 // fitToLimit can inspect sizes and reassemble the final Discord file list
@@ -231,7 +278,11 @@ func NewBot(
 	if err != nil {
 		return nil, fmt.Errorf("discord NewSession: %w", err)
 	}
-	s.Identify.Intents = discordgo.IntentsGuildMessages |
+	// IntentsGuilds populates the state cache with guilds and channels, which
+	// is how uploadLimit learns a server's boost tier. It is not a privileged
+	// intent, so it needs no approval in the developer portal.
+	s.Identify.Intents = discordgo.IntentsGuilds |
+		discordgo.IntentsGuildMessages |
 		discordgo.IntentsDirectMessages |
 		discordgo.IntentsGuildMessageReactions
 
@@ -399,6 +450,9 @@ func (b *Bot) sendFullAlbumPage(
 	}
 
 	pageSize, paged := b.fullAlbumPaging(len(imgs))
+	// Resolved once per page: every message here goes to the same channel, so
+	// the budget cannot change mid-page.
+	budget := b.uploadLimit(channelID)
 	end := offset + pageSize
 	if end > len(imgs) {
 		end = len(imgs)
@@ -430,7 +484,7 @@ func (b *Bot) sendFullAlbumPage(
 			b.l.Error(fmt.Errorf("sendFullAlbumPage window %d–%d %q: %w", start+1, stop, album.Name, err))
 			continue
 		}
-		chunks, tooBig := chunkOrdered(b.l, pool, albumBatchSize, discordMsgLimit)
+		chunks, tooBig := chunkOrdered(b.l, pool, albumBatchSize, budget)
 		oversized = append(oversized, tooBig...)
 		for _, chunk := range chunks {
 			b.channelSendFiles(b.session, channelID, "", entriesToFiles(chunk))
@@ -441,7 +495,7 @@ func (b *Bot) sendFullAlbumPage(
 		album.Name, sent, offset, len(oversized))
 
 	if len(oversized) > 0 {
-		if _, err := b.session.ChannelMessageSend(channelID, oversizedNotice(oversized)); err != nil {
+		if _, err := b.session.ChannelMessageSend(channelID, oversizedNotice(oversized, budget)); err != nil {
 			b.l.Error(fmt.Errorf("sendFullAlbumPage oversized notice %q: %w", album.Name, err))
 		}
 	}
@@ -470,10 +524,10 @@ func fullAlbumSummary(albumName, threadID string, sent, remaining int) string {
 // oversizedNotice renders the "these files were skipped" message. Sizes are
 // included because the fix is on the reader's side — they have to go shrink or
 // fetch the file themselves.
-func oversizedNotice(oversized []fileEntry) string {
+func oversizedNotice(oversized []fileEntry, budget int) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "⚠️ Skipped %d file(s) too large for Discord (limit %s):",
-		len(oversized), humanBytes(discordMsgLimit))
+		len(oversized), humanBytes(budget))
 	for _, fe := range oversized {
 		fmt.Fprintf(&sb, "\n• `%s` — %s", fe.name, humanBytes(fe.size()))
 	}
@@ -549,19 +603,19 @@ func (b *Bot) downloadImages(ctx context.Context, imgs []entity.Image) ([]*disco
 }
 
 // downloadAndFit downloads imgs as a pool, then applies fitToLimit to produce
-// at most albumBatchSize files that fit within discordMsgLimit.
-func (b *Bot) downloadAndFit(ctx context.Context, imgs []entity.Image) ([]*discordgo.File, error) {
-	return b.downloadAndFitN(ctx, imgs, albumBatchSize)
+// at most albumBatchSize files that fit channelID's upload budget.
+func (b *Bot) downloadAndFit(ctx context.Context, channelID string, imgs []entity.Image) ([]*discordgo.File, error) {
+	return b.downloadAndFitN(ctx, channelID, imgs, albumBatchSize)
 }
 
 // downloadAndFitN is downloadAndFit with a caller-chosen target count, used by
 // delivery paths whose per-album send config overrides the batch size.
-func (b *Bot) downloadAndFitN(ctx context.Context, imgs []entity.Image, targetCount int) ([]*discordgo.File, error) {
+func (b *Bot) downloadAndFitN(ctx context.Context, channelID string, imgs []entity.Image, targetCount int) ([]*discordgo.File, error) {
 	pool, err := b.downloadPool(ctx, imgs)
 	if err != nil {
 		return nil, err
 	}
-	selected := fitToLimit(b.l, pool, targetCount, discordMsgLimit)
+	selected := fitToLimit(b.l, pool, targetCount, b.uploadLimit(channelID))
 	if len(selected) == 0 {
 		return nil, fmt.Errorf("downloadAndFit: no images fit within Discord size limit")
 	}
@@ -737,7 +791,7 @@ func (b *Bot) deliverRandom(ctx context.Context, channelID string, album entity.
 		b.l.Error(fmt.Errorf("deliverAlbum random GetAlbumBatch %q: %w", album.Name, err))
 		return nil
 	}
-	files, err := b.downloadAndFitN(ctx, imgs, batchSize)
+	files, err := b.downloadAndFitN(ctx, channelID, imgs, batchSize)
 	if err != nil {
 		b.l.Error(fmt.Errorf("deliverAlbum random downloadAndFit %q: %w", album.Name, err))
 		_, _ = b.session.ChannelMessageSend(channelID, "Failed to download images.")
@@ -789,7 +843,7 @@ func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.A
 		b.l.Error(fmt.Errorf("deliverAlbum comic downloadPool %q: %w", album.Name, err))
 		return nil
 	}
-	chunks, _ := chunkOrdered(b.l, pool, batchSize, discordMsgLimit)
+	chunks, _ := chunkOrdered(b.l, pool, batchSize, b.uploadLimit(channelID))
 	if len(chunks) == 0 {
 		b.l.Warn("deliverAlbum comic: no pages fit within Discord size limit (album %q)", album.Name)
 		return nil
@@ -808,9 +862,9 @@ func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.A
 	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, pages), firstFileName(files), files, nil)
 }
 
-// deliverVideo posts one random video from the album. Videos within
-// videoUploadLimit are uploaded as attachments; larger or unknown-size videos are
-// posted as a permanent pCloud public link. Returns nil (sending nothing) when the
+// deliverVideo posts one random video from the album. Videos within the
+// channel's upload budget are uploaded as attachments; larger or unknown-size
+// videos are posted as a permanent pCloud public link. Returns nil (sending nothing) when the
 // album has no videos.
 func (b *Bot) deliverVideo(ctx context.Context, channelID string, album entity.Album, sc sendContext, style entity.MessageStyle, cfg entity.AlbumSendConfig) *discordgo.Message {
 	video, found, err := b.imagesUC.GetRandomVideo(ctx, album.ID)
@@ -827,7 +881,7 @@ func (b *Bot) deliverVideo(ctx context.Context, channelID string, album entity.A
 	msg := albumMessage(style, album, 1, counts.videosOr(1), counts, sc)
 	// Video attachments don't render through embed.Image (Discord embeds only
 	// preview static images), so the video is just a sibling file attachment.
-	if video.SizeBytes > 0 && video.SizeBytes <= videoUploadLimit {
+	if video.SizeBytes > 0 && video.SizeBytes <= int64(b.uploadLimit(channelID)) {
 		files, derr := b.downloadImages(ctx, []entity.Image{video})
 		if derr != nil {
 			b.l.Error(fmt.Errorf("deliverAlbum video download %q: %w", album.Name, derr))
@@ -883,7 +937,7 @@ func (b *Bot) deliverCustom(ctx context.Context, channelID string, album entity.
 			b.l.Error(fmt.Errorf("deliverAlbum custom downloadPool %q: %w", album.Name, derr))
 			return nil
 		}
-		chunks, _ := chunkOrdered(b.l, pool, batchSize, discordMsgLimit)
+		chunks, _ := chunkOrdered(b.l, pool, batchSize, b.uploadLimit(channelID))
 		if len(chunks) == 0 {
 			b.l.Warn("deliverAlbum custom: no images fit within Discord size limit (album %q)", album.Name)
 			return nil
@@ -891,7 +945,7 @@ func (b *Bot) deliverCustom(ctx context.Context, channelID string, album entity.
 		files = entriesToFiles(chunks[0])
 		sent, total = len(chunks[0]), len(imgs)
 	} else {
-		files, err = b.downloadAndFitN(ctx, imgs, batchSize)
+		files, err = b.downloadAndFitN(ctx, channelID, imgs, batchSize)
 		if err != nil {
 			b.l.Error(fmt.Errorf("deliverAlbum custom downloadAndFit %q: %w", album.Name, err))
 			return nil
@@ -908,7 +962,7 @@ func (b *Bot) deliverCustom(ctx context.Context, channelID string, album entity.
 // sendAlbumToChannel downloads imgs with pool fitting and sends to channel.
 // Returns the sent Discord message (nil on failure) so callers can track it.
 func (b *Bot) sendAlbumToChannel(ctx context.Context, s *discordgo.Session, channelID, caption string, imgs []entity.Image) *discordgo.Message {
-	files, err := b.downloadAndFit(ctx, imgs)
+	files, err := b.downloadAndFit(ctx, channelID, imgs)
 	if err != nil {
 		b.l.Error(fmt.Errorf("sendAlbumToChannel downloadAndFit: %w", err))
 		_, _ = s.ChannelMessageSend(channelID, "Failed to download images.")

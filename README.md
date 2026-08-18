@@ -79,13 +79,20 @@ other options.
   `Random` (size-fitted batch of images), `Order` (comic pages in natural
   filename order; first batch only — `/full_album` posts the rest in a thread),
   `Single` (one image),
-  `Video` (one random video — uploaded as an attachment when ≤ 10 MB,
-  otherwise posted as a permanent pCloud public link),
+  `Video` (one random video — uploaded as an attachment when it fits the
+  upload budget, otherwise posted as a permanent pCloud public link),
   `Custom` (batch built from the album's `send_config_json`: `batch_size`,
   `include_cover`, `ordered`, `caption`, `nsfw` — see the Config button on the
   Albums page). `caption` and `nsfw` (spoiler-tagged attachments) apply to
   every mode, not just `Custom`. Set the mode from the admin UI or the
   `/album_mode` slash command.
+- **Upload budget** — Discord's attachment cap has moved more than once (25 MB,
+  then 10 MB in Sept 2024, then 20 MB in Aug 2026) and a server's Boost level
+  raises it further for everyone posting there. `DISCORD_UPLOAD_LIMIT_MB`
+  (default 20) sets the floor; the bot reads the target server's Boost tier and
+  uses the higher of the two. Guessing high is the costly direction — Discord
+  rejects an over-budget message whole, so every image in the batch is lost, not
+  just the one that pushed it over.
 - **Full album posts** — the 📖 button on a random post (or `/full_album`) opens
   a thread and posts every image in the album, 10 per message, in order. Files
   too large for a single Discord message are the only ones skipped, and the

@@ -75,6 +75,13 @@ type (
 		// pCloud sync and to admin CreateAlbum calls that omit a mode. Validated at
 		// startup; one of Order/Random/Single/Video/Custom.
 		AlbumDefaultSendMode string `env:"ALBUM_DEFAULT_SEND_MODE" envDefault:"Random"`
+		// UploadLimitMB is the per-message attachment budget in MB, and the
+		// floor for it: when the target server's boost level grants more, that
+		// wins instead. Discord's own cap has moved twice (25 MB down to 10 MB
+		// in Sept 2024, back up to 20 MB in Aug 2026), so it is configurable
+		// rather than compiled in. Set it to your account tier's limit:
+		// 20 free, 50 Nitro Basic, 500 Nitro.
+		UploadLimitMB int `env:"DISCORD_UPLOAD_LIMIT_MB" envDefault:"20"`
 		// FullAlbumPageThreshold is the album size above which a full-album post
 		// is split into pages behind a "post more" button. Albums at or below it
 		// are posted in one go. Zero or negative disables paging entirely.
