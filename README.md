@@ -92,7 +92,9 @@ other options.
   (default 20) sets the floor; the bot reads the target server's Boost tier and
   uses the higher of the two. Guessing high is the costly direction — Discord
   rejects an over-budget message whole, so every image in the batch is lost, not
-  just the one that pushed it over.
+  just the one that pushed it over. When a send does fail, the bot says so in the
+  channel instead of only the log — at most one notice per channel per 30s, so a
+  broken full-album post does not become a wall of error messages.
 - **Full album posts** — the 📖 button on a random post (or `/full_album`) opens
   a thread and posts every image in the album, 10 per message, in order. Files
   too large for a single Discord message are the only ones skipped, and the

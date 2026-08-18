@@ -330,7 +330,7 @@ func (b *Bot) channelSendPlain(channelID, content string, files []*discordgo.Fil
 		Components: components,
 	})
 	if err != nil {
-		b.l.Error(fmt.Errorf("channelSendPlain: %w", err))
+		b.noteSendFailure(channelID, "channelSendPlain", files, err)
 		return nil
 	}
 	b.autoReact(channelID, msg.ID)
@@ -358,7 +358,7 @@ func (b *Bot) channelSendEmbed(channelID string, embed *discordgo.MessageEmbed, 
 	}
 	msg, err := b.session.ChannelMessageSendComplex(channelID, payload)
 	if err != nil {
-		b.l.Error(fmt.Errorf("channelSendEmbed: %w", err))
+		b.noteSendFailure(channelID, "channelSendEmbed", files, err)
 		return nil
 	}
 	b.autoReact(channelID, msg.ID)

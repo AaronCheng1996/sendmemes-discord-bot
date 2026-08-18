@@ -4,6 +4,7 @@ package discord
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -43,6 +44,12 @@ const (
 	// reactMapMaxSize is the maximum number of scheduled-send messages tracked
 	// for reaction-based feedback.  Oldest entries are evicted when full.
 	reactMapMaxSize = 200
+
+	// sendFailureNoticeInterval is the minimum gap between failure notices in
+	// one channel. A full-album post is dozens of messages and whatever breaks
+	// one usually breaks the rest, so an unthrottled notice would turn a failed
+	// post into a second, louder failure.
+	sendFailureNoticeInterval = 30 * time.Second
 )
 
 // boostTierUploadLimits is the attachment limit a server's boost level grants
@@ -263,6 +270,11 @@ type Bot struct {
 	reactMu    sync.RWMutex
 	reactMap   map[string]int
 	reactQueue []string
+
+	// noticeMu guards lastNotice, the per-channel timestamp that throttles
+	// send-failure notices.
+	noticeMu   sync.Mutex
+	lastNotice map[string]time.Time
 }
 
 // NewBot creates a Discord bot that delegates to use cases.
@@ -302,6 +314,7 @@ func NewBot(
 		stopCh:     make(chan struct{}),
 		reactMap:   make(map[string]int),
 		reactQueue: make([]string, 0, reactMapMaxSize),
+		lastNotice: make(map[string]time.Time),
 	}
 	s.AddHandler(b.handleReady)
 	s.AddHandler(b.handleMessageCreate)
@@ -458,19 +471,26 @@ func (b *Bot) sendFullAlbumPage(
 		end = len(imgs)
 	}
 
-	// The cover leads the album, so it belongs to the first page only.
+	var oversized []fileEntry
+
+	// The cover leads the album, so it belongs to the first page only. It goes
+	// through the same budget check as everything else: it used to be handed
+	// straight to Discord, so an oversized cover produced a 40005 rejection
+	// rather than a line in the skipped-files notice.
 	if hasCover && offset == 0 {
 		b.vlog("full_album %q: sending cover", album.Name)
 		cover.IsCover = true
-		files, err := b.downloadImages(ctx, []entity.Image{cover})
-		if err != nil {
+		pool, err := b.downloadPool(ctx, []entity.Image{cover})
+		switch {
+		case err != nil:
 			b.l.Error(fmt.Errorf("sendFullAlbumPage cover %q: %w", album.Name, err))
-		} else {
-			b.channelSendFiles(b.session, channelID, album.Name+" — Cover", files)
+		case pool[0].size() > budget:
+			oversized = append(oversized, pool[0])
+		default:
+			b.channelSendFiles(b.session, channelID, album.Name+" — Cover", entriesToFiles(pool))
 		}
 	}
 
-	var oversized []fileEntry
 	// Download in pool-sized windows to bound memory, but post every window in
 	// full: chunkOrdered splits it across as many messages as needed.
 	for start := offset; start < end; start += albumPoolSize {
@@ -592,8 +612,10 @@ func (b *Bot) downloadPool(ctx context.Context, imgs []entity.Image) ([]fileEntr
 	return entries, nil
 }
 
-// downloadImages downloads imgs and returns discordgo.File slice directly.
-// Used for single-image commands where pool/size fitting is not needed.
+// downloadImages downloads imgs and returns discordgo.File slice directly,
+// with no size fitting: it is for the single-image paths, where there is no
+// batch to trim and nothing to do about a file Discord will not take except
+// report the rejection (see noteSendFailure).
 func (b *Bot) downloadImages(ctx context.Context, imgs []entity.Image) ([]*discordgo.File, error) {
 	pool, err := b.downloadPool(ctx, imgs)
 	if err != nil {
@@ -971,6 +993,64 @@ func (b *Bot) sendAlbumToChannel(ctx context.Context, s *discordgo.Session, chan
 	return b.channelSendFiles(s, channelID, caption, files)
 }
 
+// restErrorCode returns Discord's numeric error code from err, or 0 when err
+// did not come from the Discord API.
+func restErrorCode(err error) int {
+	var restErr *discordgo.RESTError
+	if errors.As(err, &restErr) && restErr.Message != nil {
+		return restErr.Message.Code
+	}
+	return 0
+}
+
+// sendFailureNotice words a failed send for the channel it failed in. 40005
+// gets its own text because it is both the most common failure and the only one
+// the operator can act on directly: the configured budget is above what this
+// server actually accepts.
+func sendFailureNotice(files []*discordgo.File, err error, budget int) string {
+	if restErrorCode(err) == discordgo.ErrCodeRequestEntityTooLarge {
+		return fmt.Sprintf(
+			"⚠️ Discord rejected %d attachment(s) as too large. The bot is allowing up to %s per message, "+
+				"which is more than this server accepts — lower `DISCORD_UPLOAD_LIMIT_MB`.",
+			len(files), humanBytes(budget))
+	}
+	return "⚠️ Failed to post attachments here (see the server logs for details)."
+}
+
+// noteSendFailure logs a failed send and says so in the channel, at most once
+// per sendFailureNoticeInterval there.
+//
+// Logging alone is not enough: a send that fails quietly is indistinguishable
+// from an album that had nothing to post, which is how an over-budget batch
+// went unnoticed for a year.
+func (b *Bot) noteSendFailure(channelID, op string, files []*discordgo.File, err error) {
+	b.l.Error(fmt.Errorf("%s: %w", op, err))
+	if !b.claimFailureNotice(channelID) {
+		return
+	}
+	notice := sendFailureNotice(files, err, b.uploadLimit(channelID))
+	if _, sendErr := b.session.ChannelMessageSend(channelID, notice); sendErr != nil {
+		// Nothing further to try: a channel that refuses a plain text message
+		// will not accept an explanation of why it refused the last one.
+		b.l.Error(fmt.Errorf("%s: could not post the failure notice: %w", op, sendErr))
+	}
+}
+
+// claimFailureNotice reports whether channelID is due another failure notice,
+// recording the attempt when it is.
+func (b *Bot) claimFailureNotice(channelID string) bool {
+	b.noticeMu.Lock()
+	defer b.noticeMu.Unlock()
+	if last, ok := b.lastNotice[channelID]; ok && time.Since(last) < sendFailureNoticeInterval {
+		return false
+	}
+	if b.lastNotice == nil {
+		b.lastNotice = make(map[string]time.Time)
+	}
+	b.lastNotice[channelID] = time.Now()
+	return true
+}
+
 // channelSendFiles sends file attachments to a channel with an optional bold caption.
 // Returns the sent message (nil on failure).
 func (b *Bot) channelSendFiles(s *discordgo.Session, channelID, caption string, files []*discordgo.File) *discordgo.Message {
@@ -983,7 +1063,7 @@ func (b *Bot) channelSendFiles(s *discordgo.Session, channelID, caption string, 
 	}
 	msg, err := s.ChannelMessageSendComplex(channelID, payload)
 	if err != nil {
-		b.l.Error(fmt.Errorf("channelSendFiles: %w", err))
+		b.noteSendFailure(channelID, "channelSendFiles", files, err)
 		return nil
 	}
 	return msg

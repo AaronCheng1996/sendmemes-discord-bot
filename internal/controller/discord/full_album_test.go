@@ -1,8 +1,13 @@
 package discord
 
 import (
+	"errors"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/bwmarrin/discordgo"
 
 	"github.com/AaronCheng1996/sendmemes-discord-bot/config"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
@@ -147,5 +152,81 @@ func TestGuildBoostLimitWithoutSession(t *testing.T) {
 
 	if _, ok := limitBot(20).guildBoostLimit("chan"); ok {
 		t.Error("guildBoostLimit reported a limit with no session state")
+	}
+}
+
+// restErr builds the error shape discordgo returns for a non-2xx API response.
+func restErr(code int) error {
+	return &discordgo.RESTError{
+		Response: &http.Response{StatusCode: http.StatusRequestEntityTooLarge},
+		Message:  &discordgo.APIErrorMessage{Code: code, Message: "Request entity too large"},
+	}
+}
+
+func TestRestErrorCode(t *testing.T) {
+	t.Parallel()
+
+	if got := restErrorCode(restErr(discordgo.ErrCodeRequestEntityTooLarge)); got != 40005 {
+		t.Errorf("restErrorCode(40005 REST error) = %d, want 40005", got)
+	}
+	// Wrapped, because the send helpers pass errors up through fmt.Errorf.
+	wrapped := errors.Join(errors.New("context"), restErr(discordgo.ErrCodeRequestEntityTooLarge))
+	if got := restErrorCode(wrapped); got != 40005 {
+		t.Errorf("restErrorCode(wrapped) = %d, want 40005", got)
+	}
+	if got := restErrorCode(errors.New("connection reset")); got != 0 {
+		t.Errorf("restErrorCode(plain error) = %d, want 0", got)
+	}
+	if got := restErrorCode(nil); got != 0 {
+		t.Errorf("restErrorCode(nil) = %d, want 0", got)
+	}
+}
+
+func TestSendFailureNotice(t *testing.T) {
+	t.Parallel()
+
+	files := []*discordgo.File{{Name: "a.gif"}, {Name: "b.gif"}}
+
+	// 40005 is the one an operator can act on, so it names the setting, and it
+	// quotes the budget the bot actually applied rather than the raw setting.
+	budget := limitBot(20).uploadLimit("chan")
+	tooLarge := sendFailureNotice(files, restErr(discordgo.ErrCodeRequestEntityTooLarge), budget)
+	for _, want := range []string{"2 attachment(s)", "19.5 MB", "DISCORD_UPLOAD_LIMIT_MB"} {
+		if !strings.Contains(tooLarge, want) {
+			t.Errorf("40005 notice missing %q:\n%s", want, tooLarge)
+		}
+	}
+
+	other := sendFailureNotice(files, errors.New("connection reset"), budget)
+	if strings.Contains(other, "DISCORD_UPLOAD_LIMIT_MB") {
+		t.Errorf("generic notice should not blame the size setting:\n%s", other)
+	}
+	if other == "" {
+		t.Error("generic failure produced no notice")
+	}
+}
+
+// A full-album post is dozens of messages; whatever breaks one usually breaks
+// the rest, and forty identical notices is a second outage.
+func TestFailureNoticeIsThrottledPerChannel(t *testing.T) {
+	t.Parallel()
+
+	b := limitBot(20)
+	b.lastNotice = make(map[string]time.Time)
+
+	if !b.claimFailureNotice("chan-a") {
+		t.Fatal("first notice for a channel was suppressed")
+	}
+	if b.claimFailureNotice("chan-a") {
+		t.Error("second notice within the interval was not suppressed")
+	}
+	// Throttling is per channel: a different channel still deserves its own.
+	if !b.claimFailureNotice("chan-b") {
+		t.Error("another channel was suppressed by the first channel's notice")
+	}
+
+	b.lastNotice["chan-a"] = time.Now().Add(-sendFailureNoticeInterval - time.Second)
+	if !b.claimFailureNotice("chan-a") {
+		t.Error("notice still suppressed after the interval elapsed")
 	}
 }
