@@ -15,7 +15,7 @@ rules, and sync status.
   gets you a running bot + dashboard.
 - **Configurable delivery** — per-album send modes (random batch, ordered
   comic, single image, video, or a fully custom batch shape), scheduled or
-  event-triggered delivery rules, per-rule caption templates, rich Discord
+  event-triggered delivery rules, layered message styling, rich Discord
   embeds.
 - **Admin dashboard** — an Overview page with live system status, plus
   CRUD screens for albums, images, delivery rules, and a sync activity feed.
@@ -72,7 +72,11 @@ other options.
 
   Rules are managed from the admin UI or the `/schedule` slash/prefix command
   (`list` / `add` / `remove`). A scheduled goroutine per rule is reconciled
-  from the DB every ~30s, so edits take effect without a restart. Env
+  from the DB every ~30s. **Known limitation:** the reconciler compares only
+  `send_interval`, `history_size` and `channel_id`, so editing a rule's
+  *styling* (title, body, embed options, name) does not reach the running
+  goroutine until one of those three also changes or the bot restarts. App-wide
+  defaults are re-read on every send and are not affected. Env
   (`DISCORD_CHANNEL_ID`, `DISCORD_NOTIFY_CHANNEL_ID`) seeds default rules once
   when the table is empty.
 - **Typed delivery** — each album's `send_mode` controls the message format:
@@ -252,8 +256,8 @@ Post a fixed, cover-less run of pages in filename order:
 
 `ordered` and `include_cover` are only read by the `Custom` send mode, so switch
 the album to `Custom` when you need them; `caption`, `nsfw` and `batch_size`
-apply in every mode. An album's `caption` takes precedence over the rule's
-`caption_template`.
+apply in every mode. An album is the top style layer, so its `caption` and
+`title` win over the rule's.
 
 ### Media sources
 
@@ -276,7 +280,7 @@ apply in every mode. An album's `caption` takes precedence over the rule's
 - Images CRUD (`/images`, optional `album_id` scope; rows carry `kind` and
   `size_bytes`)
 - Delivery rules CRUD (`/delivery-rules`) — including per-rule
-  `caption_template`
+  `message_style` (format, title, body and the embed options)
 - Sync settings read/update (`/sync-settings`) and manual sync
   (`/sync/trigger-now`)
 - Manual scheduled send (`/schedule/trigger-now`) and per-album test send
@@ -326,6 +330,8 @@ Highlights:
 | `DISCORD_CHANNEL_ID`, `DISCORD_SEND_INTERVAL`, `DISCORD_SEND_HISTORY_SIZE` | Seed the default **scheduled** delivery rule (once, when `delivery_rules` is empty) |
 | `DISCORD_NOTIFY_CHANNEL_ID` | Seeds default **new_album** + **new_files** rules (once, when `delivery_rules` is empty; empty = no notify rules) |
 | `ALBUM_DEFAULT_SEND_MODE` | Default `send_mode` for albums created by sync and admin creates that omit one (`Order`/`Random`/`Single`/`Video`/`Custom`, default `Random`) |
+| `DISCORD_UPLOAD_LIMIT_MB` | Per-message attachment budget, and the floor for it — a server's Boost tier raises it automatically (default `20`; see [Upload budget](#discord-side)) |
+| `FULL_ALBUM_PAGE_THRESHOLD`, `FULL_ALBUM_PAGE_SIZE` | Albums over the threshold post one page at a time behind a button (defaults `200` / `100`; threshold `0` disables paging) |
 | `MEDIA_SOURCE` | `pcloud` (default) or `local` — see [Media sources](#media-sources) |
 | `MEDIA_LOCAL_ROOT` | Directory walked/served when `MEDIA_SOURCE=local` (default `/media`) |
 | `PCLOUD_ACCESS_TOKEN` *or* `PCLOUD_USERNAME` + `PCLOUD_PASSWORD` | pCloud authentication (only when `MEDIA_SOURCE=pcloud`). `PCLOUD_TOKEN_TYPE=session` (default, sent as `auth=`) or `oauth` (sent as `access_token=`); pCloud's API does not support 2FA |
@@ -372,8 +378,8 @@ people should stick with the default `docker-compose.yml`.
 ## Database migrations
 
 `migrations/` holds incremental, ordered SQL files
-(`00000N_<name>.{up,down}.sql`); `000001_init` is the baseline schema and
-later files layer on top of it. They apply automatically when the bot is
+(`00000N_<name>.{up,down}.sql`); `000001_init` is the baseline schema and the
+eight files after it layer on top. They apply automatically when the bot is
 built with the `migrate` build tag (the default in the Dockerfile and
 `make run`). To reset a dev database from scratch:
 
@@ -429,7 +435,7 @@ internal/repo
     localfs             # local filesystem MediaSource (MEDIA_SOURCE=local)
 internal/entity         # domain types
 migrations              # incremental SQL migrations
-pkg/{httpserver,logger,postgres}
+pkg/{httpserver,logger,postgres,schedulespec}
 sample                  # default fallback image (embedded)
 ui                      # Vue 3 admin dashboard (git submodule)
 ```
@@ -438,9 +444,15 @@ ui                      # Vue 3 admin dashboard (git submodule)
 
 - Weighted album selection that biases toward higher `positive_rating`
   (`ORDER BY RANDOM() * (1 + positive_rating) DESC`).
-- Move in-code tunables (`albumBatchSize`, `reactMapMaxSize`,
-  `downloadTimeout`, `videoUploadLimit`, `maxSyncNotifyMessages`,
-  `scheduleReconcileInterval`) to env when deployments need to differ.
+- Move the remaining in-code tunables (`albumBatchSize`, `reactMapMaxSize`,
+  `downloadTimeout`, `maxSyncNotifyMessages`, `scheduleReconcileInterval`) to
+  env when deployments need to differ.
+- **Rule style edits do not reach a running scheduled goroutine** — put
+  `message_style` and `name` into `scheduledRuleSig`, or re-read the rule at
+  fire time instead of capturing it at goroutine start.
+- `downloadPool` skips individual download failures with only a log line, so a
+  flaky fetch looks the same as an album that had fewer images. Report them the
+  way oversized files are reported.
 - Push scheduled-rule reconciliation on rule change instead of the ~30s poll.
 - Anti-repeat `last_sent_at` is global; consider per-rule send history if
   multiple scheduled rules should not share exclusion state.

@@ -188,34 +188,13 @@ func (b *Bot) cmdFullAlbumButton(s *discordgo.Session, i *discordgo.InteractionC
 			b.editInteractionContent(s, i, "Album not found.")
 			return
 		}
-
-		cover, hasCover, err := b.imagesUC.GetAlbumCover(ctx, album.Name)
+		post, err := b.loadFullAlbum(ctx, album.Name)
 		if err != nil {
-			b.l.Error(fmt.Errorf("cmdFullAlbumButton GetAlbumCover %q: %w", album.Name, err))
-			b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** not found.", album.Name))
-			return
-		}
-		imgs, err := b.imagesUC.GetFullAlbum(ctx, album.Name)
-		if err != nil {
-			b.l.Error(fmt.Errorf("cmdFullAlbumButton GetFullAlbum %q: %w", album.Name, err))
-			b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** not found.", album.Name))
+			b.editInteractionContent(s, i, capitalize(err.Error())+".")
 			return
 		}
 
-		total := len(imgs)
-		if hasCover {
-			total++
-		}
-		if total == 0 {
-			b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** is empty.", album.Name))
-			return
-		}
-
-		thread, err := b.session.MessageThreadStartComplex(channelID, messageID, &discordgo.ThreadStart{
-			Name:                fmt.Sprintf("Full album: %s", album.Name),
-			AutoArchiveDuration: 60,
-			Type:                discordgo.ChannelTypeGuildPublicThread,
-		})
+		thread, err := b.startAlbumThread(channelID, messageID, album.Name)
 		if err != nil {
 			// Most commonly the message already has a thread (someone pressed first).
 			b.vlog("cmdFullAlbumButton ThreadStart %q: %v", album.Name, err)
@@ -223,9 +202,9 @@ func (b *Bot) cmdFullAlbumButton(s *discordgo.Session, i *discordgo.InteractionC
 			return
 		}
 
-		sent, remaining := b.sendFullAlbumPage(ctx, thread.ID, album, cover, hasCover, imgs, 0)
+		sent, remaining := b.sendFullAlbumPage(ctx, thread.ID, album, post.Cover, post.HasCover, post.Images, 0)
 		b.editInteractionContent(s, i, fullAlbumSummary(album.Name, thread.ID, sent, remaining))
-		b.vlog("full-album button completed for %s: album=%q total=%d", user, album.Name, total)
+		b.vlog("full-album button completed for %s: album=%q total=%d", user, album.Name, post.Total())
 	}()
 }
 
@@ -308,7 +287,7 @@ func (b *Bot) cmdImage(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			b.editInteractionContent(s, i, "Failed to get image.")
 			return
 		}
-		files, err := b.downloadImages(ctx, []entity.Image{img})
+		files, err := b.downloadPool(ctx, []entity.Image{img})
 		if err != nil {
 			b.l.Error(fmt.Errorf("cmdImage download: %w", err))
 			b.editInteractionContent(s, i, "Failed to download image.")
@@ -331,7 +310,7 @@ func (b *Bot) cmdRngImage(s *discordgo.Session, i *discordgo.InteractionCreate) 
 			b.editInteractionContent(s, i, "Failed to get a random image.")
 			return
 		}
-		files, err := b.downloadImages(ctx, []entity.Image{img})
+		files, err := b.downloadPool(ctx, []entity.Image{img})
 		if err != nil {
 			b.l.Error(fmt.Errorf("cmdRngImage download: %w", err))
 			b.editInteractionContent(s, i, "Failed to download image.")
@@ -398,48 +377,28 @@ func (b *Bot) cmdFullAlbum(s *discordgo.Session, i *discordgo.InteractionCreate)
 	go func() {
 		ctx := context.Background()
 
-		cover, hasCover, err := b.imagesUC.GetAlbumCover(ctx, albumName)
+		post, err := b.loadFullAlbum(ctx, albumName)
 		if err != nil {
-			b.l.Error(fmt.Errorf("cmdFullAlbum GetAlbumCover %q: %w", albumName, err))
-			b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** not found.", albumName))
+			b.editInteractionContent(s, i, capitalize(err.Error())+".")
 			return
 		}
-		imgs, err := b.imagesUC.GetFullAlbum(ctx, albumName)
-		if err != nil {
-			b.l.Error(fmt.Errorf("cmdFullAlbum GetFullAlbum %q: %w", albumName, err))
-			b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** not found.", albumName))
-			return
-		}
-
-		total := len(imgs)
-		if hasCover {
-			total++
-		}
-		if total == 0 {
-			b.editInteractionContent(s, i, fmt.Sprintf("Album **%s** is empty.", albumName))
-			return
-		}
-		b.vlog("/full_album %q: total=%d images, hasCover=%v", albumName, total, hasCover)
+		b.vlog("/full_album %q: total=%d images, hasCover=%v", albumName, post.Total(), post.HasCover)
 
 		msg, err := b.session.InteractionResponse(i.Interaction)
 		if err != nil {
 			b.l.Error(fmt.Errorf("cmdFullAlbum InteractionResponse: %w", err))
 			return
 		}
-		thread, err := b.session.MessageThreadStartComplex(msg.ChannelID, msg.ID, &discordgo.ThreadStart{
-			Name:                fmt.Sprintf("Full album: %s", albumName),
-			AutoArchiveDuration: 60,
-			Type:                discordgo.ChannelTypeGuildPublicThread,
-		})
+		thread, err := b.startAlbumThread(msg.ChannelID, msg.ID, albumName)
 		if err != nil {
 			b.l.Error(fmt.Errorf("cmdFullAlbum ThreadStart: %w", err))
 			b.editInteractionContent(s, i, "Failed to create thread.")
 			return
 		}
 
-		sent, remaining := b.sendFullAlbumPage(ctx, thread.ID, albumRefFrom(albumName, cover, hasCover, imgs), cover, hasCover, imgs, 0)
+		sent, remaining := b.sendFullAlbumPage(ctx, thread.ID, post.Album, post.Cover, post.HasCover, post.Images, 0)
 		b.editInteractionContent(s, i, fullAlbumSummary(albumName, thread.ID, sent, remaining))
-		b.vlog("/full_album completed for %s: album=%q total=%d", user, albumName, total)
+		b.vlog("/full_album completed for %s: album=%q total=%d", user, albumName, post.Total())
 	}()
 }
 

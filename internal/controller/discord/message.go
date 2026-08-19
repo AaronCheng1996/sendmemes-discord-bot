@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/bwmarrin/discordgo"
 
@@ -357,4 +358,15 @@ func (b *Bot) channelSendEmbed(channelID string, embed *discordgo.MessageEmbed, 
 		b.autoReact(channelID, msg.ID)
 	}
 	return msg
+}
+
+// capitalize upper-cases the first letter, turning an error string into the
+// start of a sentence. Errors are written lowercase by Go convention but read
+// as messages here.
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	return string(unicode.ToUpper(r[0])) + string(r[1:])
 }

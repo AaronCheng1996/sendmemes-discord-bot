@@ -143,7 +143,7 @@ func (b *Bot) msgImage(ctx context.Context, s *discordgo.Session, channelID stri
 		_, _ = s.ChannelMessageSend(channelID, "Failed to get image.")
 		return
 	}
-	files, err := b.downloadImages(ctx, []entity.Image{img})
+	files, err := b.downloadPool(ctx, []entity.Image{img})
 	if err != nil {
 		b.l.Error(fmt.Errorf("msgImage download: %w", err))
 		return
@@ -160,7 +160,7 @@ func (b *Bot) msgRngImage(ctx context.Context, s *discordgo.Session, channelID s
 		_, _ = s.ChannelMessageSend(channelID, "Failed to get a random image.")
 		return
 	}
-	files, err := b.downloadImages(ctx, []entity.Image{img})
+	files, err := b.downloadPool(ctx, []entity.Image{img})
 	if err != nil {
 		b.l.Error(fmt.Errorf("msgRngImage download: %w", err))
 		return
@@ -200,35 +200,24 @@ func (b *Bot) msgFullAlbum(ctx context.Context, s *discordgo.Session, channelID,
 		b.l.Error(fmt.Errorf("msgFullAlbum ChannelMessageSend: %w", err))
 		return
 	}
-	thread, err := s.MessageThreadStartComplex(channelID, initMsg.ID, &discordgo.ThreadStart{
-		Name:                fmt.Sprintf("Full album: %s", albumName),
-		AutoArchiveDuration: 60,
-		Type:                discordgo.ChannelTypeGuildPublicThread,
-	})
+	// Loaded before the thread exists so an empty or missing album reports itself
+	// in the channel instead of leaving an empty thread behind.
+	post, err := b.loadFullAlbum(ctx, albumName)
+	if err != nil {
+		_, _ = s.ChannelMessageEdit(channelID, initMsg.ID, capitalize(err.Error())+".")
+		return
+	}
+
+	thread, err := b.startAlbumThread(channelID, initMsg.ID, albumName)
 	if err != nil {
 		b.l.Error(fmt.Errorf("msgFullAlbum ThreadStart: %w", err))
 		_, _ = s.ChannelMessageEdit(channelID, initMsg.ID, "Failed to create thread.")
 		return
 	}
 
-	cover, hasCover, err := b.imagesUC.GetAlbumCover(ctx, albumName)
-	if err != nil {
-		b.l.Error(fmt.Errorf("msgFullAlbum GetAlbumCover %q: %w", albumName, err))
-		return
-	}
-	imgs, err := b.imagesUC.GetFullAlbum(ctx, albumName)
-	if err != nil {
-		b.l.Error(fmt.Errorf("msgFullAlbum GetFullAlbum %q: %w", albumName, err))
-		return
-	}
-
-	total := len(imgs)
-	if hasCover {
-		total++
-	}
-	b.vlog("!full_album %q: total=%d images, hasCover=%v", albumName, total, hasCover)
-	sent, remaining := b.sendFullAlbumPage(ctx, thread.ID, albumRefFrom(albumName, cover, hasCover, imgs), cover, hasCover, imgs, 0)
+	b.vlog("!full_album %q: total=%d images, hasCover=%v", albumName, post.Total(), post.HasCover)
+	sent, remaining := b.sendFullAlbumPage(ctx, thread.ID, post.Album, post.Cover, post.HasCover, post.Images, 0)
 
 	_, _ = s.ChannelMessageEdit(channelID, initMsg.ID, fullAlbumSummary(albumName, thread.ID, sent, remaining))
-	b.vlog("!full_album completed in channel %s: album=%q total=%d", channelID, albumName, total)
+	b.vlog("!full_album completed in channel %s: album=%q total=%d", channelID, albumName, post.Total())
 }

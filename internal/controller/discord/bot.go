@@ -109,17 +109,16 @@ type fileEntry struct {
 
 func (f fileEntry) size() int { return len(f.data) }
 
-// fitToLimit selects files from pool to send as one Discord message.
+// fitToLimit picks one message worth of files out of pool and discards the rest.
+// It is the sampling half of the pair — chunkOrdered is the packing half, for
+// callers that must post everything.
 //
-// Strategy:
-//  1. Shuffle non-cover candidates for random selection order.
-//  2. Fill selected with cover + first targetCount−1 shuffled candidates.
-//  3. Single loop until one of three conditions is met:
-//     – Condition 1: selected == targetCount and total size ≤ maxBytes.
-//     – Condition 2: total size ≤ maxBytes but pool exhausted (sends what we have).
-//     – Condition 3: pool exhausted with nothing fitting — logs a warning and returns nil.
-//     Within the loop: if over limit, remove the largest non-cover then refill with the
-//     next shuffled candidate; repeat until within limit or conditions above are met.
+// The album cover leads the selection when there is one, then shuffled
+// candidates fill up to targetCount. While the selection is over maxBytes the
+// largest non-cover file is evicted and the next candidate takes its place, so
+// a batch of big images degrades into fewer images rather than none.
+//
+// Returns nil only when not one file fits on its own.
 func fitToLimit(l logger.Interface, pool []fileEntry, targetCount, maxBytes int) []fileEntry {
 	if len(pool) == 0 {
 		return nil
@@ -411,6 +410,60 @@ func (b *Bot) trackScheduledMsg(msgID string, albumID int) {
 // Shared full-album thread sender
 // ---------------------------------------------------------------------------
 
+// fullAlbumPost is everything the three /full_album entry points look up before
+// any of them can open a thread. They differ in where the thread hangs and how
+// they reply, not in what they need loaded.
+type fullAlbumPost struct {
+	Album    entity.Album
+	Cover    entity.Image
+	HasCover bool
+	Images   []entity.Image // non-cover, ordered by id
+}
+
+// Total counts the cover alongside the album's other images.
+func (p fullAlbumPost) Total() int {
+	if p.HasCover {
+		return len(p.Images) + 1
+	}
+	return len(p.Images)
+}
+
+// loadFullAlbum reads an album by name for a full-album post, treating an empty
+// album as a failure since there is nothing to open a thread for. The returned
+// error is already worded for a channel.
+func (b *Bot) loadFullAlbum(ctx context.Context, albumName string) (fullAlbumPost, error) {
+	cover, hasCover, err := b.imagesUC.GetAlbumCover(ctx, albumName)
+	if err != nil {
+		b.l.Error(fmt.Errorf("loadFullAlbum GetAlbumCover %q: %w", albumName, err))
+		return fullAlbumPost{}, fmt.Errorf("album **%s** not found", albumName)
+	}
+	imgs, err := b.imagesUC.GetFullAlbum(ctx, albumName)
+	if err != nil {
+		b.l.Error(fmt.Errorf("loadFullAlbum GetFullAlbum %q: %w", albumName, err))
+		return fullAlbumPost{}, fmt.Errorf("album **%s** not found", albumName)
+	}
+	post := fullAlbumPost{
+		Album:    albumRefFrom(albumName, cover, hasCover, imgs),
+		Cover:    cover,
+		HasCover: hasCover,
+		Images:   imgs,
+	}
+	if post.Total() == 0 {
+		return fullAlbumPost{}, fmt.Errorf("album **%s** is empty", albumName)
+	}
+	return post, nil
+}
+
+// startAlbumThread opens the thread a full-album post goes into, hanging it off
+// whichever message the request produced.
+func (b *Bot) startAlbumThread(channelID, messageID, albumName string) (*discordgo.Channel, error) {
+	return b.session.MessageThreadStartComplex(channelID, messageID, &discordgo.ThreadStart{
+		Name:                fmt.Sprintf("Full album: %s", albumName),
+		AutoArchiveDuration: 60,
+		Type:                discordgo.ChannelTypeGuildPublicThread,
+	})
+}
+
 // albumRefFrom builds the minimal album identity a full-album post needs — the
 // id for the continue button, the name for captions — out of rows already
 // fetched, so the name-only entry points need no extra lookup.
@@ -628,12 +681,6 @@ func (b *Bot) downloadPool(ctx context.Context, imgs []entity.Image) ([]fileEntr
 // failed, and the operator fixes it differently, so the two are not merged.
 var errNothingFits = errors.New("no image fits within the upload budget")
 
-// downloadImages downloads imgs with no size fitting: it is for the
-// single-image paths, where there is no batch to trim.
-func (b *Bot) downloadImages(ctx context.Context, imgs []entity.Image) ([]fileEntry, error) {
-	return b.downloadPool(ctx, imgs)
-}
-
 // downloadAndFit downloads imgs as a pool, then applies fitToLimit to produce
 // at most albumBatchSize files that fit channelID's upload budget.
 func (b *Bot) downloadAndFit(ctx context.Context, channelID string, imgs []entity.Image) ([]fileEntry, error) {
@@ -653,10 +700,6 @@ func (b *Bot) downloadAndFitN(ctx context.Context, channelID string, imgs []enti
 	}
 	return selected, nil
 }
-
-// ---------------------------------------------------------------------------
-// Send helpers
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Typed album delivery
@@ -773,16 +816,16 @@ const spoilerPrefix = "SPOILER_"
 
 // applySpoiler prefixes every file's name with spoilerPrefix when nsfw is set,
 // so config.NSFW albums post their attachments blurred behind a click-to-reveal.
-func applySpoiler(files []fileEntry, nsfw bool) []fileEntry {
+// It renames in place.
+func applySpoiler(files []fileEntry, nsfw bool) {
 	if !nsfw {
-		return files
+		return
 	}
 	for i := range files {
 		if !strings.HasPrefix(files[i].name, spoilerPrefix) {
 			files[i].name = spoilerPrefix + files[i].name
 		}
 	}
-	return files
 }
 
 // excludeCover returns imgs without any image flagged as the album cover,
@@ -846,7 +889,7 @@ func (b *Bot) deliverSingle(ctx context.Context, channelID string, album entity.
 		b.l.Error(fmt.Errorf("deliverAlbum single GetRandomFromAlbum %q: %w", album.Name, err))
 		return nil
 	}
-	files, err := b.downloadImages(ctx, imgs)
+	files, err := b.downloadPool(ctx, imgs)
 	if err != nil {
 		b.reportDeliveryFailure(channelID, album, err)
 		return nil
@@ -913,7 +956,7 @@ func (b *Bot) deliverVideo(ctx context.Context, channelID string, album entity.A
 	// Video attachments don't render through embed.Image (Discord embeds only
 	// preview static images), so the video is just a sibling file attachment.
 	if video.SizeBytes > 0 && video.SizeBytes <= int64(b.uploadLimit(channelID)) {
-		files, derr := b.downloadImages(ctx, []entity.Image{video})
+		files, derr := b.downloadPool(ctx, []entity.Image{video})
 		if derr != nil {
 			b.l.Error(fmt.Errorf("deliverAlbum video download %q: %w", album.Name, derr))
 			return nil
@@ -992,14 +1035,14 @@ func (b *Bot) deliverCustom(ctx context.Context, channelID string, album entity.
 
 // sendAlbumToChannel downloads imgs with pool fitting and sends to channel.
 // Returns the sent Discord message (nil on failure) so callers can track it.
-func (b *Bot) sendAlbumToChannel(ctx context.Context, s *discordgo.Session, channelID, caption string, imgs []entity.Image) *discordgo.Message {
+func (b *Bot) sendAlbumToChannel(ctx context.Context, s *discordgo.Session, channelID, caption string, imgs []entity.Image) {
 	files, err := b.downloadAndFit(ctx, channelID, imgs)
 	if err != nil {
 		b.l.Error(fmt.Errorf("sendAlbumToChannel downloadAndFit: %w", err))
 		_, _ = s.ChannelMessageSend(channelID, "⚠️ Could not post these images (see the server logs).")
-		return nil
+		return
 	}
-	return b.channelSendFiles(channelID, caption, caption, files)
+	b.channelSendFiles(channelID, caption, caption, files)
 }
 
 // restErrorCode returns Discord's numeric error code from err, or 0 when err
@@ -1126,17 +1169,18 @@ func (b *Bot) sendWithBackoff(channelID, what string, entries []fileEntry, paylo
 	}
 }
 
-// channelSendFiles sends file attachments to a channel with an optional bold caption.
-// Returns the sent message (nil on failure).
-func (b *Bot) channelSendFiles(channelID, caption, what string, files []fileEntry) *discordgo.Message {
+// channelSendFiles sends file attachments to a channel with an optional bold
+// caption. Failures are reported by sendWithBackoff, so there is nothing for a
+// caller to inspect.
+func (b *Bot) channelSendFiles(channelID, caption, what string, files []fileEntry) {
 	if len(files) == 0 {
-		return nil
+		return
 	}
 	payload := &discordgo.MessageSend{}
 	if caption != "" {
 		payload.Content = "**" + caption + "**"
 	}
-	return b.sendWithBackoff(channelID, what, files, payload)
+	b.sendWithBackoff(channelID, what, files, payload)
 }
 
 // ---------------------------------------------------------------------------
