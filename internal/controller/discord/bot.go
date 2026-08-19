@@ -137,6 +137,15 @@ func fitToLimit(l logger.Interface, pool []fileEntry, targetCount, maxBytes int)
 		}
 	}
 
+	// A cover bigger than the budget can never be sent, and pinning it drags the
+	// message down with it: every candidate gets evicted below trying to make
+	// room that does not exist, and the message ends up empty even though
+	// ordinary images would have fitted. Drop it before selecting anything.
+	if cover != nil && cover.size() > maxBytes {
+		l.Warn("fitToLimit: cover %q (%d bytes) is over the %d-byte budget, selecting without it", cover.name, cover.size(), maxBytes)
+		cover = nil
+	}
+
 	// Shuffle for random selection order from the start.
 	rand.Shuffle(len(candidates), func(i, j int) {
 		candidates[i], candidates[j] = candidates[j], candidates[i]
@@ -179,8 +188,10 @@ func fitToLimit(l logger.Interface, pool []fileEntry, targetCount, maxBytes int)
 			}
 		}
 		if maxIdx == -1 {
-			// Only cover remains and it alone exceeds the limit — condition 3.
-			l.Warn("fitToLimit: cover alone exceeds Discord size limit, skipping message")
+			// Unreachable once an oversized cover is dropped up front, since a
+			// cover that fits cannot be over the limit on its own. Kept as a
+			// guard rather than a panic.
+			l.Warn("fitToLimit: nothing left to evict and still over budget, skipping message")
 			return nil
 		}
 		totalBytes -= selected[maxIdx].size()
@@ -487,7 +498,7 @@ func (b *Bot) sendFullAlbumPage(
 		case pool[0].size() > budget:
 			oversized = append(oversized, pool[0])
 		default:
-			b.channelSendFiles(b.session, channelID, album.Name+" — Cover", entriesToFiles(pool))
+			b.channelSendFiles(channelID, album.Name+" — Cover", albumLabel(album), pool)
 		}
 	}
 
@@ -507,7 +518,7 @@ func (b *Bot) sendFullAlbumPage(
 		chunks, tooBig := chunkOrdered(b.l, pool, albumBatchSize, budget)
 		oversized = append(oversized, tooBig...)
 		for _, chunk := range chunks {
-			b.channelSendFiles(b.session, channelID, "", entriesToFiles(chunk))
+			b.channelSendFiles(channelID, "", albumLabel(album), chunk)
 			sent += len(chunk)
 		}
 	}
@@ -523,7 +534,7 @@ func (b *Bot) sendFullAlbumPage(
 	remaining = len(imgs) - end
 	if paged && remaining > 0 {
 		content := fmt.Sprintf("Posted %d of %d images. %d left.", end, len(imgs), remaining)
-		if b.channelSendPlain(channelID, content, nil, fullAlbumMoreButtonRow(album.ID, end, remaining)) == nil {
+		if b.channelSendPlain(channelID, content, albumLabel(album), nil, fullAlbumMoreButtonRow(album.ID, end, remaining)) == nil {
 			b.l.Error(fmt.Errorf("sendFullAlbumPage %q: failed to post the continue button at offset %d", album.Name, end))
 		}
 	}
@@ -612,36 +623,35 @@ func (b *Bot) downloadPool(ctx context.Context, imgs []entity.Image) ([]fileEntr
 	return entries, nil
 }
 
-// downloadImages downloads imgs and returns discordgo.File slice directly,
-// with no size fitting: it is for the single-image paths, where there is no
-// batch to trim and nothing to do about a file Discord will not take except
-// report the rejection (see noteSendFailure).
-func (b *Bot) downloadImages(ctx context.Context, imgs []entity.Image) ([]*discordgo.File, error) {
-	pool, err := b.downloadPool(ctx, imgs)
-	if err != nil {
-		return nil, err
-	}
-	return entriesToFiles(pool), nil
+// errNothingFits reports that every downloaded image was individually larger
+// than the message budget. It is a different problem from a download that
+// failed, and the operator fixes it differently, so the two are not merged.
+var errNothingFits = errors.New("no image fits within the upload budget")
+
+// downloadImages downloads imgs with no size fitting: it is for the
+// single-image paths, where there is no batch to trim.
+func (b *Bot) downloadImages(ctx context.Context, imgs []entity.Image) ([]fileEntry, error) {
+	return b.downloadPool(ctx, imgs)
 }
 
 // downloadAndFit downloads imgs as a pool, then applies fitToLimit to produce
 // at most albumBatchSize files that fit channelID's upload budget.
-func (b *Bot) downloadAndFit(ctx context.Context, channelID string, imgs []entity.Image) ([]*discordgo.File, error) {
+func (b *Bot) downloadAndFit(ctx context.Context, channelID string, imgs []entity.Image) ([]fileEntry, error) {
 	return b.downloadAndFitN(ctx, channelID, imgs, albumBatchSize)
 }
 
 // downloadAndFitN is downloadAndFit with a caller-chosen target count, used by
 // delivery paths whose per-album send config overrides the batch size.
-func (b *Bot) downloadAndFitN(ctx context.Context, channelID string, imgs []entity.Image, targetCount int) ([]*discordgo.File, error) {
+func (b *Bot) downloadAndFitN(ctx context.Context, channelID string, imgs []entity.Image, targetCount int) ([]fileEntry, error) {
 	pool, err := b.downloadPool(ctx, imgs)
 	if err != nil {
 		return nil, err
 	}
 	selected := fitToLimit(b.l, pool, targetCount, b.uploadLimit(channelID))
 	if len(selected) == 0 {
-		return nil, fmt.Errorf("downloadAndFit: no images fit within Discord size limit")
+		return nil, errNothingFits
 	}
-	return entriesToFiles(selected), nil
+	return selected, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -742,11 +752,11 @@ func albumMessage(style entity.MessageStyle, album entity.Album, shown, defaultT
 
 // firstFileName names the attachment an embed should render large, or "" when
 // there is nothing to attach.
-func firstFileName(files []*discordgo.File) string {
+func firstFileName(files []fileEntry) string {
 	if len(files) == 0 {
 		return ""
 	}
-	return files[0].Name
+	return files[0].name
 }
 
 // batchSizeOrDefault returns cfg.BatchSize when positive, else fall.
@@ -763,13 +773,13 @@ const spoilerPrefix = "SPOILER_"
 
 // applySpoiler prefixes every file's name with spoilerPrefix when nsfw is set,
 // so config.NSFW albums post their attachments blurred behind a click-to-reveal.
-func applySpoiler(files []*discordgo.File, nsfw bool) []*discordgo.File {
+func applySpoiler(files []fileEntry, nsfw bool) []fileEntry {
 	if !nsfw {
 		return files
 	}
-	for _, f := range files {
-		if !strings.HasPrefix(f.Name, spoilerPrefix) {
-			f.Name = spoilerPrefix + f.Name
+	for i := range files {
+		if !strings.HasPrefix(files[i].name, spoilerPrefix) {
+			files[i].name = spoilerPrefix + files[i].name
 		}
 	}
 	return files
@@ -815,8 +825,7 @@ func (b *Bot) deliverRandom(ctx context.Context, channelID string, album entity.
 	}
 	files, err := b.downloadAndFitN(ctx, channelID, imgs, batchSize)
 	if err != nil {
-		b.l.Error(fmt.Errorf("deliverAlbum random downloadAndFit %q: %w", album.Name, err))
-		_, _ = b.session.ChannelMessageSend(channelID, "Failed to download images.")
+		b.reportDeliveryFailure(channelID, album, err)
 		return nil
 	}
 	applySpoiler(files, cfg.NSFW)
@@ -839,7 +848,7 @@ func (b *Bot) deliverSingle(ctx context.Context, channelID string, album entity.
 	}
 	files, err := b.downloadImages(ctx, imgs)
 	if err != nil {
-		b.l.Error(fmt.Errorf("deliverAlbum single download %q: %w", album.Name, err))
+		b.reportDeliveryFailure(channelID, album, err)
 		return nil
 	}
 	applySpoiler(files, cfg.NSFW)
@@ -873,7 +882,7 @@ func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.A
 
 	first := chunks[0]
 	totalPages := len(pages)
-	files := entriesToFiles(first)
+	files := first
 	applySpoiler(files, cfg.NSFW)
 
 	counts := b.albumCounts(ctx, album.ID)
@@ -951,7 +960,7 @@ func (b *Bot) deliverCustom(ctx context.Context, channelID string, album entity.
 		return nil
 	}
 
-	var files []*discordgo.File
+	var files []fileEntry
 	var sent, total int
 	if cfg.Ordered {
 		pool, derr := b.downloadPool(ctx, imgs)
@@ -964,12 +973,12 @@ func (b *Bot) deliverCustom(ctx context.Context, channelID string, album entity.
 			b.l.Warn("deliverAlbum custom: no images fit within Discord size limit (album %q)", album.Name)
 			return nil
 		}
-		files = entriesToFiles(chunks[0])
+		files = chunks[0]
 		sent, total = len(chunks[0]), len(imgs)
 	} else {
 		files, err = b.downloadAndFitN(ctx, channelID, imgs, batchSize)
 		if err != nil {
-			b.l.Error(fmt.Errorf("deliverAlbum custom downloadAndFit %q: %w", album.Name, err))
+			b.reportDeliveryFailure(channelID, album, err)
 			return nil
 		}
 		sent, total = len(files), len(imgs)
@@ -987,10 +996,10 @@ func (b *Bot) sendAlbumToChannel(ctx context.Context, s *discordgo.Session, chan
 	files, err := b.downloadAndFit(ctx, channelID, imgs)
 	if err != nil {
 		b.l.Error(fmt.Errorf("sendAlbumToChannel downloadAndFit: %w", err))
-		_, _ = s.ChannelMessageSend(channelID, "Failed to download images.")
+		_, _ = s.ChannelMessageSend(channelID, "⚠️ Could not post these images (see the server logs).")
 		return nil
 	}
-	return b.channelSendFiles(s, channelID, caption, files)
+	return b.channelSendFiles(channelID, caption, caption, files)
 }
 
 // restErrorCode returns Discord's numeric error code from err, or 0 when err
@@ -1007,14 +1016,52 @@ func restErrorCode(err error) int {
 // gets its own text because it is both the most common failure and the only one
 // the operator can act on directly: the configured budget is above what this
 // server actually accepts.
-func sendFailureNotice(files []*discordgo.File, err error, budget int) string {
-	if restErrorCode(err) == discordgo.ErrCodeRequestEntityTooLarge {
-		return fmt.Sprintf(
-			"⚠️ Discord rejected %d attachment(s) as too large. The bot is allowing up to %s per message, "+
-				"which is more than this server accepts — lower `DISCORD_UPLOAD_LIMIT_MB`.",
-			len(files), humanBytes(budget))
+func sendFailureNotice(what string, files []fileEntry, err error, budget int) string {
+	subject := "This post"
+	if what != "" {
+		subject = what
 	}
-	return "⚠️ Failed to post attachments here (see the server logs for details)."
+	if restErrorCode(err) == discordgo.ErrCodeRequestEntityTooLarge {
+		// Reaching here means the backoff already shed the batch down to one
+		// file and Discord still refused it, so naming that file is the useful
+		// thing to say.
+		if len(files) == 1 {
+			return fmt.Sprintf(
+				"⚠️ %s — Discord refused `%s` (%s) on its own. The bot is allowing %s per message, "+
+					"which is above what this server accepts: lower `DISCORD_UPLOAD_LIMIT_MB`.",
+				subject, files[0].name, humanBytes(files[0].size()), humanBytes(budget))
+		}
+		return fmt.Sprintf(
+			"⚠️ %s — Discord rejected %d attachment(s) as too large. The bot is allowing %s per message; "+
+				"lower `DISCORD_UPLOAD_LIMIT_MB`.",
+			subject, len(files), humanBytes(budget))
+	}
+	return fmt.Sprintf("⚠️ %s — could not be posted (see the server logs for details).", subject)
+}
+
+// albumLabel identifies an album in a channel message. The id is included
+// because album names are not unique enough to search the dashboard by.
+func albumLabel(album entity.Album) string {
+	return fmt.Sprintf("**%s** (album #%d)", album.Name, album.ID)
+}
+
+// reportDeliveryFailure explains in the channel why an album produced no post.
+// This path used to say "Failed to download images." for both causes, which was
+// wrong for the commoner one — the images downloaded fine, they just did not
+// fit — and named neither the album nor the size involved.
+func (b *Bot) reportDeliveryFailure(channelID string, album entity.Album, err error) {
+	b.l.Error(fmt.Errorf("deliver %q: %w", album.Name, err))
+	var text string
+	if errors.Is(err, errNothingFits) {
+		text = fmt.Sprintf(
+			"⚠️ %s — every image in it is larger than the %s this channel allows, so nothing could be posted.",
+			albumLabel(album), humanBytes(b.uploadLimit(channelID)))
+	} else {
+		text = fmt.Sprintf("⚠️ %s — the images could not be downloaded (see the server logs).", albumLabel(album))
+	}
+	if _, sendErr := b.session.ChannelMessageSend(channelID, text); sendErr != nil {
+		b.l.Error(fmt.Errorf("reportDeliveryFailure %q: %w", album.Name, sendErr))
+	}
 }
 
 // noteSendFailure logs a failed send and says so in the channel, at most once
@@ -1023,16 +1070,16 @@ func sendFailureNotice(files []*discordgo.File, err error, budget int) string {
 // Logging alone is not enough: a send that fails quietly is indistinguishable
 // from an album that had nothing to post, which is how an over-budget batch
 // went unnoticed for a year.
-func (b *Bot) noteSendFailure(channelID, op string, files []*discordgo.File, err error) {
-	b.l.Error(fmt.Errorf("%s: %w", op, err))
+func (b *Bot) noteSendFailure(channelID, what string, files []fileEntry, err error) {
+	b.l.Error(fmt.Errorf("send to %s (%s): %w", channelID, what, err))
 	if !b.claimFailureNotice(channelID) {
 		return
 	}
-	notice := sendFailureNotice(files, err, b.uploadLimit(channelID))
+	notice := sendFailureNotice(what, files, err, b.uploadLimit(channelID))
 	if _, sendErr := b.session.ChannelMessageSend(channelID, notice); sendErr != nil {
 		// Nothing further to try: a channel that refuses a plain text message
 		// will not accept an explanation of why it refused the last one.
-		b.l.Error(fmt.Errorf("%s: could not post the failure notice: %w", op, sendErr))
+		b.l.Error(fmt.Errorf("could not post the failure notice to %s: %w", channelID, sendErr))
 	}
 }
 
@@ -1051,22 +1098,45 @@ func (b *Bot) claimFailureNotice(channelID string) bool {
 	return true
 }
 
+// sendWithBackoff posts payload, shedding half its attachments and retrying
+// whenever Discord rejects the request as too large.
+//
+// The configured budget is a guess at a number Discord never states outright:
+// account tier, boost level and per-server policy all move it, and it can
+// change under a running bot. A 40005 is the only authoritative reading of the
+// real limit, so a rejection drops half the batch and tries again rather than
+// throwing the whole post away. Attachments are rebuilt from their entries on
+// every attempt because the failed request consumed the previous readers.
+//
+// what names the subject for the failure notice; empty is allowed.
+func (b *Bot) sendWithBackoff(channelID, what string, entries []fileEntry, payload *discordgo.MessageSend) *discordgo.Message {
+	for {
+		payload.Files = entriesToFiles(entries)
+		msg, err := b.session.ChannelMessageSendComplex(channelID, payload)
+		if err == nil {
+			return msg
+		}
+		// Keep the first attachment: an embed's attachment:// image points at it.
+		if restErrorCode(err) != discordgo.ErrCodeRequestEntityTooLarge || len(entries) <= 1 {
+			b.noteSendFailure(channelID, what, entries, err)
+			return nil
+		}
+		entries = entries[:len(entries)/2]
+		b.l.Warn("channel %s rejected the message as too large, retrying with %d attachment(s)", channelID, len(entries))
+	}
+}
+
 // channelSendFiles sends file attachments to a channel with an optional bold caption.
 // Returns the sent message (nil on failure).
-func (b *Bot) channelSendFiles(s *discordgo.Session, channelID, caption string, files []*discordgo.File) *discordgo.Message {
+func (b *Bot) channelSendFiles(channelID, caption, what string, files []fileEntry) *discordgo.Message {
 	if len(files) == 0 {
 		return nil
 	}
-	payload := &discordgo.MessageSend{Files: files}
+	payload := &discordgo.MessageSend{}
 	if caption != "" {
 		payload.Content = "**" + caption + "**"
 	}
-	msg, err := s.ChannelMessageSendComplex(channelID, payload)
-	if err != nil {
-		b.noteSendFailure(channelID, "channelSendFiles", files, err)
-		return nil
-	}
-	return msg
+	return b.sendWithBackoff(channelID, what, files, payload)
 }
 
 // ---------------------------------------------------------------------------
@@ -1084,8 +1154,8 @@ func (b *Bot) deferInteraction(s *discordgo.Session, i *discordgo.InteractionCre
 }
 
 // editInteractionFiles edits the deferred interaction response with file attachments.
-func (b *Bot) editInteractionFiles(s *discordgo.Session, i *discordgo.InteractionCreate, caption string, files []*discordgo.File) {
-	edit := &discordgo.WebhookEdit{Files: files}
+func (b *Bot) editInteractionFiles(s *discordgo.Session, i *discordgo.InteractionCreate, caption string, files []fileEntry) {
+	edit := &discordgo.WebhookEdit{Files: entriesToFiles(files)}
 	if caption != "" {
 		c := "**" + caption + "**"
 		edit.Content = &c

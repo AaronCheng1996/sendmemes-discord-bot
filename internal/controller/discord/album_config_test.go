@@ -3,8 +3,6 @@ package discord
 import (
 	"testing"
 
-	"github.com/bwmarrin/discordgo"
-
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 )
 
@@ -54,26 +52,26 @@ func TestBatchSizeOrDefault(t *testing.T) {
 
 func TestApplySpoiler(t *testing.T) {
 	t.Run("nsfw false leaves names untouched", func(t *testing.T) {
-		files := []*discordgo.File{{Name: "a.png"}, {Name: "b.png"}}
+		files := []fileEntry{{name: "a.png"}, {name: "b.png"}}
 		applySpoiler(files, false)
-		if files[0].Name != "a.png" || files[1].Name != "b.png" {
+		if files[0].name != "a.png" || files[1].name != "b.png" {
 			t.Errorf("names changed unexpectedly: %+v", files)
 		}
 	})
 
 	t.Run("nsfw true prefixes every file", func(t *testing.T) {
-		files := []*discordgo.File{{Name: "a.png"}, {Name: "b.png"}}
+		files := []fileEntry{{name: "a.png"}, {name: "b.png"}}
 		applySpoiler(files, true)
-		if files[0].Name != "SPOILER_a.png" || files[1].Name != "SPOILER_b.png" {
+		if files[0].name != "SPOILER_a.png" || files[1].name != "SPOILER_b.png" {
 			t.Errorf("names not prefixed: %+v", files)
 		}
 	})
 
 	t.Run("nsfw true does not double-prefix an already-spoilered name", func(t *testing.T) {
-		files := []*discordgo.File{{Name: "SPOILER_a.png"}}
+		files := []fileEntry{{name: "SPOILER_a.png"}}
 		applySpoiler(files, true)
-		if files[0].Name != "SPOILER_a.png" {
-			t.Errorf("name double-prefixed: %q", files[0].Name)
+		if files[0].name != "SPOILER_a.png" {
+			t.Errorf("name double-prefixed: %q", files[0].name)
 		}
 	})
 }

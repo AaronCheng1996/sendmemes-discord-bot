@@ -91,10 +91,11 @@ other options.
   raises it further for everyone posting there. `DISCORD_UPLOAD_LIMIT_MB`
   (default 20) sets the floor; the bot reads the target server's Boost tier and
   uses the higher of the two. Guessing high is the costly direction — Discord
-  rejects an over-budget message whole, so every image in the batch is lost, not
-  just the one that pushed it over. When a send does fail, the bot says so in the
-  channel instead of only the log — at most one notice per channel per 30s, so a
-  broken full-album post does not become a wall of error messages.
+  rejects an over-budget message whole. Getting it wrong is survivable: a
+  rejection sheds half the attachments and retries, down to a single file, so a
+  post still lands while you correct the setting. When a send fails for good, the
+  bot says so in the channel instead of only the log — naming the album, and the
+  file when it is down to one — at most one notice per channel per 30s.
 - **Full album posts** — the 📖 button on a random post (or `/full_album`) opens
   a thread and posts every image in the album, 10 per message, in order. Files
   too large for a single Discord message are the only ones skipped, and the

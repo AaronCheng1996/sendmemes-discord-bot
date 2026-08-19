@@ -148,7 +148,7 @@ func (b *Bot) msgImage(ctx context.Context, s *discordgo.Session, channelID stri
 		b.l.Error(fmt.Errorf("msgImage download: %w", err))
 		return
 	}
-	b.channelSendFiles(s, channelID, "", files)
+	b.channelSendFiles(channelID, "", "the default image", files)
 	b.vlog("!image completed in channel %s", channelID)
 }
 
@@ -165,7 +165,7 @@ func (b *Bot) msgRngImage(ctx context.Context, s *discordgo.Session, channelID s
 		b.l.Error(fmt.Errorf("msgRngImage download: %w", err))
 		return
 	}
-	b.channelSendFiles(s, channelID, img.AlbumName, files)
+	b.channelSendFiles(channelID, img.AlbumName, img.AlbumName, files)
 	b.vlog("!rng_image completed in channel %s: album=%q", channelID, img.AlbumName)
 }
 

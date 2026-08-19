@@ -185,24 +185,35 @@ func TestRestErrorCode(t *testing.T) {
 func TestSendFailureNotice(t *testing.T) {
 	t.Parallel()
 
-	files := []*discordgo.File{{Name: "a.gif"}, {Name: "b.gif"}}
-
-	// 40005 is the one an operator can act on, so it names the setting, and it
-	// quotes the budget the bot actually applied rather than the raw setting.
+	files := []fileEntry{fe("a.gif", 100), fe("b.gif", 100)}
 	budget := limitBot(20).uploadLimit("chan")
-	tooLarge := sendFailureNotice(files, restErr(discordgo.ErrCodeRequestEntityTooLarge), budget)
-	for _, want := range []string{"2 attachment(s)", "19.5 MB", "DISCORD_UPLOAD_LIMIT_MB"} {
+	subject := "**Vacation** (album #7)"
+
+	// Every notice has to say which album it is about — an unattributed warning
+	// in a busy channel is not actionable.
+	tooLarge := sendFailureNotice(subject, files, restErr(discordgo.ErrCodeRequestEntityTooLarge), budget)
+	for _, want := range []string{subject, "2 attachment(s)", "19.5 MB", "DISCORD_UPLOAD_LIMIT_MB"} {
 		if !strings.Contains(tooLarge, want) {
 			t.Errorf("40005 notice missing %q:\n%s", want, tooLarge)
 		}
 	}
 
-	other := sendFailureNotice(files, errors.New("connection reset"), budget)
+	// Down to a single file, the useful thing to name is the file itself: the
+	// backoff has already proved the rest were not the problem.
+	lone := sendFailureNotice(subject, []fileEntry{fe("huge.gif", 30*1024*1024)},
+		restErr(discordgo.ErrCodeRequestEntityTooLarge), budget)
+	for _, want := range []string{"huge.gif", "30.0 MB"} {
+		if !strings.Contains(lone, want) {
+			t.Errorf("single-file notice missing %q:\n%s", want, lone)
+		}
+	}
+
+	other := sendFailureNotice(subject, files, errors.New("connection reset"), budget)
 	if strings.Contains(other, "DISCORD_UPLOAD_LIMIT_MB") {
 		t.Errorf("generic notice should not blame the size setting:\n%s", other)
 	}
-	if other == "" {
-		t.Error("generic failure produced no notice")
+	if !strings.Contains(other, subject) {
+		t.Errorf("generic notice does not say what failed:\n%s", other)
 	}
 }
 

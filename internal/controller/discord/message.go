@@ -308,32 +308,30 @@ func (b *Bot) sendStyled(
 	album entity.Album,
 	m renderedMessage,
 	thumbURL, embedImage string,
-	files []*discordgo.File,
+	files []fileEntry,
 	components []discordgo.MessageComponent,
 ) *discordgo.Message {
+	what := albumLabel(album)
 	if !m.UseEmbed {
-		return b.channelSendPlain(channelID, plainContent(m), files, components)
+		return b.channelSendPlain(channelID, plainContent(m), what, files, components)
 	}
 	embed := albumEmbed(album, thumbURL, m)
 	if embedImage != "" && m.Style.ImageEnabled() {
 		embed.Image = &discordgo.MessageEmbedImage{URL: "attachment://" + embedImage}
 	}
-	return b.channelSendEmbed(channelID, embed, files, components)
+	return b.channelSendEmbed(channelID, embed, what, files, components)
 }
 
 // channelSendPlain is the non-embed counterpart of channelSendEmbed: same
 // attachments, components and auto-reaction, just no embed wrapper.
-func (b *Bot) channelSendPlain(channelID, content string, files []*discordgo.File, components []discordgo.MessageComponent) *discordgo.Message {
-	msg, err := b.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+func (b *Bot) channelSendPlain(channelID, content, what string, files []fileEntry, components []discordgo.MessageComponent) *discordgo.Message {
+	msg := b.sendWithBackoff(channelID, what, files, &discordgo.MessageSend{
 		Content:    content,
-		Files:      files,
 		Components: components,
 	})
-	if err != nil {
-		b.noteSendFailure(channelID, "channelSendPlain", files, err)
-		return nil
+	if msg != nil {
+		b.autoReact(channelID, msg.ID)
 	}
-	b.autoReact(channelID, msg.ID)
 	return msg
 }
 
@@ -350,17 +348,13 @@ func (b *Bot) autoReact(channelID, messageID string) {
 // channelSendEmbed sends embed alongside optional file attachments and
 // message components (e.g. the Full-album button). Returns the sent message
 // (nil on failure).
-func (b *Bot) channelSendEmbed(channelID string, embed *discordgo.MessageEmbed, files []*discordgo.File, components []discordgo.MessageComponent) *discordgo.Message {
-	payload := &discordgo.MessageSend{
+func (b *Bot) channelSendEmbed(channelID string, embed *discordgo.MessageEmbed, what string, files []fileEntry, components []discordgo.MessageComponent) *discordgo.Message {
+	msg := b.sendWithBackoff(channelID, what, files, &discordgo.MessageSend{
 		Embeds:     []*discordgo.MessageEmbed{embed},
-		Files:      files,
 		Components: components,
+	})
+	if msg != nil {
+		b.autoReact(channelID, msg.ID)
 	}
-	msg, err := b.session.ChannelMessageSendComplex(channelID, payload)
-	if err != nil {
-		b.noteSendFailure(channelID, "channelSendEmbed", files, err)
-		return nil
-	}
-	b.autoReact(channelID, msg.ID)
 	return msg
 }

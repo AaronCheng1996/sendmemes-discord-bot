@@ -165,7 +165,7 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, rule entity.DeliveryRule,
 			if len(images) > len(selected) {
 				desc += fmt.Sprintf(" (showing %d of %d)", len(selected), len(images))
 			}
-			files := entriesToFiles(selected)
+			files := selected
 			msg := syncMessage(style, ev, album, len(selected), counts, sc, desc)
 			if b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, images), firstFileName(files), files, nil) != nil {
 				posted = true
