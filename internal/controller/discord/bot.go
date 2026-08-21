@@ -793,13 +793,19 @@ func albumMessage(style entity.MessageStyle, album entity.Album, shown, defaultT
 	return renderMessage(style, tokens, defaultCaption(album, shown, defaultTotal), sc.Test)
 }
 
-// firstFileName names the attachment an embed should render large, or "" when
-// there is nothing to attach.
-func firstFileName(files []fileEntry) string {
-	if len(files) == 0 {
-		return ""
+// firstEmbeddableName names the attachment an embed should render large.
+//
+// Only a still image works there — pointing embed.Image at a video leaves an
+// empty frame — so it skips past any video in the batch, and returns "" when
+// the batch is all video. The video still uploads and Discord gives it its own
+// inline player below the embed.
+func firstEmbeddableName(files []fileEntry) string {
+	for _, f := range files {
+		if kind, ok := entity.KindOfExtension(f.name); ok && kind == entity.MediaKindImage {
+			return f.name
+		}
 	}
-	return files[0].name
+	return ""
 }
 
 // batchSizeOrDefault returns cfg.BatchSize when positive, else fall.
@@ -845,14 +851,17 @@ func excludeCover(imgs []entity.Image) []entity.Image {
 // required for delivery to succeed, so any failure (or an empty imgs) just
 // means no thumbnail rather than an aborted send.
 func (b *Bot) resolveThumbURL(ctx context.Context, imgs []entity.Image) string {
-	if len(imgs) == 0 {
+	for _, img := range imgs {
+		// A video has no still to thumbnail, so keep looking.
+		if img.Kind == entity.MediaKindVideo {
+			continue
+		}
+		if url, err := b.imagesUC.ResolvePreviewURL(ctx, img); err == nil {
+			return url
+		}
 		return ""
 	}
-	url, err := b.imagesUC.ResolvePreviewURL(ctx, imgs[0])
-	if err != nil {
-		return ""
-	}
-	return url
+	return ""
 }
 
 // deliverRandom sends a size-fitted batch of random images (cover-first) with a
@@ -873,8 +882,8 @@ func (b *Bot) deliverRandom(ctx context.Context, channelID string, album entity.
 	}
 	applySpoiler(files, cfg.NSFW)
 	counts := b.albumCounts(ctx, album.ID)
-	msg := albumMessage(style, album, len(files), counts.imagesOr(len(imgs)), counts, sc)
-	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, imgs), firstFileName(files), files, fullAlbumButtonRow(album.ID))
+	msg := albumMessage(style, album, len(files), counts.totalOr(len(imgs)), counts, sc)
+	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, imgs), firstEmbeddableName(files), files, fullAlbumButtonRow(album.ID))
 }
 
 // deliverSingle sends exactly one *random* image from the album — cover
@@ -896,8 +905,8 @@ func (b *Bot) deliverSingle(ctx context.Context, channelID string, album entity.
 	}
 	applySpoiler(files, cfg.NSFW)
 	counts := b.albumCounts(ctx, album.ID)
-	msg := albumMessage(style, album, len(files), counts.imagesOr(len(imgs)), counts, sc)
-	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, imgs), firstFileName(files), files, nil)
+	msg := albumMessage(style, album, len(files), counts.totalOr(len(imgs)), counts, sc)
+	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, imgs), firstEmbeddableName(files), files, nil)
 }
 
 // deliverComic sends the album as an ordered comic: only the first ordered
@@ -929,11 +938,11 @@ func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.A
 	applySpoiler(files, cfg.NSFW)
 
 	counts := b.albumCounts(ctx, album.ID)
-	msg := albumMessage(style, album, len(first), counts.imagesOr(totalPages), counts, sc)
+	msg := albumMessage(style, album, len(first), counts.totalOr(totalPages), counts, sc)
 	if len(first) < totalPages {
 		msg.Body += "\nUse /full_album (or the button on a random post) for the rest."
 	}
-	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, pages), firstFileName(files), files, nil)
+	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, pages), firstEmbeddableName(files), files, nil)
 }
 
 // deliverVideo posts one random video from the album. Videos within the
@@ -1029,8 +1038,8 @@ func (b *Bot) deliverCustom(ctx context.Context, channelID string, album entity.
 	applySpoiler(files, cfg.NSFW)
 
 	counts := b.albumCounts(ctx, album.ID)
-	msg := albumMessage(style, album, sent, counts.imagesOr(total), counts, sc)
-	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, imgs), firstFileName(files), files, fullAlbumButtonRow(album.ID))
+	msg := albumMessage(style, album, sent, counts.totalOr(total), counts, sc)
+	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, imgs), firstEmbeddableName(files), files, fullAlbumButtonRow(album.ID))
 }
 
 // sendAlbumToChannel downloads imgs with pool fitting and sends to channel.

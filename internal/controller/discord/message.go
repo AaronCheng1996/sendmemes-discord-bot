@@ -80,18 +80,20 @@ type albumCounts struct {
 	Known  bool
 }
 
-// imagesOr/videosOr fall back to a caller-supplied count (usually the size of
-// the listing it already fetched) when the album lookup failed.
-func (c albumCounts) imagesOr(fallback int) int {
+// videosOr/totalOr fall back to a caller-supplied count (usually the size of the
+// listing already fetched) when the album lookup failed.
+func (c albumCounts) videosOr(fallback int) int {
 	if c.Known {
-		return c.Images
+		return c.Videos
 	}
 	return fallback
 }
 
-func (c albumCounts) videosOr(fallback int) int {
+// totalOr is for the modes that post images and videos alike — everything but
+// Video mode, which counts only what it can choose from.
+func (c albumCounts) totalOr(fallback int) int {
 	if c.Known {
-		return c.Videos
+		return c.Images + c.Videos
 	}
 	return fallback
 }

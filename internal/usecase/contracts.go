@@ -11,6 +11,12 @@ import (
 //go:generate mockgen -source=contracts.go -destination=./mocks_usecase_test.go -package=usecase_test
 
 type (
+	// Images serves album media. Everything that lists an album's contents
+	// (GetAlbumBatch, GetRandomFromAlbum, GetComicPages, GetFullAlbum, ...)
+	// includes videos alongside images: Discord plays an uploaded video inline,
+	// so outside Video mode a clip is just another attachment. Only
+	// GetRandomVideo restricts itself to videos, because Video mode wants those
+	// specifically.
 	Images interface {
 		// GetImage returns the default (fallback) image.
 		GetImage(ctx context.Context) (entity.Image, error)

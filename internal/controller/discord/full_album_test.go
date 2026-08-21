@@ -241,3 +241,46 @@ func TestFailureNoticeIsThrottledPerChannel(t *testing.T) {
 		t.Error("notice still suppressed after the interval elapsed")
 	}
 }
+
+// Outside Video mode an album's clips ride along as ordinary attachments, so a
+// batch can start with one. An embed's large image must still point at a still:
+// attachment:// a video leaves an empty frame where the picture should be.
+func TestFirstEmbeddableName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		files []fileEntry
+		want  string
+	}{
+		{name: "no files", files: nil, want: ""},
+		{name: "image first", files: []fileEntry{fe("a.png", 1), fe("b.mp4", 1)}, want: "a.png"},
+		{name: "skips a leading video", files: []fileEntry{fe("a.mp4", 1), fe("b.jpg", 1)}, want: "b.jpg"},
+		{name: "all video", files: []fileEntry{fe("a.mp4", 1), fe("b.webm", 1)}, want: ""},
+		// applySpoiler renames in place, and the extension still decides.
+		{name: "spoilered names still resolve", files: []fileEntry{fe("SPOILER_a.mov", 1), fe("SPOILER_b.gif", 1)}, want: "SPOILER_b.gif"},
+		{name: "unknown extension is not embeddable", files: []fileEntry{fe("notes.txt", 1)}, want: ""},
+		{name: "case insensitive", files: []fileEntry{fe("A.MP4", 1), fe("B.PNG", 1)}, want: "B.PNG"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := firstEmbeddableName(tt.files); got != tt.want {
+				t.Fatalf("firstEmbeddableName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAlbumCountsTotalOr(t *testing.T) {
+	t.Parallel()
+
+	known := albumCounts{Images: 40, Videos: 5, Known: true}
+	if got := known.totalOr(99); got != 45 {
+		t.Errorf("totalOr with known counts = %d, want 45", got)
+	}
+	if got := (albumCounts{}).totalOr(7); got != 7 {
+		t.Errorf("totalOr with unknown counts = %d, want the fallback 7", got)
+	}
+}

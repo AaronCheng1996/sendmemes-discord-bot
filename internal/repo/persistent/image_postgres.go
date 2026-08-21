@@ -266,10 +266,14 @@ func (r *ImagesRepo) GetRandom(ctx context.Context) (entity.Image, error) {
 	return e, nil
 }
 
-// GetRandomByAlbum returns up to limit random images from the given album.
-// Pass excludeID > 0 to exclude a specific image (e.g. the cover) from the result.
+// GetRandomByAlbum returns up to limit random media rows from the given album.
+// Pass excludeID > 0 to exclude a specific row (e.g. the cover) from the result.
+//
+// Videos are included: Discord renders an uploaded video as an inline player,
+// so outside Video mode a short clip is just another attachment. Video mode has
+// its own query (GetRandomVideoByAlbum) because it deliberately wants only those.
 func (r *ImagesRepo) GetRandomByAlbum(ctx context.Context, albumID, limit, excludeID int) ([]entity.Image, error) {
-	q := imageSelectBuilder(r).Where(sq.Eq{"i.album_id": albumID}).Where("i.kind = 'image'").OrderBy("RANDOM()").Limit(uint64(limit))
+	q := imageSelectBuilder(r).Where(sq.Eq{"i.album_id": albumID}).OrderBy("RANDOM()").Limit(uint64(limit))
 
 	if excludeID > 0 {
 		q = q.Where(sq.NotEq{"i.id": excludeID})
@@ -282,10 +286,11 @@ func (r *ImagesRepo) GetRandomByAlbum(ctx context.Context, albumID, limit, exclu
 	return r.queryImages(ctx, "ImagesRepo - GetRandomByAlbum", sql, args)
 }
 
-// GetAllByAlbum returns all images in the given album ordered by id.
-// Pass excludeID > 0 to exclude a specific image (e.g. the cover) from the result.
+// GetAllByAlbum returns all media in the given album ordered by id, videos
+// included (see GetRandomByAlbum).
+// Pass excludeID > 0 to exclude a specific row (e.g. the cover) from the result.
 func (r *ImagesRepo) GetAllByAlbum(ctx context.Context, albumID, excludeID int) ([]entity.Image, error) {
-	q := imageSelectBuilder(r).Where(sq.Eq{"i.album_id": albumID}).Where("i.kind = 'image'").OrderBy("i.id ASC")
+	q := imageSelectBuilder(r).Where(sq.Eq{"i.album_id": albumID}).OrderBy("i.id ASC")
 
 	if excludeID > 0 {
 		q = q.Where(sq.NotEq{"i.id": excludeID})

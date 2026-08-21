@@ -69,11 +69,13 @@ type (
 		Insert(ctx context.Context, img entity.Image) (entity.Image, error)
 		Update(ctx context.Context, img entity.Image) (entity.Image, error)
 		Delete(ctx context.Context, id int) error
-		// GetRandomByAlbum returns up to limit random images from albumID,
-		// optionally excluding the image with excludeID (pass 0 for no exclusion).
+		// GetRandomByAlbum returns up to limit random media rows from albumID,
+		// optionally excluding the row with excludeID (pass 0 for no exclusion).
+		// Videos are included: Discord plays an uploaded video inline, so outside
+		// Video mode a clip is just another attachment.
 		GetRandomByAlbum(ctx context.Context, albumID, limit, excludeID int) ([]entity.Image, error)
-		// GetAllByAlbum returns all images in albumID ordered by id,
-		// optionally excluding the image with excludeID (pass 0 for no exclusion).
+		// GetAllByAlbum returns all media in albumID ordered by id, videos
+		// included, optionally excluding the row with excludeID (0 = no exclusion).
 		GetAllByAlbum(ctx context.Context, albumID, excludeID int) ([]entity.Image, error)
 		// GetRandomVideoByAlbum returns one random video (kind='video') from albumID.
 		// Returns (zero, false, nil) when the album has no videos.

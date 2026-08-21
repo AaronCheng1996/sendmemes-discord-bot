@@ -90,6 +90,14 @@ other options.
   Albums page). `caption` and `nsfw` (spoiler-tagged attachments) apply to
   every mode, not just `Custom`. Set the mode from the admin UI or the
   `/album_mode` slash command.
+- **Videos outside Video mode** — an album may hold clips as well as stills, and
+  every mode except `Video` treats them as ordinary attachments: Discord renders
+  an uploaded video with its own inline player, so a short clip behaves like a
+  GIF. They go through the same size budget as everything else, so an oversized
+  clip is dropped from a scheduled batch or named in a full album's skipped-files
+  notice — set the album to `Video` mode when its files are large enough to want
+  the public-link fallback instead. Album covers and dashboard thumbnails stay
+  image-only, since a video has no still to show.
 - **Upload budget** — Discord's attachment cap has moved more than once (25 MB,
   then 10 MB in Sept 2024, then 20 MB in Aug 2026) and a server's Boost level
   raises it further for everyone posting there. `DISCORD_UPLOAD_LIMIT_MB`
