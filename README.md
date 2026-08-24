@@ -116,9 +116,11 @@ other options.
   images (default 100) and close with a button that posts the next page, so a
   thousand-image album does not arrive all at once.
 - **Rich sync notifications** — `new_album` / `new_files` rules post the actual
-  discovered media: new images merged into one size-fitted message (up to 10),
-  new videos as permanent pCloud public links. The first-ever import is suppressed to
-  avoid flooding, and every discovery is also stored for the Activity page.
+  discovered media, merged into one size-fitted message (up to 10 files). Clips
+  ride along with the stills whenever their recorded size fits the upload budget;
+  only a video too large to upload falls back to a permanent pCloud public link.
+  The first-ever import is suppressed to avoid flooding, and every discovery is
+  also stored for the Activity page.
 - **Reaction feedback** — any non-bot reaction on a scheduled message
   increments the album's `positive_rating` (in-memory map of the latest 200
   message → album mappings). The bot auto-adds a 👍 to its own posts so the

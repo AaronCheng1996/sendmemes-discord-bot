@@ -284,3 +284,52 @@ func TestAlbumCountsTotalOr(t *testing.T) {
 		t.Errorf("totalOr with unknown counts = %d, want the fallback 7", got)
 	}
 }
+
+// A discovery notification used to link every video regardless of size. Only
+// the ones Discord will not take should fall back to a link now.
+func TestSplitByUploadability(t *testing.T) {
+	t.Parallel()
+
+	const budget = 20 * 1024 * 1024
+	img := func(name string, size int64) entity.Image {
+		return entity.Image{URL: name, Kind: entity.MediaKindImage, SizeBytes: size}
+	}
+	vid := func(name string, size int64) entity.Image {
+		return entity.Image{URL: name, Kind: entity.MediaKindVideo, SizeBytes: size}
+	}
+
+	media := []entity.Image{
+		img("a.png", 500),
+		vid("small.mp4", 2*1024*1024),
+		vid("huge.mp4", 400*1024*1024),
+		// Sync stamps a size on everything it ingests, so a zero is odd enough
+		// not to gamble a download on.
+		vid("unknown.mp4", 0),
+		img("b.jpg", 1024),
+	}
+
+	attachable, linkOnly := splitByUploadability(media, budget)
+
+	gotAttach := make([]string, len(attachable))
+	for i, m := range attachable {
+		gotAttach[i] = m.URL
+	}
+	gotLink := make([]string, len(linkOnly))
+	for i, m := range linkOnly {
+		gotLink[i] = m.URL
+	}
+
+	if !equalStrings(gotAttach, []string{"a.png", "small.mp4", "b.jpg"}) {
+		t.Errorf("attachable = %v, want [a.png small.mp4 b.jpg]", gotAttach)
+	}
+	if !equalStrings(gotLink, []string{"huge.mp4", "unknown.mp4"}) {
+		t.Errorf("linkOnly = %v, want [huge.mp4 unknown.mp4]", gotLink)
+	}
+
+	// An image is never linked, even a preposterous one — fitToLimit drops it
+	// and the send path reports it, which is the behaviour for stills.
+	attachOnly, none := splitByUploadability([]entity.Image{img("giant.png", 900*1024*1024)}, budget)
+	if len(attachOnly) != 1 || len(none) != 0 {
+		t.Errorf("an oversized image should stay attachable, got %d attachable / %d linked", len(attachOnly), len(none))
+	}
+}

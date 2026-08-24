@@ -121,10 +121,14 @@ func (b *Bot) notifySyncEvents(ctx context.Context, report entity.SyncReport) {
 	}
 }
 
-// postDiscoveredMedia posts an event's newly discovered media to channelID: new
-// images are merged into one size-fitted attachment message (up to
-// albumBatchSize), new videos are posted as permanent pCloud public links (never
-// uploaded). Falls back to a plain text summary when nothing can be resolved.
+// postDiscoveredMedia posts an event's newly discovered media to channelID.
+//
+// Everything that fits the channel's upload budget goes into one size-fitted
+// attachment message (up to albumBatchSize), videos included — Discord plays an
+// uploaded clip inline, so a small one belongs with the images rather than
+// behind a link. Only a video too large to upload falls back to a permanent
+// pCloud public link. Falls back to a plain text summary when nothing can be
+// resolved.
 func (b *Bot) postDiscoveredMedia(ctx context.Context, rule entity.DeliveryRule, ev entity.SyncEvent) {
 	channelID := rule.ChannelID
 	// Discovery posts honour the same three-layer style as scheduled sends, minus
@@ -140,43 +144,37 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, rule entity.DeliveryRule,
 	// they are read once per notification rather than per message below.
 	counts := b.albumCounts(ctx, ev.AlbumID)
 
-	var images, videos []entity.Image
-	for _, m := range ev.NewMedia {
-		if m.Kind == entity.MediaKindVideo {
-			videos = append(videos, m)
-		} else {
-			images = append(images, m)
-		}
-	}
+	budget := b.uploadLimit(channelID)
+	attachable, linkOnly := splitByUploadability(ev.NewMedia, budget)
 
 	posted := false
 
-	// New images: one merged attachment message.
-	if len(images) > 0 {
-		pool := images
+	// Everything small enough travels as an attachment, clips alongside stills.
+	if len(attachable) > 0 {
+		pool := attachable
 		if len(pool) > albumPoolSize {
 			pool = pool[:albumPoolSize]
 		}
 		entries, err := b.downloadPool(ctx, pool)
 		if err != nil {
 			b.l.Error(fmt.Errorf("postDiscoveredMedia downloadPool %q: %w", ev.AlbumName, err))
-		} else if selected := fitToLimit(b.l, entries, albumBatchSize, b.uploadLimit(channelID)); len(selected) > 0 {
+		} else if selected := fitToLimit(b.l, entries, albumBatchSize, budget); len(selected) > 0 {
 			desc := caption
-			if len(images) > len(selected) {
-				desc += fmt.Sprintf(" (showing %d of %d)", len(selected), len(images))
+			if len(attachable) > len(selected) {
+				desc += fmt.Sprintf(" (showing %d of %d)", len(selected), len(attachable))
 			}
 			files := selected
 			msg := syncMessage(style, ev, album, len(selected), counts, sc, desc)
-			if b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, images), firstEmbeddableName(files), files, nil) != nil {
+			if b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, attachable), firstEmbeddableName(files), files, nil) != nil {
 				posted = true
 			}
 		}
 	}
 
-	// New videos: permanent public links only (per configuration, never uploaded).
-	if len(videos) > 0 {
+	// Only what Discord will not take gets a link instead.
+	if len(linkOnly) > 0 {
 		links := make([]string, 0, maxNotifyVideoLinks)
-		for i, v := range videos {
+		for i, v := range linkOnly {
 			if i >= maxNotifyVideoLinks {
 				break
 			}
@@ -194,8 +192,8 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, rule entity.DeliveryRule,
 				sb.WriteString("\n")
 			}
 			sb.WriteString(strings.Join(links, "\n"))
-			if len(videos) > len(links) {
-				fmt.Fprintf(&sb, "\n…and %d more video(s)", len(videos)-len(links))
+			if len(linkOnly) > len(links) {
+				fmt.Fprintf(&sb, "\n…and %d more too large to upload", len(linkOnly)-len(links))
 			}
 			msg := syncMessage(style, ev, album, len(links), counts, sc, sb.String())
 			if b.sendStyled(channelID, album, msg, "", "", nil, nil) != nil {
@@ -219,6 +217,26 @@ func (b *Bot) postDiscoveredMedia(ctx context.Context, rule entity.DeliveryRule,
 func syncMessage(style entity.MessageStyle, ev entity.SyncEvent, album entity.Album, shown int, counts albumCounts, sc sendContext, summary string) renderedMessage {
 	tokens := discoveryTokens(album, ev, shown, counts, sc)
 	return renderMessage(style, tokens, summary, sc.Test)
+}
+
+// splitByUploadability divides newly discovered media into what can be attached
+// to a message and what has to be linked instead.
+//
+// Only videos are ever linked, and only when their recorded size rules out an
+// upload. The size is checked here rather than after downloading because a clip
+// too large to send is also the one most expensive to fetch and throw away.
+// An unrecorded size (0) counts as too large: sync stamps every file it
+// ingests, so a missing one means something unusual enough not to gamble a
+// download on.
+func splitByUploadability(media []entity.Image, budget int) (attachable, linkOnly []entity.Image) {
+	for _, m := range media {
+		if m.Kind == entity.MediaKindVideo && (m.SizeBytes <= 0 || m.SizeBytes > int64(budget)) {
+			linkOnly = append(linkOnly, m)
+			continue
+		}
+		attachable = append(attachable, m)
+	}
+	return attachable, linkOnly
 }
 
 // formatSyncEventMessage renders one sync event as a Discord message line, e.g.
