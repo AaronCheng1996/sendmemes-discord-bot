@@ -33,7 +33,8 @@ func parseFullAlbumCustomID(customID string) (albumID int, ok bool) {
 }
 
 // fullAlbumButtonRow returns a one-button action row that lets anyone expand the
-// album behind a random post into a thread.
+// album behind a post into a thread. Every album delivery carries it except
+// Video mode, whose albums are the ones deliberately too large to post in full.
 func fullAlbumButtonRow(albumID int) []discordgo.MessageComponent {
 	return []discordgo.MessageComponent{
 		discordgo.ActionsRow{

@@ -906,14 +906,13 @@ func (b *Bot) deliverSingle(ctx context.Context, channelID string, album entity.
 	applySpoiler(files, cfg.NSFW)
 	counts := b.albumCounts(ctx, album.ID)
 	msg := albumMessage(style, album, len(files), counts.totalOr(len(imgs)), counts, sc)
-	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, imgs), firstEmbeddableName(files), files, nil)
+	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, imgs), firstEmbeddableName(files), files, fullAlbumButtonRow(album.ID))
 }
 
 // deliverComic sends the album as an ordered comic: only the first ordered
 // batch (up to albumBatchSize pages within the Discord size limit) is posted to
-// the channel. When the album has more pages than fit in that batch, the caption
-// points viewers to /full_album (or the full-album button) for the rest; nothing
-// else is sent here. Page order is never shuffled.
+// the channel, with a Full-album button for the rest. Page order is never
+// shuffled.
 func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.Album, sc sendContext, style entity.MessageStyle, cfg entity.AlbumSendConfig) *discordgo.Message {
 	batchSize := batchSizeOrDefault(cfg, albumBatchSize)
 	pages, err := b.imagesUC.GetComicPages(ctx, album)
@@ -940,9 +939,9 @@ func (b *Bot) deliverComic(ctx context.Context, channelID string, album entity.A
 	counts := b.albumCounts(ctx, album.ID)
 	msg := albumMessage(style, album, len(first), counts.totalOr(totalPages), counts, sc)
 	if len(first) < totalPages {
-		msg.Body += "\nUse /full_album (or the button on a random post) for the rest."
+		msg.Body += "\nUse the button below for the rest."
 	}
-	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, pages), firstEmbeddableName(files), files, nil)
+	return b.sendStyled(channelID, album, msg, b.resolveThumbURL(ctx, pages), firstEmbeddableName(files), files, fullAlbumButtonRow(album.ID))
 }
 
 // deliverVideo posts one random video from the album. Videos within the

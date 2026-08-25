@@ -81,7 +81,7 @@ other options.
   when the table is empty.
 - **Typed delivery** — each album's `send_mode` controls the message format:
   `Random` (size-fitted batch of images), `Order` (comic pages in natural
-  filename order; first batch only — `/full_album` posts the rest in a thread),
+  filename order; first batch only — the 📖 button posts the rest in a thread),
   `Single` (one image),
   `Video` (one random video — uploaded as an attachment when it fits the
   upload budget, otherwise posted as a permanent pCloud public link),
@@ -108,7 +108,7 @@ other options.
   post still lands while you correct the setting. When a send fails for good, the
   bot says so in the channel instead of only the log — naming the album, and the
   file when it is down to one — at most one notice per channel per 30s.
-- **Full album posts** — the 📖 button on a random post (or `/full_album`) opens
+- **Full album posts** — the 📖 button under any album post (or `/full_album`) opens
   a thread and posts every image in the album, 10 per message, in order. Files
   too large for a single Discord message are the only ones skipped, and the
   thread says which ones they were. Albums larger than
