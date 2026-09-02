@@ -59,6 +59,30 @@ func TestTaskRunNormalizeTruncatesOnRuneBoundary(t *testing.T) {
 	require.True(t, isValidUTF8(run.Source))
 }
 
+func TestTaskRunNormalizeRejectsOversizedDetail(t *testing.T) {
+	t.Parallel()
+
+	// Detail is rejected rather than truncated: half a JSON object helps nobody,
+	// and a client that outgrew the cap needs to hear about it.
+	fat := entity.TaskRun{
+		Source: "crawler",
+		Status: entity.TaskRunSucceeded,
+		Detail: map[string]any{"blob": strings.Repeat("x", 17*1024)},
+	}
+	err := fat.Normalize()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "over the")
+
+	// A payload under the cap goes through untouched.
+	ok := entity.TaskRun{
+		Source: "crawler",
+		Status: entity.TaskRunSucceeded,
+		Detail: map[string]any{"downloaded": 14, "skipped": 0},
+	}
+	require.NoError(t, ok.Normalize())
+	require.Equal(t, 14, ok.Detail["downloaded"])
+}
+
 func TestTaskRunDuration(t *testing.T) {
 	t.Parallel()
 

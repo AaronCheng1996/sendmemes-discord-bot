@@ -208,6 +208,30 @@ recorded. Such an album stays *inside* an exclude filter and *outside* an
 include one, so an unsynced library keeps behaving as it did rather than
 silently dropping out of the daily push.
 
+**Setting it up in the dashboard.** On the **Schedule** page, the rule table has
+an **Albums** column showing each rule's scope (`All albums`, `Only …`,
+`Except …`). Press **Edit** on a rule, or **New rule** for a fresh one, and that
+column becomes a mode select; choosing anything but *All albums* reveals a paths
+box that takes **one path per line** (surrounding slashes are trimmed on save).
+Edits reach the running scheduler within ~30s.
+
+To keep a crawler's output out of the daily push while still announcing it, two
+rules do the job:
+
+| Rule | Trigger | Albums |
+|---|---|---|
+| Daily push | `scheduled` | All except these paths → `Media/Crawler` |
+| Crawler finds | `new_files` | Only these paths → `Media/Crawler` |
+
+The dashboard does not yet display `source_path`, so the exact string to type —
+whether the walked root contributes a leading segment — is easiest to read off
+the API after the first sync:
+
+```bash
+curl -s -H "X-Admin-Key: $ADMIN_API_KEY" "$API/v1/admin/albums?limit=200" \
+  | jq -r '.items[] | "\(.name)\t\(.source_path)"'
+```
+
 ### System log, and reporting runs from outside
 
 Every scheduled send and every sync writes one row to `task_runs`, and the
@@ -222,7 +246,10 @@ crawler running on another host should be able to append run records, not
 rewrite delivery rules. Report a finished run in one call:
 
 ```bash
-curl -X POST "$API/v1/runs" -H "X-Ingest-Key: $INGEST_API_KEY"   -H 'Content-Type: application/json' -d '{
+curl -X POST "$API/v1/runs" \
+  -H "X-Ingest-Key: $INGEST_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{
     "source": "crawler",
     "task": "SomeArtist",
     "status": "succeeded",
@@ -236,13 +263,32 @@ run in that one call; `running` returns an id to close later, which is worth it
 only for work long enough to be worth watching:
 
 ```bash
-curl -X PATCH "$API/v1/runs/123" -H "X-Ingest-Key: $INGEST_API_KEY"   -H 'Content-Type: application/json'   -d '{"status": "failed", "summary": "Gallery returned 403", "error": "..."}'
+curl -X PATCH "$API/v1/runs/123" \
+  -H "X-Ingest-Key: $INGEST_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"status": "failed", "summary": "Gallery returned 403", "error": "HTTP 403"}'
 ```
 
-`source` and `task` are free-form: `source` groups the rows and populates the
-page's filter, `task` names what the run was about. Both are capped at 200
-characters, `summary` at 2000 and `detail` at 16 KB, so a misbehaving client
-cannot fill the table one field at a time.
+| Field | POST | PATCH | Notes |
+|---|---|---|---|
+| `source` | required | — | Groups rows and fills the page's filter. Free-form; the client names itself |
+| `task` | optional | — | What the run was about: an artist, a rule, a channel |
+| `status` | required | required | `running` / `succeeded` / `failed`, case-insensitive |
+| `started_at` | optional | — | RFC 3339. Defaults to now, so a client may backdate a run it reports late |
+| `finished_at` | optional | optional | Filled in automatically for a terminal status; forced to null for `running` |
+| `summary` | optional | optional | The one line the collapsed row shows |
+| `detail` | optional | optional | Any JSON object — the expandable payload |
+| `error` | optional | optional | Shown above the detail when the row is expanded |
+
+Limits, so a misbehaving client cannot fill the table a field at a time:
+`source` and `task` are truncated at 200 characters, `summary` at 2000 and
+`error` at 4000. `detail` is **rejected** past 16 KB of JSON rather than
+truncated — half an object helps nobody, and a client that outgrew the cap
+should hear about it.
+
+Failures come back as `400` with `{"error": "..."}`; a missing or wrong
+`X-Ingest-Key` is `403`/`401` with a plain-text body. `Authorization: Bearer …`
+works in place of the header.
 
 This is not the same thing as the in-memory job list behind the dashboard's
 progress indicator: that one is capped at 50 and forgotten on restart, and it
