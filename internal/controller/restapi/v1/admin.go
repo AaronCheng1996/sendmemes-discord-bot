@@ -51,6 +51,17 @@ func parseIntQuery(ctx *fiber.Ctx, key string, defaultVal int) int {
 	return n
 }
 
+// parseBoolQuery reads an opt-in flag. Anything but a recognized "true" spelling
+// is false, so a malformed value keeps the safe default rather than erroring.
+func parseBoolQuery(ctx *fiber.Ctx, key string) bool {
+	switch strings.ToLower(strings.TrimSpace(ctx.Query(key))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
 func parseIDParam(ctx *fiber.Ctx) (int, error) {
 	return strconv.Atoi(strings.TrimSpace(ctx.Params("id")))
 }
@@ -61,9 +72,10 @@ func parseID64Param(ctx *fiber.Ctx) (int64, error) {
 
 func parseAlbumListQuery(ctx *fiber.Ctx) repo.AlbumAdminListQuery {
 	q := repo.AlbumAdminListQuery{
-		SortBy:    strings.TrimSpace(ctx.Query("sort_by")),
-		FilterCol: strings.TrimSpace(ctx.Query("filter_field")),
-		FilterQ:   strings.TrimSpace(ctx.Query("filter_q")),
+		SortBy:         strings.TrimSpace(ctx.Query("sort_by")),
+		FilterCol:      strings.TrimSpace(ctx.Query("filter_field")),
+		FilterQ:        strings.TrimSpace(ctx.Query("filter_q")),
+		IncludeMissing: parseBoolQuery(ctx, "include_missing"),
 	}
 	so := strings.ToLower(strings.TrimSpace(ctx.Query("sort_order")))
 	q.SortAsc = so == "" || so == "asc"
@@ -75,10 +87,11 @@ func parseAlbumListQuery(ctx *fiber.Ctx) repo.AlbumAdminListQuery {
 
 func parseImageListQuery(ctx *fiber.Ctx) repo.ImageAdminListQuery {
 	q := repo.ImageAdminListQuery{
-		AlbumScopeID: parseIntQuery(ctx, "album_id", 0),
-		SortBy:       strings.TrimSpace(ctx.Query("sort_by")),
-		FilterCol:    strings.TrimSpace(ctx.Query("filter_field")),
-		FilterQ:      strings.TrimSpace(ctx.Query("filter_q")),
+		AlbumScopeID:   parseIntQuery(ctx, "album_id", 0),
+		SortBy:         strings.TrimSpace(ctx.Query("sort_by")),
+		FilterCol:      strings.TrimSpace(ctx.Query("filter_field")),
+		FilterQ:        strings.TrimSpace(ctx.Query("filter_q")),
+		IncludeDeleted: parseBoolQuery(ctx, "include_deleted"),
 	}
 	so := strings.ToLower(strings.TrimSpace(ctx.Query("sort_order")))
 	q.SortAsc = so == "" || so == "asc"

@@ -7,12 +7,11 @@ import (
 	"strings"
 	"time"
 
-	sq "github.com/Masterminds/squirrel"
-	"github.com/jackc/pgx/v5"
-
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/postgres"
+	sq "github.com/Masterminds/squirrel"
+	"github.com/jackc/pgx/v5"
 )
 
 // AlbumsRepo -.
@@ -25,12 +24,36 @@ func NewAlbumsRepo(pg *postgres.Postgres) *AlbumsRepo {
 	return &AlbumsRepo{Postgres: pg}
 }
 
+// albumColumns is the album projection shared by every read and every RETURNING
+// clause, in the order scanAlbumRow expects. Kept in one place so a new column
+// cannot reach one query and miss another.
+func albumColumns() []string {
+	return []string{
+		"id",
+		"name",
+		"COALESCE(folder_id, 0)",
+		"has_cover",
+		"COALESCE(cover_image_id, 0)",
+		"send_mode",
+		"COALESCE(send_config_json::text, '')",
+		"last_sent_at",
+		"COALESCE(positive_rating, 0)",
+		"missing_since",
+	}
+}
+
+// albumReturning renders albumColumns as a RETURNING suffix.
+func albumReturning() string {
+	return "RETURNING " + strings.Join(albumColumns(), ", ")
+}
+
 func scanAlbumRow(row pgx.Row) (entity.Album, error) {
 	var a entity.Album
 	var lastSentAt, missingSince *time.Time
 	if err := row.Scan(
 		&a.ID,
 		&a.Name,
+		&a.FolderID,
 		&a.HasCover,
 		&a.CoverImageID,
 		&a.SendMode,
@@ -47,19 +70,7 @@ func scanAlbumRow(row pgx.Row) (entity.Album, error) {
 }
 
 func albumSelectBuilder(r *AlbumsRepo) sq.SelectBuilder {
-	return r.Builder.
-		Select(
-			"id",
-			"name",
-			"has_cover",
-			"COALESCE(cover_image_id, 0)",
-			"send_mode",
-			"COALESCE(send_config_json::text, '')",
-			"last_sent_at",
-			"COALESCE(positive_rating, 0)",
-			"missing_since",
-		).
-		From("albums")
+	return r.Builder.Select(albumColumns()...).From("albums")
 }
 
 func (r *AlbumsRepo) albumAdminOrderBy(q repo.AlbumAdminListQuery) string {
@@ -80,6 +91,11 @@ func (r *AlbumsRepo) albumAdminOrderBy(q repo.AlbumAdminListQuery) string {
 }
 
 func (r *AlbumsRepo) applyAlbumAdminFilters(b sq.SelectBuilder, q repo.AlbumAdminListQuery) sq.SelectBuilder {
+	// Albums whose folder vanished are soft-deleted, not dropped: they stay out
+	// of the dashboard unless it asks for them.
+	if !q.IncludeMissing {
+		b = b.Where("missing_since IS NULL")
+	}
 	raw := strings.TrimSpace(q.FilterQ)
 	col := strings.ToLower(strings.TrimSpace(q.FilterCol))
 	if raw == "" || col == "" {
@@ -210,7 +226,7 @@ func (r *AlbumsRepo) Create(ctx context.Context, name string, sendMode entity.Al
 		Insert("albums").
 		Columns("name", "send_mode", "send_config_json").
 		Values(name, sendMode, sq.Expr("?::jsonb", sendConfigJSON)).
-		Suffix("RETURNING id, name, has_cover, COALESCE(cover_image_id, 0), send_mode, COALESCE(send_config_json::text, ''), last_sent_at, COALESCE(positive_rating, 0), missing_since").
+		Suffix(albumReturning()).
 		ToSql()
 	if err != nil {
 		return entity.Album{}, fmt.Errorf("AlbumsRepo - Create - r.Builder: %w", err)
@@ -223,41 +239,146 @@ func (r *AlbumsRepo) Create(ctx context.Context, name string, sendMode entity.Al
 	return a, nil
 }
 
-// GetOrCreate returns the album with the given name, creating it if it does not
-// exist with defaultMode as its send_mode. The returned bool reports whether a
-// new row was created; (xmax = 0) is true only for rows created by this
-// statement. Existing albums keep their stored send_mode.
-func (r *AlbumsRepo) GetOrCreate(ctx context.Context, name string, defaultMode entity.AlbumSendMode) (entity.Album, bool, error) {
-	sql, args, err := r.Builder.
-		Insert("albums").
-		Columns("name", "send_mode", "send_config_json").
-		Values(name, defaultMode, sq.Expr("'{}'::jsonb")).
-		Suffix("ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id, name, has_cover, COALESCE(cover_image_id, 0), send_mode, COALESCE(send_config_json::text, ''), last_sent_at, COALESCE(positive_rating, 0), missing_since, (xmax = 0)").
-		ToSql()
+// ResolveByFolder maps a folder a sync run just walked to its album row.
+//
+// The folder name is the album's identity, so it is matched first: a row already
+// called name is the album even when a different row currently holds folderID,
+// and the id is simply rebound to it. Only when no row carries the name does
+// folderID decide, and then the row holding it is the same folder under a new
+// name — renaming it in place is what carries the rating, send mode and config
+// across a rename instead of stranding them on an album that the missing pass
+// would flag minutes later.
+//
+// folderID 0 means the source has no folder ids; resolution is then name-only,
+// exactly as it was before folder ids existed.
+func (r *AlbumsRepo) ResolveByFolder(ctx context.Context, folderID int64, name string, defaultMode entity.AlbumSendMode) (entity.Album, repo.AlbumResolution, error) {
+	a, found, err := r.findAlbum(ctx, sq.Eq{"name": name})
 	if err != nil {
-		return entity.Album{}, false, fmt.Errorf("AlbumsRepo - GetOrCreate - r.Builder: %w", err)
+		return entity.Album{}, repo.AlbumResolution{}, fmt.Errorf("AlbumsRepo - ResolveByFolder - by name %q: %w", name, err)
+	}
+	if found {
+		if folderID != 0 && a.FolderID != folderID {
+			if bindErr := r.bindFolderID(ctx, a.ID, folderID); bindErr != nil {
+				return entity.Album{}, repo.AlbumResolution{}, bindErr
+			}
+			a.FolderID = folderID
+		}
+
+		return a, repo.AlbumResolution{}, nil
 	}
 
-	var a entity.Album
-	var lastSentAt, missingSince *time.Time
-	var created bool
-	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(
-		&a.ID,
-		&a.Name,
-		&a.HasCover,
-		&a.CoverImageID,
-		&a.SendMode,
-		&a.SendConfigJSON,
-		&lastSentAt,
-		&a.PositiveRating,
-		&missingSince,
-		&created,
-	); err != nil {
-		return entity.Album{}, false, fmt.Errorf("AlbumsRepo - GetOrCreate - QueryRow: %w", err)
+	renamed, previous, found, err := r.renameFolderMatch(ctx, folderID, name)
+	if err != nil {
+		return entity.Album{}, repo.AlbumResolution{}, err
 	}
-	a.LastSentAt = lastSentAt
-	a.MissingSince = missingSince
-	return a, created, nil
+	if found {
+		return renamed, repo.AlbumResolution{RenamedFrom: previous}, nil
+	}
+
+	sql, args, err := r.Builder.
+		Insert("albums").
+		Columns("name", "folder_id", "send_mode", "send_config_json").
+		Values(name, nullableInt64(folderID), defaultMode, sq.Expr("'{}'::jsonb")).
+		Suffix(albumReturning()).
+		ToSql()
+	if err != nil {
+		return entity.Album{}, repo.AlbumResolution{}, fmt.Errorf("AlbumsRepo - ResolveByFolder - r.Builder: %w", err)
+	}
+	fresh, err := scanAlbumRow(r.Pool.QueryRow(ctx, sql, args...))
+	if err != nil {
+		return entity.Album{}, repo.AlbumResolution{}, fmt.Errorf("AlbumsRepo - ResolveByFolder - insert %q: %w", name, err)
+	}
+	return fresh, repo.AlbumResolution{Created: true}, nil
+}
+
+// renameFolderMatch renames the album holding folderID to name and returns it
+// along with the name it used to have. It reports (zero, "", false, nil) when
+// folderID is 0 (a source without folder ids) or no row holds it, which is the
+// signal to create a fresh album instead.
+func (r *AlbumsRepo) renameFolderMatch(ctx context.Context, folderID int64, name string) (album entity.Album, previousName string, found bool, err error) {
+	if folderID == 0 {
+		return entity.Album{}, "", false, nil
+	}
+
+	album, found, err = r.findAlbum(ctx, sq.Eq{"folder_id": folderID})
+	if err != nil {
+		return entity.Album{}, "", false, fmt.Errorf("AlbumsRepo - ResolveByFolder - by folder %d: %w", folderID, err)
+	}
+	if !found {
+		return entity.Album{}, "", false, nil
+	}
+
+	previousName = album.Name
+	if renameErr := r.renameAlbum(ctx, album.ID, name); renameErr != nil {
+		return entity.Album{}, "", false, renameErr
+	}
+	album.Name = name
+
+	return album, previousName, true, nil
+}
+
+// findAlbum returns the single album matching pred, reporting absence as
+// (zero, false, nil) rather than as an error — ResolveByFolder branches on it.
+func (r *AlbumsRepo) findAlbum(ctx context.Context, pred sq.Sqlizer) (entity.Album, bool, error) {
+	sql, args, err := albumSelectBuilder(r).Where(pred).Limit(1).ToSql()
+	if err != nil {
+		return entity.Album{}, false, fmt.Errorf("r.Builder: %w", err)
+	}
+	a, err := scanAlbumRow(r.Pool.QueryRow(ctx, sql, args...))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return entity.Album{}, false, nil
+		}
+		return entity.Album{}, false, fmt.Errorf("QueryRow: %w", err)
+	}
+	return a, true, nil
+}
+
+// bindFolderID moves folderID onto albumID. Folder ids are unique, so it is
+// first detached from whichever row held it: that row is a folder this run no
+// longer sees under that name, and the missing pass deals with it.
+func (r *AlbumsRepo) bindFolderID(ctx context.Context, albumID int, folderID int64) error {
+	detach, args, err := r.Builder.
+		Update("albums").
+		Set("folder_id", nil).
+		Where(sq.Eq{"folder_id": folderID}).
+		Where(sq.NotEq{"id": albumID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("AlbumsRepo - bindFolderID - detach r.Builder: %w", err)
+	}
+	if _, err = r.Pool.Exec(ctx, detach, args...); err != nil {
+		return fmt.Errorf("AlbumsRepo - bindFolderID - detach Exec: %w", err)
+	}
+
+	attach, args, err := r.Builder.
+		Update("albums").
+		Set("folder_id", folderID).
+		Where(sq.Eq{"id": albumID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("AlbumsRepo - bindFolderID - r.Builder: %w", err)
+	}
+	if _, err = r.Pool.Exec(ctx, attach, args...); err != nil {
+		return fmt.Errorf("AlbumsRepo - bindFolderID - Exec: %w", err)
+	}
+	return nil
+}
+
+// renameAlbum changes only the name, leaving rating, send mode and config alone.
+func (r *AlbumsRepo) renameAlbum(ctx context.Context, albumID int, name string) error {
+	sql, args, err := r.Builder.
+		Update("albums").
+		Set("name", name).
+		Where(sq.Eq{"id": albumID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("AlbumsRepo - renameAlbum - r.Builder: %w", err)
+	}
+	if _, err = r.Pool.Exec(ctx, sql, args...); err != nil {
+		return fmt.Errorf("AlbumsRepo - renameAlbum - Exec: %w", err)
+	}
+	return nil
 }
 
 // GetByName returns the album with the given name.
@@ -371,7 +492,7 @@ func (r *AlbumsRepo) Update(ctx context.Context, id int, name string, sendMode e
 		Set("send_mode", sendMode).
 		Set("send_config_json", sq.Expr("?::jsonb", sendConfigJSON)).
 		Where("id = ?", id).
-		Suffix("RETURNING id, name, has_cover, COALESCE(cover_image_id, 0), send_mode, COALESCE(send_config_json::text, ''), last_sent_at, COALESCE(positive_rating, 0), missing_since").
+		Suffix(albumReturning()).
 		ToSql()
 	if err != nil {
 		return entity.Album{}, fmt.Errorf("AlbumsRepo - Update - r.Builder: %w", err)
@@ -474,10 +595,11 @@ func (r *AlbumsRepo) ClearCover(ctx context.Context, albumID int) error {
 
 // MarkMissingExcept stamps missing_since = NOW() on every album whose name is
 // not in seenNames, skipping albums already marked so the original timestamp is
-// preserved. It returns the names it newly marked. Callers must not pass an
-// empty slice: "nothing was seen" means the source failed, not that every album
-// vanished (see the sync use case's guard).
-func (r *AlbumsRepo) MarkMissingExcept(ctx context.Context, seenNames []string) ([]string, error) {
+// preserved. It returns the albums it newly marked (id and name only), which is
+// also what a caller needs to record one activity event per vanished folder.
+// Callers must not pass an empty slice: "nothing was seen" means the source
+// failed, not that every album vanished (see the sync use case's guard).
+func (r *AlbumsRepo) MarkMissingExcept(ctx context.Context, seenNames []string) ([]entity.Album, error) {
 	if len(seenNames) == 0 {
 		return nil, fmt.Errorf("AlbumsRepo - MarkMissingExcept: refusing to mark every album missing on an empty scan")
 	}
@@ -487,7 +609,7 @@ func (r *AlbumsRepo) MarkMissingExcept(ctx context.Context, seenNames []string) 
 		Set("missing_since", sq.Expr("NOW()")).
 		Where("missing_since IS NULL").
 		Where(sq.NotEq{"name": seenNames}).
-		Suffix("RETURNING name").
+		Suffix("RETURNING id, name").
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("AlbumsRepo - MarkMissingExcept - r.Builder: %w", err)
@@ -499,13 +621,13 @@ func (r *AlbumsRepo) MarkMissingExcept(ctx context.Context, seenNames []string) 
 	}
 	defer rows.Close()
 
-	var marked []string
+	var marked []entity.Album
 	for rows.Next() {
-		var name string
-		if scanErr := rows.Scan(&name); scanErr != nil {
+		var a entity.Album
+		if scanErr := rows.Scan(&a.ID, &a.Name); scanErr != nil {
 			return nil, fmt.Errorf("AlbumsRepo - MarkMissingExcept - Scan: %w", scanErr)
 		}
-		marked = append(marked, name)
+		marked = append(marked, a)
 	}
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("AlbumsRepo - MarkMissingExcept - rows.Err: %w", err)

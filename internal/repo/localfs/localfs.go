@@ -72,6 +72,7 @@ func (s *Source) ListMedia(_ context.Context) ([]repo.MediaEntry, error) {
 			FileID:           fileID(filepath.ToSlash(rel)),
 			Name:             d.Name(),
 			ParentFolderName: filepath.Base(dir),
+			ParentFolderID:   fileID(filepath.ToSlash(dir)),
 			Kind:             kind,
 			Size:             info.Size(),
 		})
@@ -83,11 +84,16 @@ func (s *Source) ListMedia(_ context.Context) ([]repo.MediaEntry, error) {
 	return entries, nil
 }
 
-// fileID derives a stable, positive file identifier from a file's path
-// relative to Root, using FNV-64a. Collisions are theoretically possible but
-// vanishingly unlikely for any realistic media library; images.file_id has a
-// unique index, so a collision would surface as an upsert conflict rather
-// than silently merging two different files.
+// fileID derives a stable, positive identifier from a path relative to Root,
+// using FNV-64a. Collisions are theoretically possible but vanishingly unlikely
+// for any realistic media library; images.file_id has a unique index, so a
+// collision would surface as an upsert conflict rather than silently merging two
+// different files.
+//
+// It is also used for a folder's id. A local directory has no identity beyond
+// its path, so renaming one produces a new id (and new ids for every file under
+// it) — the rename tracking a pCloud folderid gives for free is not available
+// here, and a renamed local folder still reads as a new album.
 func fileID(relPath string) int64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(relPath))              // hash.Hash.Write never returns an error

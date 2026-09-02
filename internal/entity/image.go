@@ -1,6 +1,8 @@
 // Package entity defines main entities for business logic.
 package entity
 
+import "time"
+
 // Media kind values for Image.Kind (also enforced by the images.kind DB CHECK).
 const (
 	MediaKindImage = "image"
@@ -28,4 +30,9 @@ type Image struct {
 	// Unlike temporary download links it never expires and is not IP-bound, so it
 	// is persisted once and reused. Empty until first resolved.
 	PublicLink string `json:"public_link,omitempty"`
+	// DeletedAt is set when a sync run no longer finds the file in its source.
+	// The row is kept rather than dropped so the file is revived if it comes
+	// back, and so the activity log can still name what disappeared. Every read
+	// path skips deleted rows; the admin list opts back in explicitly.
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }

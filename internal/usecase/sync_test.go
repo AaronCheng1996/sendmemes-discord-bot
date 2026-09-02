@@ -13,12 +13,19 @@ import (
 )
 
 // testDefaultSendMode is the configured default send mode threaded through the
-// sync use case into GetOrCreate; a non-Random value proves it is passed through.
+// sync use case into ResolveByFolder; a non-Random value proves it is passed through.
 const testDefaultSendMode = entity.AlbumSendModeSingle
 
 // testSourceName is the source label the test use case is constructed with;
 // asserted against on every upsert/prune call to prove it is passed through.
 const testSourceName = entity.MediaSourcePCloud
+
+// countQuery is the album count query the sync runs to decide InitialImport.
+// Missing albums are included: the question is whether the DB was ever
+// populated, not whether its folders are all still there.
+func countQuery() repo.AlbumAdminListQuery {
+	return repo.AlbumAdminListQuery{IncludeMissing: true}
+}
 
 func syncUseCase(t *testing.T) (*syncuc.UseCase, *MockMediaSource, *MockAlbumsRepo, *MockImagesRepo, *MockSyncEventsRepo) {
 	t.Helper()
@@ -36,21 +43,29 @@ func syncUseCase(t *testing.T) (*syncuc.UseCase, *MockMediaSource, *MockAlbumsRe
 	return useCase, source, albums, images, events
 }
 
-// noCoverCleanup registers the expectations for the per-album cleanup pass of
-// an album without a cover image.
+// noCoverCleanup registers the per-album cleanup pass of an album without a
+// cover image, whose folder lost nothing this run.
 func noCoverCleanup(ctx context.Context, albums *MockAlbumsRepo, images *MockImagesRepo, album entity.Album, fileIDs []int64) {
-	albums.EXPECT().GetByName(ctx, album.Name).Return(album, nil)
-	images.EXPECT().DeleteByAlbumNotInFileIDs(ctx, album.ID, testSourceName, fileIDs).Return(nil)
+	images.EXPECT().SoftDeleteByAlbumNotInFileIDs(ctx, album.ID, testSourceName, fileIDs).Return(nil, nil)
 	images.EXPECT().FindCoverByAlbum(ctx, album.ID).Return(entity.Image{}, false, nil)
 	albums.EXPECT().ClearCover(ctx, album.ID).Return(nil)
 }
 
-// expectMissingPass registers the missing-flag reconciliation that every
-// non-empty sync run performs. Album order is map-driven, so names are matched
-// loosely and asserted separately where it matters.
-func expectMissingPass(albums *MockAlbumsRepo, marked []string) {
+// expectNothingMissing registers the missing-flag reconciliation of a run where
+// every album was seen again. Album order is map-driven, so the arguments are
+// matched loosely; the tests that care assert on them directly instead.
+func expectNothingMissing(albums *MockAlbumsRepo) {
 	albums.EXPECT().ClearMissing(gomock.Any(), gomock.Any()).Return(nil)
-	albums.EXPECT().MarkMissingExcept(gomock.Any(), gomock.Any()).Return(marked, nil)
+	albums.EXPECT().MarkMissingExcept(gomock.Any(), gomock.Any()).Return(nil, nil)
+}
+
+// captureEvent records an inserted event and stamps it with an id, mirroring
+// what the real repository returns.
+func captureEvent(id int64) func(context.Context, entity.SyncEvent) (entity.SyncEvent, error) {
+	return func(_ context.Context, ev entity.SyncEvent) (entity.SyncEvent, error) {
+		ev.ID = id
+		return ev, nil
+	}
 }
 
 func TestSyncImagesReportsDiscoveries(t *testing.T) {
@@ -59,20 +74,21 @@ func TestSyncImagesReportsDiscoveries(t *testing.T) {
 	uc, source, albums, images, events := syncUseCase(t)
 	ctx := context.Background()
 
-	albumA := entity.Album{ID: 1, Name: "AlbumA"}
-	albumB := entity.Album{ID: 2, Name: "AlbumB"}
+	albumA := entity.Album{ID: 1, Name: "AlbumA", FolderID: 100}
+	albumB := entity.Album{ID: 2, Name: "AlbumB", FolderID: 200}
 
-	albums.EXPECT().Count(ctx, repo.AlbumAdminListQuery{}).Return(1, nil)
+	albums.EXPECT().Count(ctx, countQuery()).Return(1, nil)
 	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
-		{FileID: 11, Name: "1.jpg", ParentFolderName: "AlbumA", Kind: entity.MediaKindImage, Size: 100},
-		{FileID: 12, Name: "clip.mp4", ParentFolderName: "AlbumA", Kind: entity.MediaKindVideo, Size: 2000},
-		{FileID: 21, Name: "old.jpg", ParentFolderName: "AlbumB", Kind: entity.MediaKindImage, Size: 50},
+		{FileID: 11, Name: "1.jpg", ParentFolderName: "AlbumA", ParentFolderID: 100, Kind: entity.MediaKindImage, Size: 100},
+		{FileID: 12, Name: "clip.mp4", ParentFolderName: "AlbumA", ParentFolderID: 100, Kind: entity.MediaKindVideo, Size: 2000},
+		{FileID: 21, Name: "old.jpg", ParentFolderName: "AlbumB", ParentFolderID: 200, Kind: entity.MediaKindImage, Size: 50},
 	}, nil)
 
-	// AlbumA is created on first sight, then updated on the second file.
-	albums.EXPECT().GetOrCreate(ctx, "AlbumA", testDefaultSendMode).Return(albumA, true, nil)
-	albums.EXPECT().GetOrCreate(ctx, "AlbumA", testDefaultSendMode).Return(albumA, false, nil)
-	albums.EXPECT().GetOrCreate(ctx, "AlbumB", testDefaultSendMode).Return(albumB, false, nil)
+	// Each folder is resolved once per run, however many files it holds.
+	albums.EXPECT().ResolveByFolder(ctx, int64(100), "AlbumA", testDefaultSendMode).
+		Return(albumA, repo.AlbumResolution{Created: true}, nil)
+	albums.EXPECT().ResolveByFolder(ctx, int64(200), "AlbumB", testDefaultSendMode).
+		Return(albumB, repo.AlbumResolution{}, nil)
 
 	images.EXPECT().UpsertByFileID(ctx, entity.Image{
 		FileID: 11, URL: "1.jpg", Source: "pcloud", AlbumID: 1, Kind: entity.MediaKindImage, SizeBytes: 100,
@@ -101,7 +117,7 @@ func TestSyncImagesReportsDiscoveries(t *testing.T) {
 		return ev, nil
 	})
 
-	expectMissingPass(albums, nil)
+	expectNothingMissing(albums)
 
 	report, err := uc.SyncImages(ctx)
 
@@ -114,6 +130,7 @@ func TestSyncImagesReportsDiscoveries(t *testing.T) {
 	require.Equal(t, 1, report.Events[0].NewVideos)
 	// The in-memory report carries the new media records for the notifier.
 	require.Len(t, report.Events[0].NewMedia, 2)
+	require.Empty(t, report.Notices)
 }
 
 func TestSyncImagesInitialImport(t *testing.T) {
@@ -124,23 +141,20 @@ func TestSyncImagesInitialImport(t *testing.T) {
 
 	album := entity.Album{ID: 1, Name: "First"}
 
-	albums.EXPECT().Count(ctx, repo.AlbumAdminListQuery{}).Return(0, nil)
+	albums.EXPECT().Count(ctx, countQuery()).Return(0, nil)
 	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
-		{FileID: 11, Name: "a.jpg", ParentFolderName: "First", Kind: entity.MediaKindImage, Size: 10},
+		{FileID: 11, Name: "a.jpg", ParentFolderName: "First", ParentFolderID: 100, Kind: entity.MediaKindImage, Size: 10},
 	}, nil)
-	albums.EXPECT().GetOrCreate(ctx, "First", testDefaultSendMode).Return(album, true, nil)
+	albums.EXPECT().ResolveByFolder(ctx, int64(100), "First", testDefaultSendMode).
+		Return(album, repo.AlbumResolution{Created: true}, nil)
 	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(true, nil)
 	noCoverCleanup(ctx, albums, images, album, []int64{11})
 
 	// Events are still recorded on initial import; only Discord delivery is
 	// suppressed (by the caller, based on report.InitialImport).
-	events.EXPECT().Insert(ctx, gomock.Any()).
-		DoAndReturn(func(_ context.Context, ev entity.SyncEvent) (entity.SyncEvent, error) {
-			ev.ID = 1
-			return ev, nil
-		})
+	events.EXPECT().Insert(ctx, gomock.Any()).DoAndReturn(captureEvent(1))
 
-	expectMissingPass(albums, nil)
+	expectNothingMissing(albums)
 
 	report, err := uc.SyncImages(ctx)
 
@@ -157,24 +171,138 @@ func TestSyncImagesNoNewContent(t *testing.T) {
 
 	album := entity.Album{ID: 3, Name: "Stable"}
 
-	albums.EXPECT().Count(ctx, repo.AlbumAdminListQuery{}).Return(2, nil)
+	albums.EXPECT().Count(ctx, countQuery()).Return(2, nil)
 	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
-		{FileID: 31, Name: "same.jpg", ParentFolderName: "Stable", Kind: entity.MediaKindImage, Size: 10},
+		{FileID: 31, Name: "same.jpg", ParentFolderName: "Stable", ParentFolderID: 300, Kind: entity.MediaKindImage, Size: 10},
 	}, nil)
-	albums.EXPECT().GetOrCreate(ctx, "Stable", testDefaultSendMode).Return(album, false, nil)
+	albums.EXPECT().ResolveByFolder(ctx, int64(300), "Stable", testDefaultSendMode).
+		Return(album, repo.AlbumResolution{}, nil)
 	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(false, nil)
 	noCoverCleanup(ctx, albums, images, album, []int64{31})
 
-	// No events.Insert expectation: nothing new was discovered.
+	// No events.Insert expectation: nothing changed in either direction.
 	_ = events
 
-	expectMissingPass(albums, nil)
+	expectNothingMissing(albums)
 
 	report, err := uc.SyncImages(ctx)
 
 	require.NoError(t, err)
 	require.False(t, report.InitialImport)
 	require.Empty(t, report.Events)
+	require.Empty(t, report.Notices)
+}
+
+// A file that was soft-deleted and comes back is revived by the upsert, so it is
+// reported as an update rather than an insert and must not be announced again.
+func TestSyncImagesRevivedFileIsNotNewContent(t *testing.T) {
+	t.Parallel()
+
+	uc, source, albums, images, events := syncUseCase(t)
+	ctx := context.Background()
+
+	album := entity.Album{ID: 4, Name: "Revived"}
+
+	albums.EXPECT().Count(ctx, countQuery()).Return(2, nil)
+	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
+		{FileID: 41, Name: "back.jpg", ParentFolderName: "Revived", ParentFolderID: 400, Kind: entity.MediaKindImage, Size: 10},
+	}, nil)
+	albums.EXPECT().ResolveByFolder(ctx, int64(400), "Revived", testDefaultSendMode).
+		Return(album, repo.AlbumResolution{}, nil)
+	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(false, nil)
+	noCoverCleanup(ctx, albums, images, album, []int64{41})
+	_ = events
+
+	expectNothingMissing(albums)
+
+	report, err := uc.SyncImages(ctx)
+
+	require.NoError(t, err)
+	require.Empty(t, report.Events)
+}
+
+// A folder that survived but lost files records a files_removed notice, and that
+// notice stays out of report.Events so nothing is posted to Discord.
+func TestSyncImagesRecordsRemovedFiles(t *testing.T) {
+	t.Parallel()
+
+	uc, source, albums, images, events := syncUseCase(t)
+	ctx := context.Background()
+
+	album := entity.Album{ID: 5, Name: "Trimmed", FolderID: 500}
+
+	albums.EXPECT().Count(ctx, countQuery()).Return(2, nil)
+	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
+		{FileID: 51, Name: "kept.jpg", ParentFolderName: "Trimmed", ParentFolderID: 500, Kind: entity.MediaKindImage, Size: 10},
+	}, nil)
+	albums.EXPECT().ResolveByFolder(ctx, int64(500), "Trimmed", testDefaultSendMode).
+		Return(album, repo.AlbumResolution{}, nil)
+	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(false, nil)
+
+	images.EXPECT().SoftDeleteByAlbumNotInFileIDs(ctx, 5, testSourceName, []int64{51}).Return([]entity.Image{
+		{ID: 91, URL: "gone.jpg", Kind: entity.MediaKindImage},
+		{ID: 92, URL: "gone.mp4", Kind: entity.MediaKindVideo},
+	}, nil)
+	images.EXPECT().FindCoverByAlbum(ctx, 5).Return(entity.Image{}, false, nil)
+	albums.EXPECT().ClearCover(ctx, 5).Return(nil)
+
+	events.EXPECT().Insert(ctx, entity.SyncEvent{
+		EventType:     entity.SyncEventFilesRemoved,
+		AlbumID:       5,
+		AlbumName:     "Trimmed",
+		RemovedImages: 1,
+		RemovedVideos: 1,
+		FileNames:     []string{"gone.jpg", "gone.mp4"},
+	}).DoAndReturn(captureEvent(3))
+
+	expectNothingMissing(albums)
+
+	report, err := uc.SyncImages(ctx)
+
+	require.NoError(t, err)
+	require.Empty(t, report.Events)
+	require.Len(t, report.Notices, 1)
+	require.Equal(t, entity.SyncEventFilesRemoved, report.Notices[0].EventType)
+	require.Equal(t, int64(3), report.Notices[0].ID)
+}
+
+// A folder matched by id under a new name renames its album in place, and the
+// rename is recorded as its own activity notice.
+func TestSyncImagesRecordsRename(t *testing.T) {
+	t.Parallel()
+
+	uc, source, albums, images, events := syncUseCase(t)
+	ctx := context.Background()
+
+	// ResolveByFolder returns the album already carrying its new name.
+	album := entity.Album{ID: 6, Name: "NewName", FolderID: 600, PositiveRating: 42}
+
+	albums.EXPECT().Count(ctx, countQuery()).Return(2, nil)
+	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
+		{FileID: 61, Name: "a.jpg", ParentFolderName: "NewName", ParentFolderID: 600, Kind: entity.MediaKindImage, Size: 10},
+	}, nil)
+	albums.EXPECT().ResolveByFolder(ctx, int64(600), "NewName", testDefaultSendMode).
+		Return(album, repo.AlbumResolution{RenamedFrom: "OldName"}, nil)
+	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(false, nil)
+	noCoverCleanup(ctx, albums, images, album, []int64{61})
+
+	events.EXPECT().Insert(ctx, entity.SyncEvent{
+		EventType:    entity.SyncEventAlbumRenamed,
+		AlbumID:      6,
+		AlbumName:    "NewName",
+		PreviousName: "OldName",
+	}).DoAndReturn(captureEvent(4))
+
+	expectNothingMissing(albums)
+
+	report, err := uc.SyncImages(ctx)
+
+	require.NoError(t, err)
+	// A rename is not new content: nothing goes to Discord.
+	require.Empty(t, report.Events)
+	require.Len(t, report.Notices, 1)
+	require.Equal(t, entity.SyncEventAlbumRenamed, report.Notices[0].EventType)
+	require.Equal(t, "OldName", report.Notices[0].PreviousName)
 }
 
 func TestSyncImagesMarksVanishedAlbum(t *testing.T) {
@@ -185,25 +313,41 @@ func TestSyncImagesMarksVanishedAlbum(t *testing.T) {
 
 	album := entity.Album{ID: 1, Name: "Kept"}
 
-	albums.EXPECT().Count(ctx, repo.AlbumAdminListQuery{}).Return(2, nil)
+	albums.EXPECT().Count(ctx, countQuery()).Return(2, nil)
 	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
-		{FileID: 11, Name: "a.jpg", ParentFolderName: "Kept", Kind: entity.MediaKindImage, Size: 10},
+		{FileID: 11, Name: "a.jpg", ParentFolderName: "Kept", ParentFolderID: 100, Kind: entity.MediaKindImage, Size: 10},
 	}, nil)
-	albums.EXPECT().GetOrCreate(ctx, "Kept", testDefaultSendMode).Return(album, false, nil)
+	albums.EXPECT().ResolveByFolder(ctx, int64(100), "Kept", testDefaultSendMode).
+		Return(album, repo.AlbumResolution{}, nil)
 	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(false, nil)
 	noCoverCleanup(ctx, albums, images, album, []int64{11})
-	_ = events
 
 	// Only "Kept" was seen, so the album whose folder disappeared is flagged
-	// (and reported) rather than deleted.
+	// (and reported) rather than deleted...
 	albums.EXPECT().ClearMissing(ctx, []string{"Kept"}).Return(nil)
-	albums.EXPECT().MarkMissingExcept(ctx, []string{"Kept"}).Return([]string{"Gone"}, nil)
+	albums.EXPECT().MarkMissingExcept(ctx, []string{"Kept"}).
+		Return([]entity.Album{{ID: 9, Name: "Gone"}}, nil)
+
+	// ...and its files are retired with it, which the activity log records.
+	images.EXPECT().SoftDeleteByAlbum(ctx, 9, testSourceName).Return([]entity.Image{
+		{ID: 81, URL: "x.jpg", Kind: entity.MediaKindImage},
+	}, nil)
+	events.EXPECT().Insert(ctx, entity.SyncEvent{
+		EventType:     entity.SyncEventAlbumMissing,
+		AlbumID:       9,
+		AlbumName:     "Gone",
+		RemovedImages: 1,
+		FileNames:     []string{"x.jpg"},
+	}).DoAndReturn(captureEvent(5))
 
 	report, err := uc.SyncImages(ctx)
 
 	require.NoError(t, err)
 	require.Equal(t, []string{"Gone"}, report.MissingAlbums)
 	require.False(t, report.EmptyScan)
+	require.Len(t, report.Notices, 1)
+	require.Equal(t, entity.SyncEventAlbumMissing, report.Notices[0].EventType)
+	require.Empty(t, report.Events)
 }
 
 func TestSyncImagesClearsMissingWhenFolderReturns(t *testing.T) {
@@ -216,18 +360,15 @@ func TestSyncImagesClearsMissingWhenFolderReturns(t *testing.T) {
 	flagged := time.Now().Add(-24 * time.Hour)
 	album := entity.Album{ID: 5, Name: "Back", MissingSince: &flagged}
 
-	albums.EXPECT().Count(ctx, repo.AlbumAdminListQuery{}).Return(1, nil)
+	albums.EXPECT().Count(ctx, countQuery()).Return(1, nil)
 	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
-		{FileID: 51, Name: "b.jpg", ParentFolderName: "Back", Kind: entity.MediaKindImage, Size: 10},
+		{FileID: 51, Name: "b.jpg", ParentFolderName: "Back", ParentFolderID: 500, Kind: entity.MediaKindImage, Size: 10},
 	}, nil)
-	albums.EXPECT().GetOrCreate(ctx, "Back", testDefaultSendMode).Return(album, false, nil)
+	albums.EXPECT().ResolveByFolder(ctx, int64(500), "Back", testDefaultSendMode).
+		Return(album, repo.AlbumResolution{}, nil)
 	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(true, nil)
 	noCoverCleanup(ctx, albums, images, album, []int64{51})
-	events.EXPECT().Insert(ctx, gomock.Any()).
-		DoAndReturn(func(_ context.Context, ev entity.SyncEvent) (entity.SyncEvent, error) {
-			ev.ID = 1
-			return ev, nil
-		})
+	events.EXPECT().Insert(ctx, gomock.Any()).DoAndReturn(captureEvent(1))
 
 	albums.EXPECT().ClearMissing(ctx, []string{"Back"}).Return(nil)
 	albums.EXPECT().MarkMissingExcept(ctx, []string{"Back"}).Return(nil, nil)
@@ -244,7 +385,7 @@ func TestSyncImagesEmptyScanSkipsMissingPass(t *testing.T) {
 	uc, source, albums, images, events := syncUseCase(t)
 	ctx := context.Background()
 
-	albums.EXPECT().Count(ctx, repo.AlbumAdminListQuery{}).Return(3, nil)
+	albums.EXPECT().Count(ctx, countQuery()).Return(3, nil)
 	// A source that succeeds but returns nothing almost always means a broken
 	// configuration, so nothing may be flagged: no ClearMissing/MarkMissingExcept
 	// expectations are registered, and the mock controller fails if they are called.
@@ -256,4 +397,5 @@ func TestSyncImagesEmptyScanSkipsMissingPass(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, report.EmptyScan)
 	require.Empty(t, report.MissingAlbums)
+	require.Empty(t, report.Notices)
 }

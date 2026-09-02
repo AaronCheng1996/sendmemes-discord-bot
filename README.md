@@ -133,22 +133,47 @@ other options.
   resolves them on demand and caches them in memory (~50 min TTL) to keep
   pCloud API usage low; local files have no such expiry.
 
-### When a source folder disappears
+### Reorganizing the media library
 
-Deleting (or emptying) a folder does not silently delete the album. The next
-sync flags it with `missing_since` and the dashboard shows a **missing** badge:
+A sync never deletes a row. Everything it can no longer find is *retired* with a
+flag, so nothing is lost if a folder was only moved away for a while.
 
-- The album keeps its `positive_rating`, send mode and config, so nothing is
-  lost if the folder was only moved away temporarily.
+**A folder that disappears** is flagged with `missing_since`, and its files with
+`deleted_at`. Both are hidden from the dashboard by default (tick **Show
+missing** on the Albums page, **Show deleted** on Images) and the Activity page
+records a **Folder removed** event naming what went with it:
+
+- The album keeps its `positive_rating`, send mode and config.
 - Missing albums are skipped by scheduled delivery, so the channel stops
   receiving failed sends for files that no longer exist.
-- If the folder comes back, the next sync clears the flag automatically.
+- If the folder comes back, the next sync clears both flags automatically. The
+  revived files are *not* announced as new content — they were never new.
 - To remove it for good, delete the album from the Albums page; its image rows
   are cascaded away with it.
 
-As a safety net, a sync that finds **no media at all** skips this pass entirely
-and logs a warning — that almost always means a broken source, a wrong root ID
-or expired credentials rather than an intentionally emptied library.
+**Files removed from a folder that survived** are retired the same way and
+recorded as a **Files removed** event. Removals are only ever written to the
+activity log; they are never posted to Discord.
+
+**A renamed folder keeps its album.** Every album records the source's own
+`folder_id` (a pCloud `folderid`, which survives a rename), so a sync resolves a
+walked folder like this:
+
+| What the walk finds | What happens |
+|---|---|
+| An album with that name | It is the album; its `folder_id` is (re)bound to the walked folder |
+| No such name, but an album with that `folder_id` | Same folder under a new name: the album is **renamed in place**, keeping its rating, send mode and config, and a **Renamed** event is logged |
+| Neither | A new album is created |
+
+The name is checked first, so it stays the album's identity: if a rename would
+collide with an album that already owns the new name, that album wins and the
+folder id moves to it. Local-filesystem sources have no stable folder id (a
+directory is only its path), so renaming a local folder still reads as a new
+album.
+
+As a safety net, a sync that finds **no media at all** skips the missing pass
+entirely and logs a warning — that almost always means a broken source, a wrong
+root ID or expired credentials rather than an intentionally emptied library.
 
 ### Customizing messages
 
@@ -288,7 +313,8 @@ apply in every mode. An album is the top style layer, so its `caption` and
 - Albums CRUD (`/albums`) — including per-album `send_mode` (delivery type)
   and `send_config_json` (Custom mode overrides)
 - Images CRUD (`/images`, optional `album_id` scope; rows carry `kind` and
-  `size_bytes`)
+  `size_bytes`). Soft-deleted rows are hidden unless `include_deleted=1`, as
+  missing albums are on `/albums` unless `include_missing=1`
 - Delivery rules CRUD (`/delivery-rules`) — including per-rule
   `message_style` (format, title, body and the embed options)
 - Sync settings read/update (`/sync-settings`) and manual sync
@@ -297,8 +323,8 @@ apply in every mode. An album is the top style layer, so its `caption` and
   (`/albums/:id/send-test`) — both take an optional `channel_id`, falling back
   to the first enabled scheduled rule, and both run as background jobs
   (`GET /jobs`)
-- Sync activity feed (`/sync-events`) — paginated discovery events for the
-  dashboard Activity page
+- Sync activity feed (`/sync-events`) — paginated events for the dashboard
+  Activity page: content discovered, files and folders removed, folders renamed
 - Aggregated system status (DB ping + Discord session + sync interval + rule
   count + next scheduled run + last sync time + album/image/video counts) at
   `/system/status`

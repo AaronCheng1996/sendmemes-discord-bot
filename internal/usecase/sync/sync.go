@@ -44,25 +44,53 @@ func New(source repo.MediaSource, sourceName string, albums repo.AlbumsRepo, ima
 	}
 }
 
-// albumSyncStats accumulates per-album discovery counters for one run.
-type albumSyncStats struct {
-	albumID   int
-	created   bool
-	newImages int
-	newVideos int
-	fileNames []string
-	newMedia  []entity.Image
+// albumGroup collects the files one walked folder contributed, so an album is
+// resolved once per run rather than once per file. Folders are keyed by name
+// (the album's identity); folderID is the id of the first file's parent, which
+// only differs between files when two folders share a name and therefore merge
+// into one album anyway.
+type albumGroup struct {
+	name     string
+	folderID int64
+	entries  []repo.MediaEntry
 }
 
-// SyncImages fetches the full pCloud folder tree and reconciles it with the database:
-//  1. For each discovered media file, upsert the album and the file row.
-//  2. Remove DB rows for files that no longer exist in pCloud (per album).
+// albumSyncStats accumulates one album's counters for one run: what the walk
+// added, and what it took away.
+type albumSyncStats struct {
+	albumID     int
+	created     bool
+	renamedFrom string
+	// vanished marks an album whose folder was not in this walk at all, as
+	// opposed to one that merely lost some files.
+	vanished      bool
+	newImages     int
+	newVideos     int
+	fileNames     []string
+	newMedia      []entity.Image
+	removedImages int
+	removedVideos int
+	removedNames  []string
+}
+
+// SyncImages fetches the full source folder tree and reconciles it with the database:
+//  1. Group the walked files by folder, then resolve each folder to its album
+//     (following a rename by folder id) and upsert every file row.
+//  2. Soft-delete the rows for files the folder no longer holds.
 //  3. Detect cover images (filename matches cover.* or _cover.*) and update album.has_cover.
-//  4. Record one sync event per album that gained new content and return them in
-//     a SyncReport (InitialImport is set when the database had no albums before
-//     this run, so callers can suppress notifications on first import).
+//  4. Flag the albums whose folder disappeared and soft-delete their files too.
+//  5. Record one sync event per album that changed. Events describing new
+//     content go to report.Events (deliverable to Discord); removals and renames
+//     go to report.Notices, which is for the activity log only. InitialImport is
+//     set when the database had no albums before this run, so callers can
+//     suppress notifications on first import.
+//
+// Nothing here deletes a row. Both an album and a file are retired by a flag, so
+// a folder that is moved away and comes back recovers on its own.
 func (uc *UseCase) SyncImages(ctx context.Context) (entity.SyncReport, error) {
-	priorAlbums, err := uc.albums.Count(ctx, repo.AlbumAdminListQuery{})
+	// Missing albums count too: the question is whether this database has ever
+	// been populated, not whether its folders are all still there.
+	priorAlbums, err := uc.albums.Count(ctx, repo.AlbumAdminListQuery{IncludeMissing: true})
 	if err != nil {
 		return entity.SyncReport{}, fmt.Errorf("SyncUseCase - SyncImages - albums.Count: %w", err)
 	}
@@ -73,77 +101,40 @@ func (uc *UseCase) SyncImages(ctx context.Context) (entity.SyncReport, error) {
 		return report, fmt.Errorf("SyncUseCase - SyncImages - ListMedia: %w", err)
 	}
 
-	// Group file IDs per album name so we can prune stale rows and detect covers
-	// after upsert, and track per-album discovery stats for the sync report.
-	albumFileIDs := make(map[string][]int64)
-	stats := make(map[string]*albumSyncStats)
+	groups := groupByFolder(entries)
+	stats := make(map[string]*albumSyncStats, len(groups))
+	seen := make([]string, 0, len(groups))
 
-	for _, entry := range entries {
-		album, created, err := uc.albums.GetOrCreate(ctx, entry.ParentFolderName, uc.defaultMode)
-		if err != nil {
-			return report, fmt.Errorf("SyncUseCase - SyncImages - GetOrCreate album %q: %w", entry.ParentFolderName, err)
+	for _, group := range groups {
+		album, res, rerr := uc.albums.ResolveByFolder(ctx, group.folderID, group.name, uc.defaultMode)
+		if rerr != nil {
+			return report, fmt.Errorf("SyncUseCase - SyncImages - ResolveByFolder %q: %w", group.name, rerr)
 		}
+		// A rename has already moved the row to the folder's name, so from here
+		// on the album is only known by the name the walk reported.
+		st := &albumSyncStats{albumID: album.ID, created: res.Created, renamedFrom: res.RenamedFrom}
+		stats[group.name] = st
+		seen = append(seen, group.name)
 
-		st := stats[entry.ParentFolderName]
-		if st == nil {
-			st = &albumSyncStats{albumID: album.ID}
-			stats[entry.ParentFolderName] = st
-		}
-		st.created = st.created || created
-
-		img := entity.Image{
-			FileID:    entry.FileID,
-			URL:       entry.Name, // store filename; full link resolved at send time via the MediaSource
-			Source:    uc.sourceName,
-			AlbumID:   album.ID,
-			Kind:      entry.Kind,
-			SizeBytes: entry.Size,
-		}
-		inserted, err := uc.images.UpsertByFileID(ctx, img)
-		if err != nil {
-			return report, fmt.Errorf("SyncUseCase - SyncImages - UpsertByFileID fileID=%d: %w", entry.FileID, err)
-		}
-		if inserted {
-			if entry.Kind == entity.MediaKindVideo {
-				st.newVideos++
-			} else {
-				st.newImages++
-			}
-			if len(st.fileNames) < maxEventFileNames {
-				st.fileNames = append(st.fileNames, entry.Name)
-			}
-			if len(st.newMedia) < maxEventMedia {
-				st.newMedia = append(st.newMedia, entity.Image{
-					FileID:    entry.FileID,
-					URL:       entry.Name,
-					Source:    uc.sourceName,
-					AlbumID:   st.albumID,
-					AlbumName: entry.ParentFolderName, // no DB round-trip yet, so carry it from the walk
-					Kind:      entry.Kind,
-					SizeBytes: entry.Size,
-				})
+		fileIDs := make([]int64, 0, len(group.entries))
+		for _, entry := range group.entries {
+			fileIDs = append(fileIDs, entry.FileID)
+			if uerr := uc.upsertEntry(ctx, album.ID, group.name, entry, st); uerr != nil {
+				return report, uerr
 			}
 		}
 
-		albumFileIDs[entry.ParentFolderName] = append(albumFileIDs[entry.ParentFolderName], entry.FileID)
-	}
-
-	// Per-album cleanup and cover detection.
-	for albumName, fileIDs := range albumFileIDs {
-		album, err := uc.albums.GetByName(ctx, albumName)
-		if err != nil {
-			return report, fmt.Errorf("SyncUseCase - SyncImages - GetByName %q: %w", albumName, err)
+		removed, derr := uc.images.SoftDeleteByAlbumNotInFileIDs(ctx, album.ID, uc.sourceName, fileIDs)
+		if derr != nil {
+			return report, fmt.Errorf("SyncUseCase - SyncImages - SoftDeleteByAlbumNotInFileIDs album %q: %w", group.name, derr)
 		}
-
-		if err = uc.images.DeleteByAlbumNotInFileIDs(ctx, album.ID, uc.sourceName, fileIDs); err != nil {
-			return report, fmt.Errorf("SyncUseCase - SyncImages - DeleteByAlbumNotInFileIDs album %q: %w", albumName, err)
-		}
+		st.countRemoved(removed)
 
 		// Detect cover: look for an image whose filename matches cover.* or _cover.*
 		// Cover detection is best-effort; errors do not abort the sync.
-		if err = uc.updateCover(ctx, album.ID); err != nil {
+		if cerr := uc.updateCover(ctx, album.ID); cerr != nil {
 			// Non-fatal: log via error return but continue processing other albums.
-			_ = err // caller (scheduler) logs the returned error; we just skip this album's cover
+			_ = cerr // caller (scheduler) logs the returned error; we just skip this album's cover
 		}
 	}
 
@@ -158,11 +149,6 @@ func (uc *UseCase) SyncImages(ctx context.Context) (entity.SyncReport, error) {
 	if len(entries) == 0 {
 		report.EmptyScan = true
 	} else {
-		seen := make([]string, 0, len(albumFileIDs))
-		for name := range albumFileIDs {
-			seen = append(seen, name)
-		}
-
 		if err = uc.albums.ClearMissing(ctx, seen); err != nil {
 			return report, fmt.Errorf("SyncUseCase - SyncImages - ClearMissing: %w", err)
 		}
@@ -170,27 +156,157 @@ func (uc *UseCase) SyncImages(ctx context.Context) (entity.SyncReport, error) {
 		if merr != nil {
 			return report, fmt.Errorf("SyncUseCase - SyncImages - MarkMissingExcept: %w", merr)
 		}
-		sort.Strings(marked)
-		report.MissingAlbums = marked
-	}
+		sort.Slice(marked, func(i, j int) bool { return marked[i].Name < marked[j].Name })
 
-	// Persist one event per album with new content, ordered by album name so
-	// notification output is deterministic.
-	changed := make([]string, 0, len(stats))
-	for name, st := range stats {
-		if st.created || st.newImages > 0 || st.newVideos > 0 {
-			changed = append(changed, name)
+		for _, album := range marked {
+			report.MissingAlbums = append(report.MissingAlbums, album.Name)
+
+			// The folder is gone, so its files are as unreachable as the ones
+			// pruned out of a folder that survived: retire them the same way.
+			removed, rerr := uc.images.SoftDeleteByAlbum(ctx, album.ID, uc.sourceName)
+			if rerr != nil {
+				return report, fmt.Errorf("SyncUseCase - SyncImages - SoftDeleteByAlbum %q: %w", album.Name, rerr)
+			}
+			st := &albumSyncStats{albumID: album.ID, vanished: true}
+			st.countRemoved(removed)
+			stats[album.Name] = st
 		}
 	}
-	sort.Strings(changed)
 
-	for _, name := range changed {
+	if rerr := uc.recordEvents(ctx, &report, stats); rerr != nil {
+		return report, rerr
+	}
+	return report, nil
+}
+
+// groupByFolder buckets a walk's files by their album name, preserving the order
+// the source reported so the run's events stay stable between syncs. Two folders
+// sharing a name still merge into one album; the first one's id wins.
+func groupByFolder(entries []repo.MediaEntry) []*albumGroup {
+	groups := make([]*albumGroup, 0, len(entries))
+	index := make(map[string]*albumGroup, len(entries))
+	for _, entry := range entries {
+		g := index[entry.ParentFolderName]
+		if g == nil {
+			g = &albumGroup{name: entry.ParentFolderName, folderID: entry.ParentFolderID}
+			index[entry.ParentFolderName] = g
+			groups = append(groups, g)
+		}
+		g.entries = append(g.entries, entry)
+	}
+	return groups
+}
+
+// upsertEntry writes one walked file into albumID and records it as new content
+// when the row did not already exist (a revived soft-deleted row does not count).
+func (uc *UseCase) upsertEntry(ctx context.Context, albumID int, albumName string, entry repo.MediaEntry, st *albumSyncStats) error {
+	inserted, err := uc.images.UpsertByFileID(ctx, entity.Image{
+		FileID:    entry.FileID,
+		URL:       entry.Name, // store filename; full link resolved at send time via the MediaSource
+		Source:    uc.sourceName,
+		AlbumID:   albumID,
+		Kind:      entry.Kind,
+		SizeBytes: entry.Size,
+	})
+	if err != nil {
+		return fmt.Errorf("SyncUseCase - SyncImages - UpsertByFileID fileID=%d: %w", entry.FileID, err)
+	}
+	if !inserted {
+		return nil
+	}
+
+	if entry.Kind == entity.MediaKindVideo {
+		st.newVideos++
+	} else {
+		st.newImages++
+	}
+	if len(st.fileNames) < maxEventFileNames {
+		st.fileNames = append(st.fileNames, entry.Name)
+	}
+	if len(st.newMedia) < maxEventMedia {
+		st.newMedia = append(st.newMedia, entity.Image{
+			FileID:    entry.FileID,
+			URL:       entry.Name,
+			Source:    uc.sourceName,
+			AlbumID:   albumID,
+			AlbumName: albumName, // no DB round-trip yet, so carry it from the walk
+			Kind:      entry.Kind,
+			SizeBytes: entry.Size,
+		})
+	}
+	return nil
+}
+
+// countRemoved folds a soft-delete result into the album's counters.
+func (st *albumSyncStats) countRemoved(removed []entity.Image) {
+	for i := range removed {
+		img := &removed[i]
+		if img.Kind == entity.MediaKindVideo {
+			st.removedVideos++
+		} else {
+			st.removedImages++
+		}
+		if len(st.removedNames) < maxEventFileNames {
+			st.removedNames = append(st.removedNames, img.URL)
+		}
+	}
+}
+
+// recordEvents persists this run's events in album name order, so the output is
+// deterministic. Each saved event is filed by whether its type maps to a
+// delivery-rule trigger: those go to report.Events and may reach Discord, the
+// rest to report.Notices, which the activity log reads and the notifier never
+// touches.
+func (uc *UseCase) recordEvents(ctx context.Context, report *entity.SyncReport, stats map[string]*albumSyncStats) error {
+	names := make([]string, 0, len(stats))
+	for name := range stats {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
 		st := stats[name]
+		pending := pendingEvents(name, st)
+		for i := range pending {
+			saved, err := uc.events.Insert(ctx, pending[i])
+			if err != nil {
+				return fmt.Errorf("SyncUseCase - SyncImages - events.Insert %s %q: %w", pending[i].EventType, name, err)
+			}
+			if entity.SyncEventTriggerType(saved.EventType) == "" {
+				report.Notices = append(report.Notices, saved)
+				continue
+			}
+			// Attach the in-memory media after persistence (it is never stored).
+			saved.NewMedia = st.newMedia
+			report.Events = append(report.Events, saved)
+		}
+	}
+
+	return nil
+}
+
+// pendingEvents turns one album's counters into the events they call for, in a
+// stable order: the rename first, then what the run added, then what it took
+// away. An album can produce all three — a renamed folder may have gained files
+// and lost others in the same run.
+func pendingEvents(name string, st *albumSyncStats) []entity.SyncEvent {
+	var events []entity.SyncEvent
+
+	if st.renamedFrom != "" {
+		events = append(events, entity.SyncEvent{
+			EventType:    entity.SyncEventAlbumRenamed,
+			AlbumID:      st.albumID,
+			AlbumName:    name,
+			PreviousName: st.renamedFrom,
+		})
+	}
+
+	if st.created || st.newImages > 0 || st.newVideos > 0 {
 		eventType := entity.SyncEventFilesAdded
 		if st.created {
 			eventType = entity.SyncEventAlbumCreated
 		}
-		saved, err := uc.events.Insert(ctx, entity.SyncEvent{
+		events = append(events, entity.SyncEvent{
 			EventType: eventType,
 			AlbumID:   st.albumID,
 			AlbumName: name,
@@ -198,15 +314,26 @@ func (uc *UseCase) SyncImages(ctx context.Context) (entity.SyncReport, error) {
 			NewVideos: st.newVideos,
 			FileNames: st.fileNames,
 		})
-		if err != nil {
-			return report, fmt.Errorf("SyncUseCase - SyncImages - events.Insert %q: %w", name, err)
-		}
-		// Attach the in-memory media after persistence (it is never stored).
-		saved.NewMedia = st.newMedia
-		report.Events = append(report.Events, saved)
 	}
 
-	return report, nil
+	// A vanished album is worth an event even when it held no files; a folder
+	// that survived only reports what it actually lost.
+	if st.vanished || st.removedImages > 0 || st.removedVideos > 0 {
+		eventType := entity.SyncEventFilesRemoved
+		if st.vanished {
+			eventType = entity.SyncEventAlbumMissing
+		}
+		events = append(events, entity.SyncEvent{
+			EventType:     eventType,
+			AlbumID:       st.albumID,
+			AlbumName:     name,
+			RemovedImages: st.removedImages,
+			RemovedVideos: st.removedVideos,
+			FileNames:     st.removedNames,
+		})
+	}
+
+	return events
 }
 
 // updateCover queries the DB for a cover image in the album and updates the album record.

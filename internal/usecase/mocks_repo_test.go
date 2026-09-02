@@ -145,22 +145,6 @@ func (mr *MockAlbumsRepoMockRecorder) GetByName(ctx, name any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByName", reflect.TypeOf((*MockAlbumsRepo)(nil).GetByName), ctx, name)
 }
 
-// GetOrCreate mocks base method.
-func (m *MockAlbumsRepo) GetOrCreate(ctx context.Context, name string, defaultMode entity.AlbumSendMode) (entity.Album, bool, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetOrCreate", ctx, name, defaultMode)
-	ret0, _ := ret[0].(entity.Album)
-	ret1, _ := ret[1].(bool)
-	ret2, _ := ret[2].(error)
-	return ret0, ret1, ret2
-}
-
-// GetOrCreate indicates an expected call of GetOrCreate.
-func (mr *MockAlbumsRepoMockRecorder) GetOrCreate(ctx, name, defaultMode any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrCreate", reflect.TypeOf((*MockAlbumsRepo)(nil).GetOrCreate), ctx, name, defaultMode)
-}
-
 // GetRandom mocks base method.
 func (m *MockAlbumsRepo) GetRandom(ctx context.Context) (entity.Album, error) {
 	m.ctrl.T.Helper()
@@ -221,10 +205,10 @@ func (mr *MockAlbumsRepoMockRecorder) List(ctx, q, offset, limit any) *gomock.Ca
 }
 
 // MarkMissingExcept mocks base method.
-func (m *MockAlbumsRepo) MarkMissingExcept(ctx context.Context, seenNames []string) ([]string, error) {
+func (m *MockAlbumsRepo) MarkMissingExcept(ctx context.Context, seenNames []string) ([]entity.Album, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "MarkMissingExcept", ctx, seenNames)
-	ret0, _ := ret[0].([]string)
+	ret0, _ := ret[0].([]entity.Album)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -247,6 +231,22 @@ func (m *MockAlbumsRepo) MarkSent(ctx context.Context, albumID int) error {
 func (mr *MockAlbumsRepoMockRecorder) MarkSent(ctx, albumID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkSent", reflect.TypeOf((*MockAlbumsRepo)(nil).MarkSent), ctx, albumID)
+}
+
+// ResolveByFolder mocks base method.
+func (m *MockAlbumsRepo) ResolveByFolder(ctx context.Context, folderID int64, name string, defaultMode entity.AlbumSendMode) (entity.Album, repo.AlbumResolution, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolveByFolder", ctx, folderID, name, defaultMode)
+	ret0, _ := ret[0].(entity.Album)
+	ret1, _ := ret[1].(repo.AlbumResolution)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// ResolveByFolder indicates an expected call of ResolveByFolder.
+func (mr *MockAlbumsRepoMockRecorder) ResolveByFolder(ctx, folderID, name, defaultMode any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveByFolder", reflect.TypeOf((*MockAlbumsRepo)(nil).ResolveByFolder), ctx, folderID, name, defaultMode)
 }
 
 // SetCover mocks base method.
@@ -375,20 +375,6 @@ func (m *MockImagesRepo) Delete(ctx context.Context, id int) error {
 func (mr *MockImagesRepoMockRecorder) Delete(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Delete", reflect.TypeOf((*MockImagesRepo)(nil).Delete), ctx, id)
-}
-
-// DeleteByAlbumNotInFileIDs mocks base method.
-func (m *MockImagesRepo) DeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, source string, fileIDs []int64) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteByAlbumNotInFileIDs", ctx, albumID, source, fileIDs)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// DeleteByAlbumNotInFileIDs indicates an expected call of DeleteByAlbumNotInFileIDs.
-func (mr *MockImagesRepoMockRecorder) DeleteByAlbumNotInFileIDs(ctx, albumID, source, fileIDs any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteByAlbumNotInFileIDs", reflect.TypeOf((*MockImagesRepo)(nil).DeleteByAlbumNotInFileIDs), ctx, albumID, source, fileIDs)
 }
 
 // FindCoverByAlbum mocks base method.
@@ -556,6 +542,36 @@ func (m *MockImagesRepo) SetPublicLink(ctx context.Context, id int, link string)
 func (mr *MockImagesRepoMockRecorder) SetPublicLink(ctx, id, link any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPublicLink", reflect.TypeOf((*MockImagesRepo)(nil).SetPublicLink), ctx, id, link)
+}
+
+// SoftDeleteByAlbum mocks base method.
+func (m *MockImagesRepo) SoftDeleteByAlbum(ctx context.Context, albumID int, source string) ([]entity.Image, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SoftDeleteByAlbum", ctx, albumID, source)
+	ret0, _ := ret[0].([]entity.Image)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SoftDeleteByAlbum indicates an expected call of SoftDeleteByAlbum.
+func (mr *MockImagesRepoMockRecorder) SoftDeleteByAlbum(ctx, albumID, source any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SoftDeleteByAlbum", reflect.TypeOf((*MockImagesRepo)(nil).SoftDeleteByAlbum), ctx, albumID, source)
+}
+
+// SoftDeleteByAlbumNotInFileIDs mocks base method.
+func (m *MockImagesRepo) SoftDeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, source string, fileIDs []int64) ([]entity.Image, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SoftDeleteByAlbumNotInFileIDs", ctx, albumID, source, fileIDs)
+	ret0, _ := ret[0].([]entity.Image)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SoftDeleteByAlbumNotInFileIDs indicates an expected call of SoftDeleteByAlbumNotInFileIDs.
+func (mr *MockImagesRepoMockRecorder) SoftDeleteByAlbumNotInFileIDs(ctx, albumID, source, fileIDs any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SoftDeleteByAlbumNotInFileIDs", reflect.TypeOf((*MockImagesRepo)(nil).SoftDeleteByAlbumNotInFileIDs), ctx, albumID, source, fileIDs)
 }
 
 // Update mocks base method.

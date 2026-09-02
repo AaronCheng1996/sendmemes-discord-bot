@@ -82,8 +82,14 @@ func ParseAlbumSendConfig(raw string) (AlbumSendConfig, error) {
 
 // Album represents a named collection of images (derived from folder name).
 type Album struct {
-	ID             int           `json:"id"`
-	Name           string        `json:"name"`
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	// FolderID is the source's own identifier for the folder backing this album
+	// (a pCloud folderid, or a path hash for the local source). The name stays
+	// the album's identity; FolderID is what lets a sync follow the folder
+	// across a rename instead of creating a blank album beside it. 0 until a
+	// sync has seen the folder.
+	FolderID       int64         `json:"folder_id,omitempty"`
 	HasCover       bool          `json:"has_cover"`
 	CoverImageID   int           `json:"cover_image_id,omitempty"`
 	SendMode       AlbumSendMode `json:"send_mode"`

@@ -7,10 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/postgres"
+	"github.com/jackc/pgx/v5"
 )
 
 // SyncEventsRepo persists pCloud sync discovery events.
@@ -36,8 +35,8 @@ func (r *SyncEventsRepo) Insert(ctx context.Context, ev entity.SyncEvent) (entit
 
 	sql, args, err := r.Builder.
 		Insert("sync_events").
-		Columns("event_type", "album_id", "album_name", "new_images", "new_videos", "file_names").
-		Values(ev.EventType, nullableInt(ev.AlbumID), ev.AlbumName, ev.NewImages, ev.NewVideos, rawNames).
+		Columns("event_type", "album_id", "album_name", "new_images", "new_videos", "removed_images", "removed_videos", "previous_name", "file_names").
+		Values(ev.EventType, nullableInt(ev.AlbumID), ev.AlbumName, ev.NewImages, ev.NewVideos, ev.RemovedImages, ev.RemovedVideos, nullableString(ev.PreviousName), rawNames).
 		Suffix("RETURNING id, created_at").
 		ToSql()
 	if err != nil {
@@ -60,7 +59,11 @@ func (r *SyncEventsRepo) List(ctx context.Context, offset, limit int) ([]entity.
 	}
 
 	sql, args, err := r.Builder.
-		Select("id", "event_type", "COALESCE(album_id, 0)", "album_name", "new_images", "new_videos", "file_names", "created_at").
+		Select(
+			"id", "event_type", "COALESCE(album_id, 0)", "album_name",
+			"new_images", "new_videos", "removed_images", "removed_videos",
+			"COALESCE(previous_name, '')", "file_names", "created_at",
+		).
 		From("sync_events").
 		OrderBy("created_at DESC, id DESC").
 		Offset(uint64(offset)).
@@ -80,7 +83,11 @@ func (r *SyncEventsRepo) List(ctx context.Context, offset, limit int) ([]entity.
 	for rows.Next() {
 		var ev entity.SyncEvent
 		var rawNames []byte
-		if err = rows.Scan(&ev.ID, &ev.EventType, &ev.AlbumID, &ev.AlbumName, &ev.NewImages, &ev.NewVideos, &rawNames, &ev.CreatedAt); err != nil {
+		if err = rows.Scan(
+			&ev.ID, &ev.EventType, &ev.AlbumID, &ev.AlbumName,
+			&ev.NewImages, &ev.NewVideos, &ev.RemovedImages, &ev.RemovedVideos,
+			&ev.PreviousName, &rawNames, &ev.CreatedAt,
+		); err != nil {
 			return nil, fmt.Errorf("SyncEventsRepo - List - Scan: %w", err)
 		}
 		if len(rawNames) > 0 {

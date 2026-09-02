@@ -87,8 +87,11 @@ func (b *Bot) doSync() {
 		b.l.Warn("sync found no media at all — skipped the missing-album pass (check the source configuration and credentials)")
 	}
 	if len(report.MissingAlbums) > 0 {
-		b.l.Info("sync flagged %d album(s) as missing (excluded from scheduled sends until their folder returns): %s",
+		b.l.Info("sync flagged %d album(s) as missing (hidden from the dashboard and excluded from scheduled sends until their folder returns): %s",
 			len(report.MissingAlbums), strings.Join(report.MissingAlbums, ", "))
+	}
+	if len(report.Notices) > 0 {
+		b.vlog("sync recorded %d activity-log notice(s) (removals/renames); not delivered to Discord", len(report.Notices))
 	}
 	b.notifySyncEvents(ctx, report)
 }
@@ -110,7 +113,14 @@ func (b *Bot) notifySyncEvents(ctx context.Context, report entity.SyncReport) {
 			b.vlog("sync notify: reached %d-event cap, skipping the rest", maxSyncNotifyMessages)
 			break
 		}
-		rules, err := b.rulesUC.ListActiveByTrigger(ctx, entity.SyncEventTriggerType(ev.EventType))
+		trigger := entity.SyncEventTriggerType(ev.EventType)
+		if trigger == "" {
+			// Removals and renames have no matching rule trigger; report.Notices
+			// already keeps them out of this loop, so this only guards a future
+			// event type that forgets to.
+			continue
+		}
+		rules, err := b.rulesUC.ListActiveByTrigger(ctx, trigger)
 		if err != nil {
 			b.l.Error(fmt.Errorf("notifySyncEvents ListActiveByTrigger: %w", err))
 			continue

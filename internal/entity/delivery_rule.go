@@ -20,19 +20,19 @@ const (
 // random album every SendInterval; new_album / new_files rules post freshly
 // discovered media when a sync run reports it.
 type DeliveryRule struct {
-	ID           int64     `json:"id"`
-	Name         string    `json:"name"`
-	GuildID      string    `json:"guild_id"`
-	TriggerType  string    `json:"trigger_type"`
-	ChannelID    string    `json:"channel_id"`
-	SendInterval string    `json:"send_interval,omitempty"` // scheduled only
-	HistorySize  int       `json:"history_size"`            // scheduled only
-	Enabled      bool      `json:"enabled"`
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	GuildID      string `json:"guild_id"`
+	TriggerType  string `json:"trigger_type"`
+	ChannelID    string `json:"channel_id"`
+	SendInterval string `json:"send_interval,omitempty"` // scheduled only
+	HistorySize  int    `json:"history_size"`            // scheduled only
+	Enabled      bool   `json:"enabled"`
 	// MessageStyle overrides the app defaults for this rule's posts. Unset
 	// fields inherit; the album's own config overrides whatever survives here.
 	MessageStyle MessageStyle `json:"message_style"`
-	CreatedAt    time.Time `json:"created_at,omitempty"`
-	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+	CreatedAt    time.Time    `json:"created_at,omitempty"`
+	UpdatedAt    time.Time    `json:"updated_at,omitempty"`
 
 	// NextRunAt and ScheduleDescription are computed on read for scheduled
 	// rules (never persisted) so the UI can show when a rule will next fire.
@@ -52,12 +52,18 @@ func ParseTriggerType(s string) (string, error) {
 }
 
 // SyncEventTriggerType maps a sync event type to the delivery-rule trigger that
-// should fire for it.
+// should fire for it. Events that report a removal or a rename map to no
+// trigger at all (empty string): they exist for the activity log, and posting an
+// album's files to Discord because they just disappeared would be absurd.
 func SyncEventTriggerType(eventType string) string {
-	if eventType == SyncEventAlbumCreated {
+	switch eventType {
+	case SyncEventAlbumCreated:
 		return TriggerNewAlbum
+	case SyncEventFilesAdded:
+		return TriggerNewFiles
+	default:
+		return ""
 	}
-	return TriggerNewFiles
 }
 
 // Style exposes the rule's presentation overrides as a message-style layer,

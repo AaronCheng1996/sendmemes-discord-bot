@@ -59,9 +59,12 @@ func isTokenErr(err error) bool {
 
 // pcloudMeta mirrors the JSON structure returned by pCloud's listfolder API.
 type pcloudMeta struct {
-	Name     string       `json:"name"`
-	IsFolder bool         `json:"isfolder"`
-	FileID   int64        `json:"fileid"`
+	Name     string `json:"name"`
+	IsFolder bool   `json:"isfolder"`
+	FileID   int64  `json:"fileid"`
+	// FolderID is pCloud's own id for a folder node. It survives a rename, which
+	// is what lets a sync recognize a renamed album folder.
+	FolderID int64        `json:"folderid"`
 	Size     int64        `json:"size"`
 	Contents []pcloudMeta `json:"contents"`
 }
@@ -397,18 +400,20 @@ func (c *PCloudClient) doListFolder(ctx context.Context, folderID int64) ([]repo
 		if !child.IsFolder {
 			continue
 		}
-		collectMedia(child, child.Name, &entries)
+		collectMedia(child, child.Name, child.FolderID, &entries)
 	}
 	return entries, nil
 }
 
 // collectMedia recursively walks a pCloud folder tree node, collecting image and
 // video files (per mediaExtensions). Unknown extensions and root-level files are
-// skipped. albumName is always the leaf folder name containing the file.
-func collectMedia(node pcloudMeta, albumName string, out *[]repo.MediaEntry) {
+// skipped. albumName and albumFolderID always describe the leaf folder holding
+// the file — the id is carried alongside the name so a sync can follow the
+// folder across a rename.
+func collectMedia(node pcloudMeta, albumName string, albumFolderID int64, out *[]repo.MediaEntry) {
 	for _, child := range node.Contents {
 		if child.IsFolder {
-			collectMedia(child, child.Name, out)
+			collectMedia(child, child.Name, child.FolderID, out)
 			continue
 		}
 		kind, ok := entity.KindOfExtension(child.Name)
@@ -419,6 +424,7 @@ func collectMedia(node pcloudMeta, albumName string, out *[]repo.MediaEntry) {
 			FileID:           child.FileID,
 			Name:             child.Name,
 			ParentFolderName: albumName,
+			ParentFolderID:   albumFolderID,
 			Kind:             kind,
 			Size:             child.Size,
 		})

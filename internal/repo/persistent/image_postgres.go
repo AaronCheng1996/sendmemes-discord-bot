@@ -24,12 +24,28 @@ func NewImagesRepo(pg *postgres.Postgres) *ImagesRepo {
 	return &ImagesRepo{Postgres: pg}
 }
 
+// imageSelectBuilder is the default projection: live rows only. Every send and
+// preview path goes through it, so a soft-deleted file cannot leak back into a
+// message just because a caller forgot a WHERE clause. Only the admin list
+// opts out, via imageSelectBuilderScoped.
 func imageSelectBuilder(r *ImagesRepo) sq.SelectBuilder {
-	return r.Builder.
-		Select("i.id", "i.url", "i.source", "i.file_id", "i.album_id", "COALESCE(i.guild_id, '')", "COALESCE(a.name, '')", "i.kind", "COALESCE(i.size_bytes, 0)", "COALESCE(i.public_link, '')").
+	return imageSelectBuilderScoped(r, false)
+}
+
+func imageSelectBuilderScoped(r *ImagesRepo, includeDeleted bool) sq.SelectBuilder {
+	b := r.Builder.
+		Select("i.id", "i.url", "i.source", "i.file_id", "i.album_id", "COALESCE(i.guild_id, '')", "COALESCE(a.name, '')", "i.kind", "COALESCE(i.size_bytes, 0)", "COALESCE(i.public_link, '')", "i.deleted_at").
 		From("images i").
 		LeftJoin("albums a ON a.id = i.album_id")
+	if !includeDeleted {
+		b = b.Where(liveImages)
+	}
+	return b
 }
+
+// liveImages is the "not soft-deleted" predicate, spelled once so the aggregate
+// queries that build their own statements stay in step with the projection.
+const liveImages = "i.deleted_at IS NULL"
 
 func scanImageRow(row pgx.Row) (entity.Image, error) {
 	var e entity.Image
@@ -37,7 +53,7 @@ func scanImageRow(row pgx.Row) (entity.Image, error) {
 	var fileID *int64
 	var albumID *int
 	var guildID string
-	if err := row.Scan(&e.ID, &e.URL, &source, &fileID, &albumID, &guildID, &e.AlbumName, &e.Kind, &e.SizeBytes, &e.PublicLink); err != nil {
+	if err := row.Scan(&e.ID, &e.URL, &source, &fileID, &albumID, &guildID, &e.AlbumName, &e.Kind, &e.SizeBytes, &e.PublicLink, &e.DeletedAt); err != nil {
 		return entity.Image{}, err
 	}
 	if source != nil {
@@ -124,7 +140,7 @@ func (r *ImagesRepo) List(ctx context.Context, q repo.ImageAdminListQuery, offse
 	if offset < 0 {
 		offset = 0
 	}
-	b := imageSelectBuilder(r)
+	b := imageSelectBuilderScoped(r, q.IncludeDeleted)
 	b = r.applyImageAdminFilters(b, q)
 	sql, args, err := b.
 		OrderBy(r.imageAdminOrderBy(q)).
@@ -140,6 +156,9 @@ func (r *ImagesRepo) List(ctx context.Context, q repo.ImageAdminListQuery, offse
 // Count returns the number of images matching the admin list query.
 func (r *ImagesRepo) Count(ctx context.Context, q repo.ImageAdminListQuery) (int, error) {
 	b := r.Builder.Select("COUNT(*)").From("images i")
+	if !q.IncludeDeleted {
+		b = b.Where(liveImages)
+	}
 	b = r.applyImageAdminFilters(b, q)
 	sql, args, err := b.ToSql()
 	if err != nil {
@@ -155,7 +174,12 @@ func (r *ImagesRepo) Count(ctx context.Context, q repo.ImageAdminListQuery) (int
 // CountByKind returns the number of images with the given kind
 // (entity.MediaKindImage or entity.MediaKindVideo).
 func (r *ImagesRepo) CountByKind(ctx context.Context, kind string) (int, error) {
-	sql, args, err := r.Builder.Select("COUNT(*)").From("images").Where(sq.Eq{"kind": kind}).ToSql()
+	sql, args, err := r.Builder.
+		Select("COUNT(*)").
+		From("images").
+		Where(sq.Eq{"kind": kind}).
+		Where("deleted_at IS NULL").
+		ToSql()
 	if err != nil {
 		return 0, fmt.Errorf("ImagesRepo - CountByKind - r.Builder: %w", err)
 	}
@@ -175,6 +199,7 @@ func (r *ImagesRepo) CountAlbumMedia(ctx context.Context, albumID int) (int, int
 		Column("COUNT(*) FILTER (WHERE kind = ?)", entity.MediaKindVideo).
 		From("images").
 		Where(sq.Eq{"album_id": albumID}).
+		Where("deleted_at IS NULL").
 		ToSql()
 	if err != nil {
 		return 0, 0, fmt.Errorf("ImagesRepo - CountAlbumMedia - r.Builder: %w", err)
@@ -208,9 +233,11 @@ func (r *ImagesRepo) GetFirstByAlbum(ctx context.Context, albumID int) (entity.I
 	return e, true, nil
 }
 
-// GetByID returns image by primary key.
+// GetByID returns image by primary key, soft-deleted rows included: it backs the
+// admin's explicit by-id lookups, which must still be able to open a row the
+// dashboard is showing under "include deleted".
 func (r *ImagesRepo) GetByID(ctx context.Context, id int) (entity.Image, error) {
-	sql, args, err := imageSelectBuilder(r).Where("i.id = ?", id).Limit(1).ToSql()
+	sql, args, err := imageSelectBuilderScoped(r, true).Where("i.id = ?", id).Limit(1).ToSql()
 	if err != nil {
 		return entity.Image{}, fmt.Errorf("ImagesRepo - GetByID - r.Builder: %w", err)
 	}
@@ -230,6 +257,7 @@ func (r *ImagesRepo) GetDefault(ctx context.Context) (entity.Image, error) {
 		Select("id", "url", "source", "guild_id").
 		From("images").
 		Where("kind = 'image'").
+		Where("deleted_at IS NULL").
 		OrderBy("id ASC").
 		Limit(1).
 		ToSql()
@@ -406,6 +434,12 @@ func (r *ImagesRepo) Delete(ctx context.Context, id int) error {
 // UpsertByFileID inserts or updates an image record keyed on file_id.
 // The returned bool reports whether a new row was inserted (vs. updated);
 // (xmax = 0) is true only for rows created by this statement.
+//
+// The conflict branch clears deleted_at, so a file that was soft-deleted and
+// then reappears (a folder moved away and back keeps its file ids) is revived
+// in place. That also means it comes back reported as *not* inserted, and so is
+// not announced to Discord a second time — the same quiet recovery an album gets
+// from ClearMissing.
 func (r *ImagesRepo) UpsertByFileID(ctx context.Context, img entity.Image) (bool, error) {
 	kind := img.Kind
 	if kind == "" {
@@ -415,7 +449,7 @@ func (r *ImagesRepo) UpsertByFileID(ctx context.Context, img entity.Image) (bool
 		Insert("images").
 		Columns("file_id", "url", "source", "album_id", "kind", "size_bytes").
 		Values(img.FileID, img.URL, img.Source, img.AlbumID, kind, nullableInt64(img.SizeBytes)).
-		Suffix("ON CONFLICT (file_id) WHERE file_id IS NOT NULL DO UPDATE SET url = EXCLUDED.url, album_id = EXCLUDED.album_id, kind = EXCLUDED.kind, size_bytes = EXCLUDED.size_bytes RETURNING (xmax = 0)").
+		Suffix("ON CONFLICT (file_id) WHERE file_id IS NOT NULL DO UPDATE SET url = EXCLUDED.url, album_id = EXCLUDED.album_id, kind = EXCLUDED.kind, size_bytes = EXCLUDED.size_bytes, deleted_at = NULL RETURNING (xmax = 0)").
 		ToSql()
 	if err != nil {
 		return false, fmt.Errorf("ImagesRepo - UpsertByFileID - r.Builder: %w", err)
@@ -444,26 +478,61 @@ func (r *ImagesRepo) SetPublicLink(ctx context.Context, id int, link string) err
 	return nil
 }
 
-// DeleteByAlbumNotInFileIDs removes images in albumID owned by source whose file_id is not in fileIDs.
-func (r *ImagesRepo) DeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, source string, fileIDs []int64) error {
-	q := r.Builder.
-		Delete("images").
-		Where(sq.And{
-			sq.Eq{"album_id": albumID},
-			sq.Eq{"source": source},
-			sq.NotEq{"file_id": fileIDs},
-		})
+// SoftDeleteByAlbumNotInFileIDs flags the live rows in albumID owned by source
+// whose file_id the latest walk did not report, and returns the ones it flagged.
+func (r *ImagesRepo) SoftDeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, source string, fileIDs []int64) ([]entity.Image, error) {
+	return r.softDelete(ctx, "SoftDeleteByAlbumNotInFileIDs", sq.And{
+		sq.Eq{"album_id": albumID},
+		sq.Eq{"source": source},
+		sq.NotEq{"file_id": fileIDs},
+	})
+}
 
-	sqlStr, args, err := q.ToSql()
+// SoftDeleteByAlbum flags every live row in albumID owned by source. Used when
+// the album's whole folder disappeared: its files are just as gone as the ones
+// pruned out of a folder that survived, and leaving them listed would offer the
+// dashboard media nothing can fetch.
+func (r *ImagesRepo) SoftDeleteByAlbum(ctx context.Context, albumID int, source string) ([]entity.Image, error) {
+	return r.softDelete(ctx, "SoftDeleteByAlbum", sq.And{
+		sq.Eq{"album_id": albumID},
+		sq.Eq{"source": source},
+	})
+}
+
+// softDelete stamps deleted_at on the live rows matching pred and returns them.
+// The "live rows only" clause both keeps an earlier removal's timestamp intact
+// and keeps the result to what actually changed, so a caller can record one
+// activity event per removal instead of one per sync run.
+func (r *ImagesRepo) softDelete(ctx context.Context, caller string, pred sq.Sqlizer) ([]entity.Image, error) {
+	sqlStr, args, err := r.Builder.
+		Update("images").
+		Set("deleted_at", sq.Expr("NOW()")).
+		Where(pred).
+		Where("deleted_at IS NULL").
+		Suffix("RETURNING id, url, kind").
+		ToSql()
 	if err != nil {
-		return fmt.Errorf("ImagesRepo - DeleteByAlbumNotInFileIDs - r.Builder: %w", err)
+		return nil, fmt.Errorf("ImagesRepo - %s - r.Builder: %w", caller, err)
 	}
 
-	_, err = r.Pool.Exec(ctx, sqlStr, args...)
+	rows, err := r.Pool.Query(ctx, sqlStr, args...)
 	if err != nil {
-		return fmt.Errorf("ImagesRepo - DeleteByAlbumNotInFileIDs - Exec: %w", err)
+		return nil, fmt.Errorf("ImagesRepo - %s - Query: %w", caller, err)
 	}
-	return nil
+	defer rows.Close()
+
+	var removed []entity.Image
+	for rows.Next() {
+		var e entity.Image
+		if scanErr := rows.Scan(&e.ID, &e.URL, &e.Kind); scanErr != nil {
+			return nil, fmt.Errorf("ImagesRepo - %s - Scan: %w", caller, scanErr)
+		}
+		removed = append(removed, e)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ImagesRepo - %s - rows.Err: %w", caller, err)
+	}
+	return removed, nil
 }
 
 // queryImages is a shared scanner helper for multi-row image queries.

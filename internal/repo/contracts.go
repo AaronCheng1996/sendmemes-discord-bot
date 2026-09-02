@@ -15,8 +15,19 @@ type MediaEntry struct {
 	FileID           int64
 	Name             string
 	ParentFolderName string // immediate parent folder name (= album name)
+	ParentFolderID   int64  // source's own id for that folder; 0 when it has none
 	Kind             string // "image" or "video" (see entity.MediaKind*)
 	Size             int64  // file size in bytes (0 when unknown)
+}
+
+// AlbumResolution reports how ResolveByFolder matched a discovered folder to an
+// album row, so the sync can record the right activity event.
+type AlbumResolution struct {
+	// Created is true when no album matched and a new row was inserted.
+	Created bool
+	// RenamedFrom holds the album's previous name when the folder was matched
+	// on its id and the row was renamed to follow it. Empty otherwise.
+	RenamedFrom string
 }
 
 type (
@@ -26,10 +37,15 @@ type (
 		Count(ctx context.Context, q AlbumAdminListQuery) (int, error)
 		GetByID(ctx context.Context, id int) (entity.Album, error)
 		Create(ctx context.Context, name string, sendMode entity.AlbumSendMode, sendConfigJSON string) (entity.Album, error)
-		// GetOrCreate returns the album with the given name, creating it when
-		// missing with defaultMode as its send_mode. The bool reports whether a
-		// new row was created (existing albums keep their stored mode).
-		GetOrCreate(ctx context.Context, name string, defaultMode entity.AlbumSendMode) (entity.Album, bool, error)
+		// ResolveByFolder maps a folder discovered by a sync run to its album
+		// row, creating one with defaultMode as its send_mode when nothing
+		// matches. The folder NAME is the album's identity and wins first: a row
+		// already called name is the album, and folderID is (re)bound to it.
+		// Only when no row carries the name does folderID take over, and the row
+		// holding it is renamed in place so its rating, send mode and config
+		// follow the folder. Pass folderID 0 for a source with no folder ids;
+		// resolution then falls back to name-only, as it was before.
+		ResolveByFolder(ctx context.Context, folderID int64, name string, defaultMode entity.AlbumSendMode) (entity.Album, AlbumResolution, error)
 		GetByName(ctx context.Context, name string) (entity.Album, error)
 		GetRandom(ctx context.Context) (entity.Album, error)
 		Update(ctx context.Context, id int, name string, sendMode entity.AlbumSendMode, sendConfigJSON string) (entity.Album, error)
@@ -49,9 +65,9 @@ type (
 		ClearCover(ctx context.Context, albumID int) error
 		// MarkMissingExcept flags albums whose name was not seen in the latest
 		// sync (missing_since = NOW(), already-marked albums keep their original
-		// timestamp) and returns the names it newly marked. It errors on an empty
-		// slice rather than marking everything.
-		MarkMissingExcept(ctx context.Context, seenNames []string) ([]string, error)
+		// timestamp) and returns the albums it newly marked (id and name only).
+		// It errors on an empty slice rather than marking everything.
+		MarkMissingExcept(ctx context.Context, seenNames []string) ([]entity.Album, error)
 		// ClearMissing unflags albums that reappeared in the latest sync.
 		ClearMissing(ctx context.Context, seenNames []string) error
 		// TopRated returns up to limit albums ordered by positive_rating DESC.
@@ -81,12 +97,20 @@ type (
 		// Returns (zero, false, nil) when the album has no videos.
 		GetRandomVideoByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error)
 		// UpsertByFileID inserts or updates an image record keyed on file_id.
-		// The bool reports whether a new row was inserted (vs. updated).
+		// The bool reports whether a new row was inserted (vs. updated). A row
+		// that had been soft-deleted is revived rather than re-inserted, so a
+		// file that moves away and back is not announced as new content twice.
 		UpsertByFileID(ctx context.Context, img entity.Image) (bool, error)
-		// DeleteByAlbumNotInFileIDs removes rows owned by source in albumID whose
-		// file_id is not in fileIDs, scoping pruning to the syncing source so a
-		// local sync never deletes pCloud-sourced rows (or vice versa).
-		DeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, source string, fileIDs []int64) error
+		// SoftDeleteByAlbumNotInFileIDs flags rows owned by source in albumID
+		// whose file_id is not in fileIDs, scoping the prune to the syncing
+		// source so a local sync never touches pCloud-sourced rows (or vice
+		// versa). Already-deleted rows keep their original timestamp; the
+		// returned images are the ones this call newly flagged.
+		SoftDeleteByAlbumNotInFileIDs(ctx context.Context, albumID int, source string, fileIDs []int64) ([]entity.Image, error)
+		// SoftDeleteByAlbum flags every live row owned by source in albumID.
+		// Used when the album's whole folder disappeared, so the dashboard stops
+		// listing files that cannot be fetched any more.
+		SoftDeleteByAlbum(ctx context.Context, albumID int, source string) ([]entity.Image, error)
 		// FindCoverByAlbum returns the image in albumID whose filename matches
 		// the cover convention (cover.* or _cover.*), case-insensitive.
 		FindCoverByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error)
@@ -145,7 +169,8 @@ type (
 	// identifiers.
 	MediaSource interface {
 		// ListMedia walks every configured root and returns all discovered media
-		// files, each carrying its immediate parent folder name as the album name.
+		// files, each carrying its immediate parent folder name as the album
+		// name, plus that folder's source id when the source has one.
 		ListMedia(ctx context.Context) ([]MediaEntry, error)
 		// ResolveDownloadURL returns a URL suitable for downloading m's file
 		// content. May be temporary/IP-bound depending on the source.
