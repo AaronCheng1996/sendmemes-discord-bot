@@ -126,6 +126,14 @@ func (b *Bot) notifySyncEvents(ctx context.Context, report entity.SyncReport) {
 			continue
 		}
 		for _, rule := range rules {
+			// A rule scoped to part of the library ignores everything outside
+			// it, which is what lets one channel carry the crawler's finds and
+			// another carry the rest.
+			if !rule.AlbumFilter.Matches(ev.AlbumPath) {
+				b.vlog("sync notify: rule %d skips %q (albums=%s, path=%q)",
+					rule.ID, ev.AlbumName, rule.AlbumFilter.Describe(), ev.AlbumPath)
+				continue
+			}
 			b.postDiscoveredMedia(ctx, rule, ev)
 		}
 	}
@@ -293,8 +301,13 @@ type scheduledHandle struct {
 	sig    string
 }
 
+// scheduledRuleSig decides whether a running rule goroutine still matches its
+// database row. It hashes updated_at rather than the individual fields: the
+// goroutine captures the whole rule by value, so ANY edit — interval, channel,
+// styling, album filter — has to restart it. Listing fields here is how editing
+// a rule's styling used to silently do nothing until the next restart.
 func scheduledRuleSig(r entity.DeliveryRule) string {
-	return fmt.Sprintf("%s|%d|%v", r.SendInterval, r.HistorySize, r.ChannelID)
+	return fmt.Sprintf("%d|%s", r.ID, r.UpdatedAt.UTC().Format(time.RFC3339Nano))
 }
 
 // runScheduleManager periodically reconciles the set of running scheduled-rule
@@ -342,7 +355,8 @@ func (b *Bot) reconcileScheduledRules(running map[int64]scheduledHandle) {
 		ctx, cancel := context.WithCancel(context.Background())
 		running[rule.ID] = scheduledHandle{cancel: cancel, sig: sig}
 		go b.runScheduledRule(ctx, rule)
-		b.vlog("schedule manager: started rule %d (interval=%s channel=%s)", rule.ID, rule.SendInterval, rule.ChannelID)
+		b.vlog("schedule manager: started rule %d (interval=%s channel=%s albums=%s)",
+			rule.ID, rule.SendInterval, rule.ChannelID, rule.AlbumFilter.Describe())
 	}
 
 	for id, h := range running {
@@ -374,7 +388,8 @@ func (b *Bot) runScheduledRule(ctx context.Context, rule entity.DeliveryRule) {
 			_, _ = b.doScheduledSend(
 				sendContext{RuleName: rule.Name, ChannelID: rule.ChannelID},
 				rule.HistorySize,
-				entity.MergeMessageStyle(b.appStyle(context.Background()), rule.Style()))
+				entity.MergeMessageStyle(b.appStyle(context.Background()), rule.Style()),
+				rule.AlbumFilter)
 		case <-ctx.Done():
 			timer.Stop()
 			return
@@ -385,11 +400,11 @@ func (b *Bot) runScheduledRule(ctx context.Context, rule entity.DeliveryRule) {
 	}
 }
 
-func (b *Bot) doScheduledSend(sc sendContext, historySize int, style entity.MessageStyle) (entity.ManualScheduleTriggerResult, error) {
+func (b *Bot) doScheduledSend(sc sendContext, historySize int, style entity.MessageStyle, filter entity.AlbumPathFilter) (entity.ManualScheduleTriggerResult, error) {
 	ctx := context.Background()
 	channelID := sc.ChannelID
-	b.vlog("scheduled send: selecting album (history=%d)", historySize)
-	album, err := b.imagesUC.GetScheduledAlbum(ctx, historySize)
+	b.vlog("scheduled send: selecting album (history=%d albums=%s)", historySize, filter.Describe())
+	album, err := b.imagesUC.GetScheduledAlbum(ctx, historySize, filter)
 	if err != nil {
 		b.l.Error(fmt.Errorf("doScheduledSend GetScheduledAlbum: %w", err))
 		return entity.ManualScheduleTriggerResult{}, err

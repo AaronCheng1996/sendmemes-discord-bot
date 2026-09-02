@@ -146,33 +146,33 @@ func (mr *MockAlbumsRepoMockRecorder) GetByName(ctx, name any) *gomock.Call {
 }
 
 // GetRandom mocks base method.
-func (m *MockAlbumsRepo) GetRandom(ctx context.Context) (entity.Album, error) {
+func (m *MockAlbumsRepo) GetRandom(ctx context.Context, filter entity.AlbumPathFilter) (entity.Album, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetRandom", ctx)
+	ret := m.ctrl.Call(m, "GetRandom", ctx, filter)
 	ret0, _ := ret[0].(entity.Album)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetRandom indicates an expected call of GetRandom.
-func (mr *MockAlbumsRepoMockRecorder) GetRandom(ctx any) *gomock.Call {
+func (mr *MockAlbumsRepoMockRecorder) GetRandom(ctx, filter any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRandom", reflect.TypeOf((*MockAlbumsRepo)(nil).GetRandom), ctx)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRandom", reflect.TypeOf((*MockAlbumsRepo)(nil).GetRandom), ctx, filter)
 }
 
 // GetRandomExcludeRecent mocks base method.
-func (m *MockAlbumsRepo) GetRandomExcludeRecent(ctx context.Context, excludeN int) (entity.Album, error) {
+func (m *MockAlbumsRepo) GetRandomExcludeRecent(ctx context.Context, excludeN int, filter entity.AlbumPathFilter) (entity.Album, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetRandomExcludeRecent", ctx, excludeN)
+	ret := m.ctrl.Call(m, "GetRandomExcludeRecent", ctx, excludeN, filter)
 	ret0, _ := ret[0].(entity.Album)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetRandomExcludeRecent indicates an expected call of GetRandomExcludeRecent.
-func (mr *MockAlbumsRepoMockRecorder) GetRandomExcludeRecent(ctx, excludeN any) *gomock.Call {
+func (mr *MockAlbumsRepoMockRecorder) GetRandomExcludeRecent(ctx, excludeN, filter any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRandomExcludeRecent", reflect.TypeOf((*MockAlbumsRepo)(nil).GetRandomExcludeRecent), ctx, excludeN)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRandomExcludeRecent", reflect.TypeOf((*MockAlbumsRepo)(nil).GetRandomExcludeRecent), ctx, excludeN, filter)
 }
 
 // IncrRating mocks base method.
@@ -234,9 +234,9 @@ func (mr *MockAlbumsRepoMockRecorder) MarkSent(ctx, albumID any) *gomock.Call {
 }
 
 // ResolveByFolder mocks base method.
-func (m *MockAlbumsRepo) ResolveByFolder(ctx context.Context, folderID int64, name string, defaultMode entity.AlbumSendMode) (entity.Album, repo.AlbumResolution, error) {
+func (m *MockAlbumsRepo) ResolveByFolder(ctx context.Context, folder repo.DiscoveredFolder, defaultMode entity.AlbumSendMode) (entity.Album, repo.AlbumResolution, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ResolveByFolder", ctx, folderID, name, defaultMode)
+	ret := m.ctrl.Call(m, "ResolveByFolder", ctx, folder, defaultMode)
 	ret0, _ := ret[0].(entity.Album)
 	ret1, _ := ret[1].(repo.AlbumResolution)
 	ret2, _ := ret[2].(error)
@@ -244,9 +244,9 @@ func (m *MockAlbumsRepo) ResolveByFolder(ctx context.Context, folderID int64, na
 }
 
 // ResolveByFolder indicates an expected call of ResolveByFolder.
-func (mr *MockAlbumsRepoMockRecorder) ResolveByFolder(ctx, folderID, name, defaultMode any) *gomock.Call {
+func (mr *MockAlbumsRepoMockRecorder) ResolveByFolder(ctx, folder, defaultMode any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveByFolder", reflect.TypeOf((*MockAlbumsRepo)(nil).ResolveByFolder), ctx, folderID, name, defaultMode)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveByFolder", reflect.TypeOf((*MockAlbumsRepo)(nil).ResolveByFolder), ctx, folder, defaultMode)
 }
 
 // SetCover mocks base method.

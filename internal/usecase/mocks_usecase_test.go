@@ -226,18 +226,18 @@ func (mr *MockImagesMockRecorder) GetRandomVideo(ctx, albumID any) *gomock.Call 
 }
 
 // GetScheduledAlbum mocks base method.
-func (m *MockImages) GetScheduledAlbum(ctx context.Context, excludeN int) (entity.Album, error) {
+func (m *MockImages) GetScheduledAlbum(ctx context.Context, excludeN int, filter entity.AlbumPathFilter) (entity.Album, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetScheduledAlbum", ctx, excludeN)
+	ret := m.ctrl.Call(m, "GetScheduledAlbum", ctx, excludeN, filter)
 	ret0, _ := ret[0].(entity.Album)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetScheduledAlbum indicates an expected call of GetScheduledAlbum.
-func (mr *MockImagesMockRecorder) GetScheduledAlbum(ctx, excludeN any) *gomock.Call {
+func (mr *MockImagesMockRecorder) GetScheduledAlbum(ctx, excludeN, filter any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetScheduledAlbum", reflect.TypeOf((*MockImages)(nil).GetScheduledAlbum), ctx, excludeN)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetScheduledAlbum", reflect.TypeOf((*MockImages)(nil).GetScheduledAlbum), ctx, excludeN, filter)
 }
 
 // IncrAlbumRating mocks base method.

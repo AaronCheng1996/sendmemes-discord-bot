@@ -89,7 +89,12 @@ type Album struct {
 	// the album's identity; FolderID is what lets a sync follow the folder
 	// across a rename instead of creating a blank album beside it. 0 until a
 	// sync has seen the folder.
-	FolderID       int64         `json:"folder_id,omitempty"`
+	FolderID int64 `json:"folder_id,omitempty"`
+	// SourcePath is the folder's full path from the walked root, the root's own
+	// name included (e.g. "Crawler/SomeArtist"). It is what a delivery rule's
+	// AlbumPathFilter matches against; the album's identity is still its name.
+	// Empty until a sync has seen the folder.
+	SourcePath     string        `json:"source_path,omitempty"`
 	HasCover       bool          `json:"has_cover"`
 	CoverImageID   int           `json:"cover_image_id,omitempty"`
 	SendMode       AlbumSendMode `json:"send_mode"`

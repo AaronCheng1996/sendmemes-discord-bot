@@ -39,6 +39,10 @@ type SyncEvent struct {
 	// ones for an add event, removed ones for a removal (capped, not exhaustive).
 	FileNames []string  `json:"file_names,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+	// AlbumPath is the album's source path, carried in-memory so the notifier can
+	// match a delivery rule's path filter without a second lookup. Never
+	// persisted or serialized — the album row is the record of it.
+	AlbumPath string `json:"-"`
 	// NewMedia carries the newly discovered image/video records for this event.
 	// It is populated in-memory for the Discord notifier only — never persisted
 	// or serialized (the API surfaces counts and sampled names instead).

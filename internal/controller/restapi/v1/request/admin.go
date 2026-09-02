@@ -43,6 +43,9 @@ type DeliveryRuleWrite struct {
 	// MessageStyle overrides presentation for this rule. Unset fields inherit
 	// the app defaults rather than clearing them.
 	MessageStyle entity.MessageStyle `json:"message_style"`
+	// AlbumFilter narrows the rule to part of the library by folder path. Omit
+	// it, or send an empty object, to cover every album.
+	AlbumFilter entity.AlbumPathFilter `json:"album_filter"`
 }
 
 // SyncSettingsPut updates the global sync cadence.

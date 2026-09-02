@@ -52,13 +52,17 @@ func New(source repo.MediaSource, sourceName string, albums repo.AlbumsRepo, ima
 type albumGroup struct {
 	name     string
 	folderID int64
+	path     string
 	entries  []repo.MediaEntry
 }
 
 // albumSyncStats accumulates one album's counters for one run: what the walk
 // added, and what it took away.
 type albumSyncStats struct {
-	albumID     int
+	albumID int
+	// albumPath is the album's source path, carried onto every event so the
+	// notifier can match a rule's path filter without a second lookup.
+	albumPath   string
 	created     bool
 	renamedFrom string
 	// vanished marks an album whose folder was not in this walk at all, as
@@ -106,13 +110,22 @@ func (uc *UseCase) SyncImages(ctx context.Context) (entity.SyncReport, error) {
 	seen := make([]string, 0, len(groups))
 
 	for _, group := range groups {
-		album, res, rerr := uc.albums.ResolveByFolder(ctx, group.folderID, group.name, uc.defaultMode)
+		album, res, rerr := uc.albums.ResolveByFolder(ctx, repo.DiscoveredFolder{
+			ID:   group.folderID,
+			Name: group.name,
+			Path: group.path,
+		}, uc.defaultMode)
 		if rerr != nil {
 			return report, fmt.Errorf("SyncUseCase - SyncImages - ResolveByFolder %q: %w", group.name, rerr)
 		}
 		// A rename has already moved the row to the folder's name, so from here
 		// on the album is only known by the name the walk reported.
-		st := &albumSyncStats{albumID: album.ID, created: res.Created, renamedFrom: res.RenamedFrom}
+		st := &albumSyncStats{
+			albumID:     album.ID,
+			albumPath:   album.SourcePath,
+			created:     res.Created,
+			renamedFrom: res.RenamedFrom,
+		}
 		stats[group.name] = st
 		seen = append(seen, group.name)
 
@@ -188,7 +201,7 @@ func groupByFolder(entries []repo.MediaEntry) []*albumGroup {
 	for _, entry := range entries {
 		g := index[entry.ParentFolderName]
 		if g == nil {
-			g = &albumGroup{name: entry.ParentFolderName, folderID: entry.ParentFolderID}
+			g = &albumGroup{name: entry.ParentFolderName, folderID: entry.ParentFolderID, path: entry.ParentPath}
 			index[entry.ParentFolderName] = g
 			groups = append(groups, g)
 		}
@@ -310,6 +323,7 @@ func pendingEvents(name string, st *albumSyncStats) []entity.SyncEvent {
 			EventType: eventType,
 			AlbumID:   st.albumID,
 			AlbumName: name,
+			AlbumPath: st.albumPath,
 			NewImages: st.newImages,
 			NewVideos: st.newVideos,
 			FileNames: st.fileNames,

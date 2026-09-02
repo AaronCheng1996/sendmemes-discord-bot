@@ -85,7 +85,9 @@ func (uc *UseCase) GetAlbumBatch(ctx context.Context, album entity.Album, limit 
 // GetRandomAlbumImages picks a random album and returns up to limit images from it.
 // If the album has a cover, it is always prepended as the first element.
 func (uc *UseCase) GetRandomAlbumImages(ctx context.Context, limit int) ([]entity.Image, error) {
-	album, err := uc.albums.GetRandom(ctx)
+	// Discord's own "random album" commands draw from the whole library; only
+	// scheduled delivery is scoped by a rule.
+	album, err := uc.albums.GetRandom(ctx, entity.AlbumPathFilter{})
 	if err != nil {
 		return nil, fmt.Errorf("ImagesUseCase - GetRandomAlbumImages - GetRandom: %w", err)
 	}
@@ -129,10 +131,11 @@ func (uc *UseCase) GetRandomFromAlbum(ctx context.Context, albumID, limit int) (
 }
 
 // GetScheduledAlbum picks a random album with anti-repeat logic (avoiding the
-// excludeN most recently sent albums). Pass the album's ID to MarkAlbumSent after
+// excludeN most recently sent albums), restricted to filter's scope so a rule
+// can draw from part of the library. Pass the album's ID to MarkAlbumSent after
 // the message is sent.
-func (uc *UseCase) GetScheduledAlbum(ctx context.Context, excludeN int) (entity.Album, error) {
-	album, err := uc.albums.GetRandomExcludeRecent(ctx, excludeN)
+func (uc *UseCase) GetScheduledAlbum(ctx context.Context, excludeN int, filter entity.AlbumPathFilter) (entity.Album, error) {
+	album, err := uc.albums.GetRandomExcludeRecent(ctx, excludeN, filter)
 	if err != nil {
 		return entity.Album{}, fmt.Errorf("ImagesUseCase - GetScheduledAlbum - GetRandomExcludeRecent: %w", err)
 	}

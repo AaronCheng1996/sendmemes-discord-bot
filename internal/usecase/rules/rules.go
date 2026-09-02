@@ -101,6 +101,13 @@ func normalize(rule *entity.DeliveryRule) error {
 	rule.MessageStyle.Title = strings.TrimSpace(rule.MessageStyle.Title)
 	rule.MessageStyle.Body = strings.TrimSpace(rule.MessageStyle.Body)
 
+	// Reject a bad mode rather than silently widening the rule to the whole
+	// library — an exclusion that quietly stops excluding is worse than an error.
+	if _, ferr := entity.ParseAlbumPathFilterMode(rule.AlbumFilter.Mode); ferr != nil {
+		return ferr
+	}
+	rule.AlbumFilter = rule.AlbumFilter.Normalized()
+
 	if trigger == entity.TriggerScheduled {
 		if _, derr := schedulespec.Parse(rule.SendInterval); derr != nil {
 			return fmt.Errorf("scheduled rule needs a valid send_interval (e.g. 6h or 0 9 * * *): %w", derr)

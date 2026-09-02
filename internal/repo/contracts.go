@@ -16,8 +16,19 @@ type MediaEntry struct {
 	Name             string
 	ParentFolderName string // immediate parent folder name (= album name)
 	ParentFolderID   int64  // source's own id for that folder; 0 when it has none
+	ParentPath       string // that folder's path from the walked root, root name included
 	Kind             string // "image" or "video" (see entity.MediaKind*)
 	Size             int64  // file size in bytes (0 when unknown)
+}
+
+// DiscoveredFolder identifies one folder a sync run walked.
+type DiscoveredFolder struct {
+	// ID is the source's own folder identifier; 0 when the source has none.
+	ID int64
+	// Name is the leaf folder name, which is the album's name.
+	Name string
+	// Path is the folder's full path from the walked root, root name included.
+	Path string
 }
 
 // AlbumResolution reports how ResolveByFolder matched a discovered folder to an
@@ -40,21 +51,25 @@ type (
 		// ResolveByFolder maps a folder discovered by a sync run to its album
 		// row, creating one with defaultMode as its send_mode when nothing
 		// matches. The folder NAME is the album's identity and wins first: a row
-		// already called name is the album, and folderID is (re)bound to it.
-		// Only when no row carries the name does folderID take over, and the row
-		// holding it is renamed in place so its rating, send mode and config
-		// follow the folder. Pass folderID 0 for a source with no folder ids;
-		// resolution then falls back to name-only, as it was before.
-		ResolveByFolder(ctx context.Context, folderID int64, name string, defaultMode entity.AlbumSendMode) (entity.Album, AlbumResolution, error)
+		// already called folder.Name is the album, and folder.ID is (re)bound to
+		// it. Only when no row carries the name does folder.ID take over, and the
+		// row holding it is renamed in place so its rating, send mode and config
+		// follow the folder. A folder.ID of 0 means the source has no folder ids;
+		// resolution then falls back to name-only, as it was before. The walked
+		// path is recorded on the album either way, for the rule path filters.
+		ResolveByFolder(ctx context.Context, folder DiscoveredFolder, defaultMode entity.AlbumSendMode) (entity.Album, AlbumResolution, error)
 		GetByName(ctx context.Context, name string) (entity.Album, error)
-		GetRandom(ctx context.Context) (entity.Album, error)
+		// GetRandom returns a random album whose source path is in filter's
+		// scope. Pass the zero filter to draw from the whole library.
+		GetRandom(ctx context.Context, filter entity.AlbumPathFilter) (entity.Album, error)
 		Update(ctx context.Context, id int, name string, sendMode entity.AlbumSendMode, sendConfigJSON string) (entity.Album, error)
 		Delete(ctx context.Context, id int) error
-		// GetRandomExcludeRecent returns a random album that is NOT among the
-		// excludeN most recently sent (by last_sent_at DESC).
+		// GetRandomExcludeRecent returns a random album in filter's scope that is
+		// NOT among the excludeN most recently sent (by last_sent_at DESC).
 		// When no eligible album exists (all sent within the history window),
-		// it falls back to GetRandom so the scheduler never stalls.
-		GetRandomExcludeRecent(ctx context.Context, excludeN int) (entity.Album, error)
+		// it falls back to GetRandom — still filtered — so the scheduler never
+		// stalls and never escapes the rule's scope.
+		GetRandomExcludeRecent(ctx context.Context, excludeN int, filter entity.AlbumPathFilter) (entity.Album, error)
 		// MarkSent stamps last_sent_at = NOW() for albumID.
 		MarkSent(ctx context.Context, albumID int) error
 		// IncrRating increments positive_rating by 1 for albumID.

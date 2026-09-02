@@ -73,8 +73,11 @@ func (s *Source) ListMedia(_ context.Context) ([]repo.MediaEntry, error) {
 			Name:             d.Name(),
 			ParentFolderName: filepath.Base(dir),
 			ParentFolderID:   fileID(filepath.ToSlash(dir)),
-			Kind:             kind,
-			Size:             info.Size(),
+			// Root's own name heads the path, matching how the pCloud source
+			// reports it, so one filter expression works for both sources.
+			ParentPath: joinPath(filepath.Base(s.root), filepath.ToSlash(dir)),
+			Kind:       kind,
+			Size:       info.Size(),
 		})
 		return nil
 	})
@@ -82,6 +85,15 @@ func (s *Source) ListMedia(_ context.Context) ([]repo.MediaEntry, error) {
 		return nil, fmt.Errorf("localfs - ListMedia - WalkDir: %w", err)
 	}
 	return entries, nil
+}
+
+// joinPath appends a relative directory to the root's name, tolerating an
+// empty root name (a root at the filesystem's own root has none).
+func joinPath(rootName, dir string) string {
+	if rootName == "" || rootName == "." || rootName == string(filepath.Separator) {
+		return dir
+	}
+	return rootName + "/" + dir
 }
 
 // fileID derives a stable, positive identifier from a path relative to Root,

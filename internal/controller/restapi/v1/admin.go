@@ -312,6 +312,7 @@ func ruleFromBody(body request.DeliveryRuleWrite) entity.DeliveryRule {
 		Enabled:      enabled,
 
 		MessageStyle: body.MessageStyle,
+		AlbumFilter:  body.AlbumFilter.Normalized(),
 	}
 }
 

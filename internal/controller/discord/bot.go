@@ -758,19 +758,19 @@ func (b *Bot) appStyle(ctx context.Context) entity.MessageStyle {
 // that targets channelID, if any. Test sends and manual triggers use it so the
 // preview matches what the real scheduled post will look like — without it a
 // rule's title/body/embed settings would be silently ignored.
-func (b *Bot) baseStyleForChannel(ctx context.Context, channelID string) (entity.MessageStyle, string) {
+func (b *Bot) baseStyleForChannel(ctx context.Context, channelID string) (entity.MessageStyle, string, entity.AlbumPathFilter) {
 	style := b.appStyle(ctx)
 	rules, err := b.rulesUC.ListActiveByTrigger(ctx, entity.TriggerScheduled)
 	if err != nil {
 		b.l.Error(fmt.Errorf("baseStyleForChannel: %w", err))
-		return style, ""
+		return style, "", entity.AlbumPathFilter{}
 	}
 	for _, rule := range rules {
 		if rule.ChannelID == channelID {
-			return entity.MergeMessageStyle(style, rule.Style()), rule.Name
+			return entity.MergeMessageStyle(style, rule.Style()), rule.Name, rule.AlbumFilter
 		}
 	}
-	return style, ""
+	return style, "", entity.AlbumPathFilter{}
 }
 
 // albumCounts reads how much media the album holds, for the {album_*}
@@ -1273,9 +1273,10 @@ func (b *Bot) TriggerScheduleNow(ctx context.Context, channelID string, historyS
 		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("send channel is not configured")
 	}
 	// Manual triggers are not tied to a rule, so reuse whichever scheduled rule
-	// targets this channel to preview the real styling.
-	style, ruleName := b.baseStyleForChannel(ctx, ch)
-	return b.doScheduledSend(sendContext{RuleName: ruleName, ChannelID: ch}, historySize, style)
+	// targets this channel — for its styling and, just as importantly, for the
+	// album scope, so "send now" cannot reach albums the rule itself excludes.
+	style, ruleName, filter := b.baseStyleForChannel(ctx, ch)
+	return b.doScheduledSend(sendContext{RuleName: ruleName, ChannelID: ch}, historySize, style, filter)
 }
 
 // SendAlbumTest posts a one-off preview of albumID to channelID.
@@ -1289,7 +1290,9 @@ func (b *Bot) SendAlbumTest(ctx context.Context, channelID string, albumID int) 
 	if err != nil {
 		return entity.ManualScheduleTriggerResult{}, err
 	}
-	style, ruleName := b.baseStyleForChannel(ctx, ch)
+	// The album is named explicitly here, so the rule's album scope does not
+	// apply — a test send is allowed to preview anything.
+	style, ruleName, _ := b.baseStyleForChannel(ctx, ch)
 	msg := b.deliverAlbum(ctx, ch, album, sendContext{Test: true, RuleName: ruleName, ChannelID: ch}, style)
 	if msg == nil {
 		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("failed to send test preview (see server logs)")
@@ -1316,7 +1319,7 @@ func (b *Bot) SendRuleTest(ctx context.Context, ruleID int64, albumID int) (enti
 		return entity.ManualScheduleTriggerResult{}, fmt.Errorf("rule %d has no channel", ruleID)
 	}
 
-	album, err := b.pickTestAlbum(ctx, albumID, rule.HistorySize)
+	album, err := b.pickTestAlbum(ctx, albumID, rule.HistorySize, rule.AlbumFilter)
 	if err != nil {
 		return entity.ManualScheduleTriggerResult{}, err
 	}
@@ -1336,12 +1339,14 @@ func (b *Bot) SendRuleTest(ctx context.Context, ruleID int64, albumID int) (enti
 }
 
 // pickTestAlbum resolves the album a rule preview should use: the requested one
-// when given, otherwise a random album (anti-repeat aware, like a real send).
-func (b *Bot) pickTestAlbum(ctx context.Context, albumID, historySize int) (entity.Album, error) {
+// when given, otherwise a random album drawn exactly as a real send would draw
+// it — anti-repeat aware, and inside the rule's own album scope, so the preview
+// shows what the rule will actually post.
+func (b *Bot) pickTestAlbum(ctx context.Context, albumID, historySize int, filter entity.AlbumPathFilter) (entity.Album, error) {
 	if albumID > 0 {
 		return b.imagesUC.GetAlbumByID(ctx, albumID)
 	}
-	return b.imagesUC.GetScheduledAlbum(ctx, historySize)
+	return b.imagesUC.GetScheduledAlbum(ctx, historySize, filter)
 }
 
 // TriggerSyncNow runs a pCloud sync immediately and posts notifications.

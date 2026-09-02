@@ -395,25 +395,39 @@ func (c *PCloudClient) doListFolder(ctx context.Context, folderID int64) ([]repo
 		return nil, fmt.Errorf("PCloudClient - ListFolder - API error %d: %s", result.Result, result.Error)
 	}
 
+	// The root's own name heads every path below, so a filter can name a subtree
+	// ("Crawler") whether that folder is itself a configured root or sits inside
+	// one. pCloud omits the name for the account root, which then contributes
+	// nothing and leaves paths starting at the album's own top-level folder.
+	rootName := strings.TrimSpace(result.Metadata.Name)
+
 	var entries []repo.MediaEntry
 	for _, child := range result.Metadata.Contents {
 		if !child.IsFolder {
 			continue
 		}
-		collectMedia(child, child.Name, child.FolderID, &entries)
+		collectMedia(child, child.Name, child.FolderID, joinFolderPath(rootName, child.Name), &entries)
 	}
 	return entries, nil
 }
 
+// joinFolderPath appends a folder name to a path, tolerating an empty parent.
+func joinFolderPath(parent, name string) string {
+	if parent == "" {
+		return name
+	}
+	return parent + "/" + name
+}
+
 // collectMedia recursively walks a pCloud folder tree node, collecting image and
 // video files (per mediaExtensions). Unknown extensions and root-level files are
-// skipped. albumName and albumFolderID always describe the leaf folder holding
-// the file — the id is carried alongside the name so a sync can follow the
-// folder across a rename.
-func collectMedia(node pcloudMeta, albumName string, albumFolderID int64, out *[]repo.MediaEntry) {
+// skipped. albumName, albumFolderID and albumPath always describe the leaf
+// folder holding the file: the id lets a sync follow the folder across a rename,
+// the path lets a delivery rule address a whole subtree at once.
+func collectMedia(node pcloudMeta, albumName string, albumFolderID int64, albumPath string, out *[]repo.MediaEntry) {
 	for _, child := range node.Contents {
 		if child.IsFolder {
-			collectMedia(child, child.Name, child.FolderID, out)
+			collectMedia(child, child.Name, child.FolderID, joinFolderPath(albumPath, child.Name), out)
 			continue
 		}
 		kind, ok := entity.KindOfExtension(child.Name)
@@ -425,6 +439,7 @@ func collectMedia(node pcloudMeta, albumName string, albumFolderID int64, out *[
 			Name:             child.Name,
 			ParentFolderName: albumName,
 			ParentFolderID:   albumFolderID,
+			ParentPath:       albumPath,
 			Kind:             kind,
 			Size:             child.Size,
 		})

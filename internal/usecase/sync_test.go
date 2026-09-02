@@ -74,20 +74,20 @@ func TestSyncImagesReportsDiscoveries(t *testing.T) {
 	uc, source, albums, images, events := syncUseCase(t)
 	ctx := context.Background()
 
-	albumA := entity.Album{ID: 1, Name: "AlbumA", FolderID: 100}
-	albumB := entity.Album{ID: 2, Name: "AlbumB", FolderID: 200}
+	albumA := entity.Album{ID: 1, Name: "AlbumA", FolderID: 100, SourcePath: "Media/AlbumA"}
+	albumB := entity.Album{ID: 2, Name: "AlbumB", FolderID: 200, SourcePath: "Media/AlbumB"}
 
 	albums.EXPECT().Count(ctx, countQuery()).Return(1, nil)
 	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
-		{FileID: 11, Name: "1.jpg", ParentFolderName: "AlbumA", ParentFolderID: 100, Kind: entity.MediaKindImage, Size: 100},
-		{FileID: 12, Name: "clip.mp4", ParentFolderName: "AlbumA", ParentFolderID: 100, Kind: entity.MediaKindVideo, Size: 2000},
-		{FileID: 21, Name: "old.jpg", ParentFolderName: "AlbumB", ParentFolderID: 200, Kind: entity.MediaKindImage, Size: 50},
+		{FileID: 11, Name: "1.jpg", ParentFolderName: "AlbumA", ParentFolderID: 100, ParentPath: "Media/AlbumA", Kind: entity.MediaKindImage, Size: 100},
+		{FileID: 12, Name: "clip.mp4", ParentFolderName: "AlbumA", ParentFolderID: 100, ParentPath: "Media/AlbumA", Kind: entity.MediaKindVideo, Size: 2000},
+		{FileID: 21, Name: "old.jpg", ParentFolderName: "AlbumB", ParentFolderID: 200, ParentPath: "Media/AlbumB", Kind: entity.MediaKindImage, Size: 50},
 	}, nil)
 
 	// Each folder is resolved once per run, however many files it holds.
-	albums.EXPECT().ResolveByFolder(ctx, int64(100), "AlbumA", testDefaultSendMode).
+	albums.EXPECT().ResolveByFolder(ctx, repo.DiscoveredFolder{ID: 100, Name: "AlbumA", Path: "Media/AlbumA"}, testDefaultSendMode).
 		Return(albumA, repo.AlbumResolution{Created: true}, nil)
-	albums.EXPECT().ResolveByFolder(ctx, int64(200), "AlbumB", testDefaultSendMode).
+	albums.EXPECT().ResolveByFolder(ctx, repo.DiscoveredFolder{ID: 200, Name: "AlbumB", Path: "Media/AlbumB"}, testDefaultSendMode).
 		Return(albumB, repo.AlbumResolution{}, nil)
 
 	images.EXPECT().UpsertByFileID(ctx, entity.Image{
@@ -104,10 +104,13 @@ func TestSyncImagesReportsDiscoveries(t *testing.T) {
 	noCoverCleanup(ctx, albums, images, albumB, []int64{21})
 
 	now := time.Now()
+	// The event carries the album's source path so the notifier can match a
+	// rule's path filter without going back to the database.
 	events.EXPECT().Insert(ctx, entity.SyncEvent{
 		EventType: entity.SyncEventAlbumCreated,
 		AlbumID:   1,
 		AlbumName: "AlbumA",
+		AlbumPath: "Media/AlbumA",
 		NewImages: 1,
 		NewVideos: 1,
 		FileNames: []string{"1.jpg", "clip.mp4"},
@@ -130,6 +133,7 @@ func TestSyncImagesReportsDiscoveries(t *testing.T) {
 	require.Equal(t, 1, report.Events[0].NewVideos)
 	// The in-memory report carries the new media records for the notifier.
 	require.Len(t, report.Events[0].NewMedia, 2)
+	require.Equal(t, "Media/AlbumA", report.Events[0].AlbumPath)
 	require.Empty(t, report.Notices)
 }
 
@@ -143,9 +147,9 @@ func TestSyncImagesInitialImport(t *testing.T) {
 
 	albums.EXPECT().Count(ctx, countQuery()).Return(0, nil)
 	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
-		{FileID: 11, Name: "a.jpg", ParentFolderName: "First", ParentFolderID: 100, Kind: entity.MediaKindImage, Size: 10},
+		{FileID: 11, Name: "a.jpg", ParentFolderName: "First", ParentFolderID: 100, ParentPath: "Media/First", Kind: entity.MediaKindImage, Size: 10},
 	}, nil)
-	albums.EXPECT().ResolveByFolder(ctx, int64(100), "First", testDefaultSendMode).
+	albums.EXPECT().ResolveByFolder(ctx, repo.DiscoveredFolder{ID: 100, Name: "First", Path: "Media/First"}, testDefaultSendMode).
 		Return(album, repo.AlbumResolution{Created: true}, nil)
 	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(true, nil)
 	noCoverCleanup(ctx, albums, images, album, []int64{11})
@@ -173,9 +177,9 @@ func TestSyncImagesNoNewContent(t *testing.T) {
 
 	albums.EXPECT().Count(ctx, countQuery()).Return(2, nil)
 	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
-		{FileID: 31, Name: "same.jpg", ParentFolderName: "Stable", ParentFolderID: 300, Kind: entity.MediaKindImage, Size: 10},
+		{FileID: 31, Name: "same.jpg", ParentFolderName: "Stable", ParentFolderID: 300, ParentPath: "Media/Stable", Kind: entity.MediaKindImage, Size: 10},
 	}, nil)
-	albums.EXPECT().ResolveByFolder(ctx, int64(300), "Stable", testDefaultSendMode).
+	albums.EXPECT().ResolveByFolder(ctx, repo.DiscoveredFolder{ID: 300, Name: "Stable", Path: "Media/Stable"}, testDefaultSendMode).
 		Return(album, repo.AlbumResolution{}, nil)
 	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(false, nil)
 	noCoverCleanup(ctx, albums, images, album, []int64{31})
@@ -205,9 +209,9 @@ func TestSyncImagesRevivedFileIsNotNewContent(t *testing.T) {
 
 	albums.EXPECT().Count(ctx, countQuery()).Return(2, nil)
 	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
-		{FileID: 41, Name: "back.jpg", ParentFolderName: "Revived", ParentFolderID: 400, Kind: entity.MediaKindImage, Size: 10},
+		{FileID: 41, Name: "back.jpg", ParentFolderName: "Revived", ParentFolderID: 400, ParentPath: "Media/Revived", Kind: entity.MediaKindImage, Size: 10},
 	}, nil)
-	albums.EXPECT().ResolveByFolder(ctx, int64(400), "Revived", testDefaultSendMode).
+	albums.EXPECT().ResolveByFolder(ctx, repo.DiscoveredFolder{ID: 400, Name: "Revived", Path: "Media/Revived"}, testDefaultSendMode).
 		Return(album, repo.AlbumResolution{}, nil)
 	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(false, nil)
 	noCoverCleanup(ctx, albums, images, album, []int64{41})
@@ -233,9 +237,9 @@ func TestSyncImagesRecordsRemovedFiles(t *testing.T) {
 
 	albums.EXPECT().Count(ctx, countQuery()).Return(2, nil)
 	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
-		{FileID: 51, Name: "kept.jpg", ParentFolderName: "Trimmed", ParentFolderID: 500, Kind: entity.MediaKindImage, Size: 10},
+		{FileID: 51, Name: "kept.jpg", ParentFolderName: "Trimmed", ParentFolderID: 500, ParentPath: "Media/Trimmed", Kind: entity.MediaKindImage, Size: 10},
 	}, nil)
-	albums.EXPECT().ResolveByFolder(ctx, int64(500), "Trimmed", testDefaultSendMode).
+	albums.EXPECT().ResolveByFolder(ctx, repo.DiscoveredFolder{ID: 500, Name: "Trimmed", Path: "Media/Trimmed"}, testDefaultSendMode).
 		Return(album, repo.AlbumResolution{}, nil)
 	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(false, nil)
 
@@ -279,9 +283,9 @@ func TestSyncImagesRecordsRename(t *testing.T) {
 
 	albums.EXPECT().Count(ctx, countQuery()).Return(2, nil)
 	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
-		{FileID: 61, Name: "a.jpg", ParentFolderName: "NewName", ParentFolderID: 600, Kind: entity.MediaKindImage, Size: 10},
+		{FileID: 61, Name: "a.jpg", ParentFolderName: "NewName", ParentFolderID: 600, ParentPath: "Media/NewName", Kind: entity.MediaKindImage, Size: 10},
 	}, nil)
-	albums.EXPECT().ResolveByFolder(ctx, int64(600), "NewName", testDefaultSendMode).
+	albums.EXPECT().ResolveByFolder(ctx, repo.DiscoveredFolder{ID: 600, Name: "NewName", Path: "Media/NewName"}, testDefaultSendMode).
 		Return(album, repo.AlbumResolution{RenamedFrom: "OldName"}, nil)
 	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(false, nil)
 	noCoverCleanup(ctx, albums, images, album, []int64{61})
@@ -315,9 +319,9 @@ func TestSyncImagesMarksVanishedAlbum(t *testing.T) {
 
 	albums.EXPECT().Count(ctx, countQuery()).Return(2, nil)
 	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
-		{FileID: 11, Name: "a.jpg", ParentFolderName: "Kept", ParentFolderID: 100, Kind: entity.MediaKindImage, Size: 10},
+		{FileID: 11, Name: "a.jpg", ParentFolderName: "Kept", ParentFolderID: 100, ParentPath: "Media/Kept", Kind: entity.MediaKindImage, Size: 10},
 	}, nil)
-	albums.EXPECT().ResolveByFolder(ctx, int64(100), "Kept", testDefaultSendMode).
+	albums.EXPECT().ResolveByFolder(ctx, repo.DiscoveredFolder{ID: 100, Name: "Kept", Path: "Media/Kept"}, testDefaultSendMode).
 		Return(album, repo.AlbumResolution{}, nil)
 	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(false, nil)
 	noCoverCleanup(ctx, albums, images, album, []int64{11})
@@ -362,9 +366,9 @@ func TestSyncImagesClearsMissingWhenFolderReturns(t *testing.T) {
 
 	albums.EXPECT().Count(ctx, countQuery()).Return(1, nil)
 	source.EXPECT().ListMedia(ctx).Return([]repo.MediaEntry{
-		{FileID: 51, Name: "b.jpg", ParentFolderName: "Back", ParentFolderID: 500, Kind: entity.MediaKindImage, Size: 10},
+		{FileID: 51, Name: "b.jpg", ParentFolderName: "Back", ParentFolderID: 500, ParentPath: "Media/Back", Kind: entity.MediaKindImage, Size: 10},
 	}, nil)
-	albums.EXPECT().ResolveByFolder(ctx, int64(500), "Back", testDefaultSendMode).
+	albums.EXPECT().ResolveByFolder(ctx, repo.DiscoveredFolder{ID: 500, Name: "Back", Path: "Media/Back"}, testDefaultSendMode).
 		Return(album, repo.AlbumResolution{}, nil)
 	images.EXPECT().UpsertByFileID(ctx, gomock.Any()).Return(true, nil)
 	noCoverCleanup(ctx, albums, images, album, []int64{51})

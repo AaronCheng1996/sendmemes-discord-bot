@@ -175,6 +175,39 @@ As a safety net, a sync that finds **no media at all** skips the missing pass
 entirely and logs a warning — that almost always means a broken source, a wrong
 root ID or expired credentials rather than an intentionally emptied library.
 
+### Scoping a rule to part of the library
+
+Every album records the full path of its source folder (`albums.source_path`,
+the walked root's own name included, e.g. `Media/Crawler/SomeArtist`), and a
+delivery rule can narrow itself to a subtree of that:
+
+| Albums | Behaviour |
+|---|---|
+| **All albums** | The default — the rule covers the whole library |
+| **Only these paths** | The rule applies to those folders and everything under them |
+| **All except these paths** | The rule applies to everything else |
+
+A path matches the folder itself and everything beneath it, case-insensitively
+and on whole segments, so `Media/Crawler` covers `Media/Crawler/SomeArtist` but
+never `Media/CrawlerOld`.
+
+The point is that a subtree keeps growing without anyone touching the rule
+again. A crawler dropping artwork into `Media/Crawler/<Artist>` mints a new
+album per artist; one scheduled rule set to **All except `Media/Crawler`** keeps
+every one of them out of the daily push, and one `new_files` rule set to **Only
+`Media/Crawler`** posts them to a channel of their own as they arrive.
+
+Scoping applies to how a rule *picks* an album: the scheduled draw, the manual
+"send now" for that rule's channel, and the rule's own preview. Naming an album
+explicitly — `/album <name>`, the Full-album button, an album's Send test —
+still reaches anything, and Discord's own random-album commands still draw from
+the whole library.
+
+An album that has not been synced since `source_path` was added has no path
+recorded. Such an album stays *inside* an exclude filter and *outside* an
+include one, so an unsynced library keeps behaving as it did rather than
+silently dropping out of the daily push.
+
 ### Customizing messages
 
 Three layers shape a post, each overriding the one below it **per field**:

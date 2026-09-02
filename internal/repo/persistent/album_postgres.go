@@ -32,6 +32,7 @@ func albumColumns() []string {
 		"id",
 		"name",
 		"COALESCE(folder_id, 0)",
+		"COALESCE(source_path, '')",
 		"has_cover",
 		"COALESCE(cover_image_id, 0)",
 		"send_mode",
@@ -54,6 +55,7 @@ func scanAlbumRow(row pgx.Row) (entity.Album, error) {
 		&a.ID,
 		&a.Name,
 		&a.FolderID,
+		&a.SourcePath,
 		&a.HasCover,
 		&a.CoverImageID,
 		&a.SendMode,
@@ -126,6 +128,44 @@ func (r *AlbumsRepo) applyAlbumAdminFilters(b sq.SelectBuilder, q repo.AlbumAdmi
 		// Treat unknown filter_field like "all" for forward compatibility.
 		return b.Where(albumOrFilterParts(pat, lraw))
 	}
+}
+
+// albumPathPredicate turns a rule's path filter into SQL. Matching is
+// case-insensitive and segment-wise — "Crawler" covers "Crawler/Artist" but
+// never "CrawlerOld" — and mirrors entity.AlbumPathFilter.Matches, which the
+// notifier applies in memory to the same paths.
+//
+// COALESCE keeps an album that has not been synced since source_path was added
+// out of an include filter and inside an exclude one, the same way Matches does.
+func albumPathPredicate(filter entity.AlbumPathFilter) sq.Sqlizer {
+	f := filter.Normalized()
+	if f.Mode == entity.AlbumFilterAll || len(f.Paths) == 0 {
+		return nil
+	}
+
+	under := make([]sq.Sqlizer, 0, len(f.Paths))
+	for _, p := range f.Paths {
+		lowered := strings.ToLower(strings.Trim(p, "/"))
+		under = append(under, sq.Or{
+			sq.Expr("LOWER(COALESCE(source_path, '')) = ?", lowered),
+			sq.Expr("LOWER(COALESCE(source_path, '')) LIKE ?", escapeLikePrefix(lowered)+"/%"),
+		})
+	}
+
+	if f.Mode == entity.AlbumFilterInclude {
+		return sq.Or(under)
+	}
+
+	return sq.And{sq.Expr("NOT (?)", sq.Or(under))}
+}
+
+// applyAlbumPathFilter adds the path predicate to b when the filter narrows
+// anything, so an unfiltered query keeps the SQL it always had.
+func applyAlbumPathFilter(b sq.SelectBuilder, filter entity.AlbumPathFilter) sq.SelectBuilder {
+	if pred := albumPathPredicate(filter); pred != nil {
+		return b.Where(pred)
+	}
+	return b
 }
 
 func albumOrFilterParts(pat, lraw string) sq.Sqlizer {
@@ -249,25 +289,43 @@ func (r *AlbumsRepo) Create(ctx context.Context, name string, sendMode entity.Al
 // across a rename instead of stranding them on an album that the missing pass
 // would flag minutes later.
 //
-// folderID 0 means the source has no folder ids; resolution is then name-only,
-// exactly as it was before folder ids existed.
-func (r *AlbumsRepo) ResolveByFolder(ctx context.Context, folderID int64, name string, defaultMode entity.AlbumSendMode) (entity.Album, repo.AlbumResolution, error) {
-	a, found, err := r.findAlbum(ctx, sq.Eq{"name": name})
+// A folder.ID of 0 means the source has no folder ids; resolution is then
+// name-only, exactly as it was before folder ids existed. The walked path is
+// recorded on whichever row wins, so a moved folder's rules follow it.
+func (r *AlbumsRepo) ResolveByFolder(ctx context.Context, folder repo.DiscoveredFolder, defaultMode entity.AlbumSendMode) (entity.Album, repo.AlbumResolution, error) {
+	album, res, err := r.resolveAlbumRow(ctx, folder, defaultMode)
 	if err != nil {
-		return entity.Album{}, repo.AlbumResolution{}, fmt.Errorf("AlbumsRepo - ResolveByFolder - by name %q: %w", name, err)
+		return entity.Album{}, repo.AlbumResolution{}, err
+	}
+	// Recorded once, after every branch: a freshly inserted row already carries
+	// the path and short-circuits, and the two that matched an existing row are
+	// exactly the ones whose folder may have moved since the last sync.
+	if perr := r.syncSourcePath(ctx, &album, folder.Path); perr != nil {
+		return entity.Album{}, repo.AlbumResolution{}, perr
+	}
+
+	return album, res, nil
+}
+
+// resolveAlbumRow is ResolveByFolder's three-way match, without the path
+// bookkeeping: name, then folder id, then insert.
+func (r *AlbumsRepo) resolveAlbumRow(ctx context.Context, folder repo.DiscoveredFolder, defaultMode entity.AlbumSendMode) (entity.Album, repo.AlbumResolution, error) {
+	a, found, err := r.findAlbum(ctx, sq.Eq{"name": folder.Name})
+	if err != nil {
+		return entity.Album{}, repo.AlbumResolution{}, fmt.Errorf("AlbumsRepo - ResolveByFolder - by name %q: %w", folder.Name, err)
 	}
 	if found {
-		if folderID != 0 && a.FolderID != folderID {
-			if bindErr := r.bindFolderID(ctx, a.ID, folderID); bindErr != nil {
+		if folder.ID != 0 && a.FolderID != folder.ID {
+			if bindErr := r.bindFolderID(ctx, a.ID, folder.ID); bindErr != nil {
 				return entity.Album{}, repo.AlbumResolution{}, bindErr
 			}
-			a.FolderID = folderID
+			a.FolderID = folder.ID
 		}
 
 		return a, repo.AlbumResolution{}, nil
 	}
 
-	renamed, previous, found, err := r.renameFolderMatch(ctx, folderID, name)
+	renamed, previous, found, err := r.renameFolderMatch(ctx, folder.ID, folder.Name)
 	if err != nil {
 		return entity.Album{}, repo.AlbumResolution{}, err
 	}
@@ -277,8 +335,8 @@ func (r *AlbumsRepo) ResolveByFolder(ctx context.Context, folderID int64, name s
 
 	sql, args, err := r.Builder.
 		Insert("albums").
-		Columns("name", "folder_id", "send_mode", "send_config_json").
-		Values(name, nullableInt64(folderID), defaultMode, sq.Expr("'{}'::jsonb")).
+		Columns("name", "folder_id", "source_path", "send_mode", "send_config_json").
+		Values(folder.Name, nullableInt64(folder.ID), nullableString(folder.Path), defaultMode, sq.Expr("'{}'::jsonb")).
 		Suffix(albumReturning()).
 		ToSql()
 	if err != nil {
@@ -286,9 +344,34 @@ func (r *AlbumsRepo) ResolveByFolder(ctx context.Context, folderID int64, name s
 	}
 	fresh, err := scanAlbumRow(r.Pool.QueryRow(ctx, sql, args...))
 	if err != nil {
-		return entity.Album{}, repo.AlbumResolution{}, fmt.Errorf("AlbumsRepo - ResolveByFolder - insert %q: %w", name, err)
+		return entity.Album{}, repo.AlbumResolution{}, fmt.Errorf("AlbumsRepo - ResolveByFolder - insert %q: %w", folder.Name, err)
 	}
+
 	return fresh, repo.AlbumResolution{Created: true}, nil
+}
+
+// syncSourcePath writes the walked path onto an existing album when it changed,
+// keeping the album in step with a folder that moved. An empty walked path (a
+// source that reports none) leaves the stored one alone rather than erasing it.
+func (r *AlbumsRepo) syncSourcePath(ctx context.Context, a *entity.Album, path string) error {
+	if path == "" || a.SourcePath == path {
+		return nil
+	}
+
+	sql, args, err := r.Builder.
+		Update("albums").
+		Set("source_path", path).
+		Where(sq.Eq{"id": a.ID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("AlbumsRepo - syncSourcePath - r.Builder: %w", err)
+	}
+	if _, err = r.Pool.Exec(ctx, sql, args...); err != nil {
+		return fmt.Errorf("AlbumsRepo - syncSourcePath - Exec: %w", err)
+	}
+	a.SourcePath = path
+
+	return nil
 }
 
 // renameFolderMatch renames the album holding folderID to name and returns it
@@ -401,9 +484,9 @@ func (r *AlbumsRepo) GetByName(ctx context.Context, name string) (entity.Album, 
 	return a, nil
 }
 
-// GetRandom returns a random album.
-func (r *AlbumsRepo) GetRandom(ctx context.Context) (entity.Album, error) {
-	sql, args, err := albumSelectBuilder(r).
+// GetRandom returns a random album within filter's scope.
+func (r *AlbumsRepo) GetRandom(ctx context.Context, filter entity.AlbumPathFilter) (entity.Album, error) {
+	sql, args, err := applyAlbumPathFilter(albumSelectBuilder(r), filter).
 		Where("missing_since IS NULL").
 		OrderBy("RANDOM()").
 		Limit(1).
@@ -426,8 +509,8 @@ func (r *AlbumsRepo) GetRandom(ctx context.Context) (entity.Album, error) {
 // most-recently-sent albums (ordered by last_sent_at DESC).
 // When all albums have been sent within the history window (no eligible row),
 // it falls back to GetRandom so the scheduler never stalls.
-func (r *AlbumsRepo) GetRandomExcludeRecent(ctx context.Context, excludeN int) (entity.Album, error) {
-	sql, args, err := albumSelectBuilder(r).
+func (r *AlbumsRepo) GetRandomExcludeRecent(ctx context.Context, excludeN int, filter entity.AlbumPathFilter) (entity.Album, error) {
+	sql, args, err := applyAlbumPathFilter(albumSelectBuilder(r), filter).
 		Where("missing_since IS NULL").
 		Where("id NOT IN (SELECT id FROM albums WHERE last_sent_at IS NOT NULL ORDER BY last_sent_at DESC LIMIT ?)", excludeN).
 		OrderBy("RANDOM()").
@@ -444,8 +527,9 @@ func (r *AlbumsRepo) GetRandomExcludeRecent(ctx context.Context, excludeN int) (
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return entity.Album{}, fmt.Errorf("AlbumsRepo - GetRandomExcludeRecent - QueryRow: %w", err)
 	}
-	// All albums are within the history window — reset by falling back to fully random.
-	return r.GetRandom(ctx)
+	// Every album in scope is within the history window — reset by falling back
+	// to a fully random pick, still inside the rule's scope.
+	return r.GetRandom(ctx, filter)
 }
 
 // TopRated returns up to limit albums ordered by positive_rating DESC (ties

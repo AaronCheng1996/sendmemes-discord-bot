@@ -28,10 +28,10 @@ type (
 		// GetRandomAlbumImages picks a random album then returns up to limit images from it.
 		// If the album has a cover, it is always the first element; the rest are random.
 		GetRandomAlbumImages(ctx context.Context, limit int) ([]entity.Image, error)
-		// GetScheduledAlbum picks a random album while avoiding the excludeN most
+		// GetScheduledAlbum picks a random album in filter's scope, avoiding the excludeN most
 		// recently sent albums. When all albums fall within the history window it
 		// resets and picks fully at random. Call MarkAlbumSent after a successful send.
-		GetScheduledAlbum(ctx context.Context, excludeN int) (entity.Album, error)
+		GetScheduledAlbum(ctx context.Context, excludeN int, filter entity.AlbumPathFilter) (entity.Album, error)
 		// GetAlbumByID returns the album with the given id.
 		GetAlbumByID(ctx context.Context, id int) (entity.Album, error)
 		// GetAlbumBatch returns up to limit images for album using cover-first rules:

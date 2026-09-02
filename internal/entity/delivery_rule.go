@@ -31,8 +31,12 @@ type DeliveryRule struct {
 	// MessageStyle overrides the app defaults for this rule's posts. Unset
 	// fields inherit; the album's own config overrides whatever survives here.
 	MessageStyle MessageStyle `json:"message_style"`
-	CreatedAt    time.Time    `json:"created_at,omitempty"`
-	UpdatedAt    time.Time    `json:"updated_at,omitempty"`
+	// AlbumFilter narrows the rule to part of the library by folder path. The
+	// zero value covers every album. A scheduled rule uses it to shrink the pool
+	// it draws from; an event rule uses it to ignore albums outside its subtree.
+	AlbumFilter AlbumPathFilter `json:"album_filter"`
+	CreatedAt   time.Time       `json:"created_at,omitempty"`
+	UpdatedAt   time.Time       `json:"updated_at,omitempty"`
 
 	// NextRunAt and ScheduleDescription are computed on read for scheduled
 	// rules (never persisted) so the UI can show when a rule will next fire.

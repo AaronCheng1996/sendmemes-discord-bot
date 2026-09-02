@@ -26,17 +26,18 @@ func deliveryRuleSelect(r *DeliveryRulesRepo) sq.SelectBuilder {
 	return r.Builder.
 		Select("id", "name", "guild_id", "trigger_type", "channel_id",
 			"COALESCE(send_interval, '')", "history_size", "enabled",
-			"COALESCE(message_style::text, '{}')", "created_at", "updated_at").
+			"COALESCE(message_style::text, '{}')", "COALESCE(album_filter::text, '{}')",
+			"created_at", "updated_at").
 		From("delivery_rules")
 }
 
 func scanDeliveryRule(row pgx.Row) (entity.DeliveryRule, error) {
 	var rule entity.DeliveryRule
-	var styleJSON string
+	var styleJSON, filterJSON string
 	if err := row.Scan(
 		&rule.ID, &rule.Name, &rule.GuildID, &rule.TriggerType, &rule.ChannelID,
 		&rule.SendInterval, &rule.HistorySize, &rule.Enabled,
-		&styleJSON, &rule.CreatedAt, &rule.UpdatedAt,
+		&styleJSON, &filterJSON, &rule.CreatedAt, &rule.UpdatedAt,
 	); err != nil {
 		return entity.DeliveryRule{}, err
 	}
@@ -45,6 +46,11 @@ func scanDeliveryRule(row pgx.Row) (entity.DeliveryRule, error) {
 		return entity.DeliveryRule{}, fmt.Errorf("message_style: %w", err)
 	}
 	rule.MessageStyle = style
+	filter, err := entity.ParseAlbumPathFilter(filterJSON)
+	if err != nil {
+		return entity.DeliveryRule{}, fmt.Errorf("album_filter: %w", err)
+	}
+	rule.AlbumFilter = filter
 	return rule, nil
 }
 
@@ -106,16 +112,17 @@ func (r *DeliveryRulesRepo) GetByID(ctx context.Context, id int64) (entity.Deliv
 	return rule, nil
 }
 
-const deliveryRuleReturning = "RETURNING id, name, guild_id, trigger_type, channel_id, COALESCE(send_interval, ''), history_size, enabled, COALESCE(message_style::text, '{}'), created_at, updated_at"
+const deliveryRuleReturning = "RETURNING id, name, guild_id, trigger_type, channel_id, COALESCE(send_interval, ''), history_size, enabled, COALESCE(message_style::text, '{}'), COALESCE(album_filter::text, '{}'), created_at, updated_at"
 
 // Create inserts a new rule.
 func (r *DeliveryRulesRepo) Create(ctx context.Context, rule entity.DeliveryRule) (entity.DeliveryRule, error) {
 	sql, args, err := r.Builder.
 		Insert("delivery_rules").
-		Columns("name", "guild_id", "trigger_type", "channel_id", "send_interval", "history_size", "enabled", "message_style").
+		Columns("name", "guild_id", "trigger_type", "channel_id", "send_interval", "history_size", "enabled", "message_style", "album_filter").
 		Values(rule.Name, rule.GuildID, rule.TriggerType, rule.ChannelID,
 			nullableString(rule.SendInterval), rule.HistorySize, rule.Enabled,
-			sq.Expr("?::jsonb", rule.MessageStyle.JSON())).
+			sq.Expr("?::jsonb", rule.MessageStyle.JSON()),
+			sq.Expr("?::jsonb", rule.AlbumFilter.JSON())).
 		Suffix(deliveryRuleReturning).
 		ToSql()
 	if err != nil {
@@ -140,6 +147,7 @@ func (r *DeliveryRulesRepo) Update(ctx context.Context, rule entity.DeliveryRule
 		Set("history_size", rule.HistorySize).
 		Set("enabled", rule.Enabled).
 		Set("message_style", sq.Expr("?::jsonb", rule.MessageStyle.JSON())).
+		Set("album_filter", sq.Expr("?::jsonb", rule.AlbumFilter.JSON())).
 		Set("updated_at", sq.Expr("NOW()")).
 		Where("id = ?", rule.ID).
 		Suffix(deliveryRuleReturning).
