@@ -173,6 +173,25 @@ type (
 		LatestAt(ctx context.Context) (*time.Time, error)
 	}
 
+	// TaskRunsRepo stores one durable row per execution of a scheduled send, a
+	// sync, or anything an ingest client reports. Unlike the in-memory job
+	// manager it survives restarts and accepts writes from outside the process.
+	TaskRunsRepo interface {
+		// Insert stores a run and returns it with ID and CreatedAt filled in.
+		Insert(ctx context.Context, run entity.TaskRun) (entity.TaskRun, error)
+		// Complete replaces a run's outcome (status, finish time, summary,
+		// detail, error), leaving what identifies the run untouched.
+		Complete(ctx context.Context, id int64, outcome entity.TaskRun) (entity.TaskRun, error)
+		List(ctx context.Context, q TaskRunListQuery, offset, limit int) ([]entity.TaskRun, error)
+		Count(ctx context.Context, q TaskRunListQuery) (int, error)
+		// Sources returns the distinct source values present, so the dashboard
+		// filter does not have to hardcode which clients report runs.
+		Sources(ctx context.Context) ([]string, error)
+		// PruneBefore hard-deletes runs that started before cutoff, returning
+		// how many went.
+		PruneBefore(ctx context.Context, cutoff time.Time) (int64, error)
+	}
+
 	// SystemRepo provides system-level checks.
 	SystemRepo interface {
 		Ping(ctx context.Context) error

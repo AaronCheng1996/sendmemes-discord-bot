@@ -13,12 +13,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
-
 	"github.com/AaronCheng1996/sendmemes-discord-bot/config"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/logger"
+	"github.com/bwmarrin/discordgo"
 )
 
 const (
@@ -268,6 +267,7 @@ type Bot struct {
 	syncUC        usecase.Sync
 	rulesUC       usecase.Rules
 	appSettingsUC usecase.AppSettings
+	runsUC        usecase.TaskRuns
 	session       *discordgo.Session
 	httpClient    *http.Client
 	mu            sync.Mutex
@@ -295,6 +295,7 @@ func NewBot(
 	syncUC usecase.Sync,
 	rulesUC usecase.Rules,
 	appSettingsUC usecase.AppSettings,
+	runsUC usecase.TaskRuns,
 ) (*Bot, error) {
 	s, err := discordgo.New("Bot " + cfg.Discord.Token)
 	if err != nil {
@@ -318,6 +319,7 @@ func NewBot(
 		syncUC:        syncUC,
 		rulesUC:       rulesUC,
 		appSettingsUC: appSettingsUC,
+		runsUC:        runsUC,
 		session:       s,
 		// Separate client for pCloud downloads (same generous timeout).
 		httpClient: &http.Client{Timeout: downloadTimeout},
@@ -352,6 +354,7 @@ func (b *Bot) Start() {
 	}()
 	go b.runSyncScheduler()
 	go b.runScheduleManager()
+	go b.runTaskRunRetention()
 }
 
 // Close shuts down the bot and stops all schedulers.
@@ -1351,7 +1354,11 @@ func (b *Bot) pickTestAlbum(ctx context.Context, albumID, historySize int, filte
 
 // TriggerSyncNow runs a pCloud sync immediately and posts notifications.
 func (b *Bot) TriggerSyncNow(ctx context.Context) (entity.SyncReport, error) {
+	started := time.Now().UTC()
 	report, err := b.syncUC.SyncImages(ctx)
+	// Recorded here as well as in doSync, so a manual sync is as visible in the
+	// System log as a scheduled one — the "trigger" field is what tells them apart.
+	b.recordSyncRun(ctx, "manual", started, &report, err)
 	if err != nil {
 		return entity.SyncReport{}, err
 	}

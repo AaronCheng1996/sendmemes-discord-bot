@@ -15,6 +15,7 @@ type (
 		Log     Log
 		PG      PG
 		Admin   Admin
+		Ingest  Ingest
 		Discord Discord
 		PCloud  PCloud
 		Media   Media
@@ -94,6 +95,14 @@ type (
 	// Admin controls privileged API access.
 	Admin struct {
 		APIKey string `env:"ADMIN_API_KEY"`
+	}
+
+	// Ingest controls the write-only run-reporting API used by external
+	// clients (the crawler). Separate from the admin key on purpose: those
+	// clients run elsewhere, and this credential can only append run records.
+	// Unset leaves the /v1/runs routes rejecting everything.
+	Ingest struct {
+		APIKey string `env:"INGEST_API_KEY"`
 	}
 
 	// PCloud holds credentials and settings for the pCloud integration.

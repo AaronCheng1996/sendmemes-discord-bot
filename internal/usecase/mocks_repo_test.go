@@ -909,6 +909,120 @@ func (mr *MockSyncEventsRepoMockRecorder) List(ctx, offset, limit any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockSyncEventsRepo)(nil).List), ctx, offset, limit)
 }
 
+// MockTaskRunsRepo is a mock of TaskRunsRepo interface.
+type MockTaskRunsRepo struct {
+	ctrl     *gomock.Controller
+	recorder *MockTaskRunsRepoMockRecorder
+	isgomock struct{}
+}
+
+// MockTaskRunsRepoMockRecorder is the mock recorder for MockTaskRunsRepo.
+type MockTaskRunsRepoMockRecorder struct {
+	mock *MockTaskRunsRepo
+}
+
+// NewMockTaskRunsRepo creates a new mock instance.
+func NewMockTaskRunsRepo(ctrl *gomock.Controller) *MockTaskRunsRepo {
+	mock := &MockTaskRunsRepo{ctrl: ctrl}
+	mock.recorder = &MockTaskRunsRepoMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockTaskRunsRepo) EXPECT() *MockTaskRunsRepoMockRecorder {
+	return m.recorder
+}
+
+// Complete mocks base method.
+func (m *MockTaskRunsRepo) Complete(ctx context.Context, id int64, outcome entity.TaskRun) (entity.TaskRun, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Complete", ctx, id, outcome)
+	ret0, _ := ret[0].(entity.TaskRun)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Complete indicates an expected call of Complete.
+func (mr *MockTaskRunsRepoMockRecorder) Complete(ctx, id, outcome any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Complete", reflect.TypeOf((*MockTaskRunsRepo)(nil).Complete), ctx, id, outcome)
+}
+
+// Count mocks base method.
+func (m *MockTaskRunsRepo) Count(ctx context.Context, q repo.TaskRunListQuery) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Count", ctx, q)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Count indicates an expected call of Count.
+func (mr *MockTaskRunsRepoMockRecorder) Count(ctx, q any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Count", reflect.TypeOf((*MockTaskRunsRepo)(nil).Count), ctx, q)
+}
+
+// Insert mocks base method.
+func (m *MockTaskRunsRepo) Insert(ctx context.Context, run entity.TaskRun) (entity.TaskRun, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Insert", ctx, run)
+	ret0, _ := ret[0].(entity.TaskRun)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Insert indicates an expected call of Insert.
+func (mr *MockTaskRunsRepoMockRecorder) Insert(ctx, run any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Insert", reflect.TypeOf((*MockTaskRunsRepo)(nil).Insert), ctx, run)
+}
+
+// List mocks base method.
+func (m *MockTaskRunsRepo) List(ctx context.Context, q repo.TaskRunListQuery, offset, limit int) ([]entity.TaskRun, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "List", ctx, q, offset, limit)
+	ret0, _ := ret[0].([]entity.TaskRun)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// List indicates an expected call of List.
+func (mr *MockTaskRunsRepoMockRecorder) List(ctx, q, offset, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockTaskRunsRepo)(nil).List), ctx, q, offset, limit)
+}
+
+// PruneBefore mocks base method.
+func (m *MockTaskRunsRepo) PruneBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PruneBefore", ctx, cutoff)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PruneBefore indicates an expected call of PruneBefore.
+func (mr *MockTaskRunsRepoMockRecorder) PruneBefore(ctx, cutoff any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PruneBefore", reflect.TypeOf((*MockTaskRunsRepo)(nil).PruneBefore), ctx, cutoff)
+}
+
+// Sources mocks base method.
+func (m *MockTaskRunsRepo) Sources(ctx context.Context) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Sources", ctx)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Sources indicates an expected call of Sources.
+func (mr *MockTaskRunsRepoMockRecorder) Sources(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Sources", reflect.TypeOf((*MockTaskRunsRepo)(nil).Sources), ctx)
+}
+
 // MockSystemRepo is a mock of SystemRepo interface.
 type MockSystemRepo struct {
 	ctrl     *gomock.Controller

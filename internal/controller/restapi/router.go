@@ -16,11 +16,11 @@ import (
 )
 
 // NewRouter -.
-func NewRouter(app *fiber.App, cfg *config.Config, a usecase.Admin, l logger.Interface) {
+func NewRouter(app *fiber.App, cfg *config.Config, a usecase.Admin, runs usecase.TaskRuns, l logger.Interface) {
 	// Options
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
-		AllowHeaders: "Origin, Content-Type, Accept, X-Admin-Key, Authorization",
+		AllowHeaders: "Origin, Content-Type, Accept, X-Admin-Key, X-Ingest-Key, Authorization",
 		AllowMethods: "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 	}))
 	app.Use(middleware.Logger(l))
@@ -50,5 +50,9 @@ func NewRouter(app *fiber.App, cfg *config.Config, a usecase.Admin, l logger.Int
 	{
 		adminGroup := apiV1Group.Group("/admin", middleware.AdminAPIKey(cfg.Admin.APIKey))
 		v1.NewAdminRoutes(adminGroup, a, l)
+
+		// Separate credential, and nothing but the run log behind it.
+		ingestGroup := apiV1Group.Group("", middleware.IngestAPIKey(cfg.Ingest.APIKey))
+		v1.NewIngestRoutes(ingestGroup, runs, l)
 	}
 }

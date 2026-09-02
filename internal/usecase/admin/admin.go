@@ -22,6 +22,7 @@ type UseCase struct {
 	appSettings usecase.AppSettings
 	audit       repo.AdminAuditRepo
 	syncEvents  repo.SyncEventsRepo
+	taskRuns    usecase.TaskRuns
 	system      repo.SystemRepo
 	runtime     usecase.AdminRuntime
 	jobs        usecase.Jobs
@@ -38,6 +39,7 @@ func New(
 	appSettings usecase.AppSettings,
 	audit repo.AdminAuditRepo,
 	syncEvents repo.SyncEventsRepo,
+	taskRuns usecase.TaskRuns,
 	system repo.SystemRepo,
 	runtime usecase.AdminRuntime,
 	jobs usecase.Jobs,
@@ -51,6 +53,7 @@ func New(
 		appSettings:     appSettings,
 		audit:           audit,
 		syncEvents:      syncEvents,
+		taskRuns:        taskRuns,
 		system:          system,
 		runtime:         runtime,
 		jobs:            jobs,
@@ -376,6 +379,16 @@ func (uc *UseCase) ListSyncEvents(ctx context.Context, offset, limit int) ([]ent
 		return nil, 0, err
 	}
 	return items, total, nil
+}
+
+// ListTaskRuns returns a page of the durable run log plus its total.
+func (uc *UseCase) ListTaskRuns(ctx context.Context, q repo.TaskRunListQuery, offset, limit int) ([]entity.TaskRun, int, error) {
+	return uc.taskRuns.List(ctx, q, offset, limit)
+}
+
+// ListTaskRunSources returns the distinct sources that have reported runs.
+func (uc *UseCase) ListTaskRunSources(ctx context.Context) ([]string, error) {
+	return uc.taskRuns.Sources(ctx)
 }
 
 func (uc *UseCase) GetSystemStatus(ctx context.Context) (entity.SystemStatus, error) {

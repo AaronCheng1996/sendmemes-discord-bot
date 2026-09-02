@@ -13,6 +13,13 @@ type AlbumAdminListQuery struct {
 	IncludeMissing bool
 }
 
+// TaskRunListQuery narrows a task-run listing. The zero value returns every
+// run, newest first.
+type TaskRunListQuery struct {
+	Source string // exact match, e.g. "scheduled_send"; empty = any
+	Status string // running | succeeded | failed; empty = any
+}
+
 // ImageAdminListQuery drives filtered/sorted admin image listing.
 // AlbumScopeID > 0 restricts to that album (same as historical album_id query param).
 // Zero value hides soft-deleted rows.

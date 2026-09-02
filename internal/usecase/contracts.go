@@ -137,6 +137,28 @@ type (
 		GetDiscordStatus(ctx context.Context) (connected bool, user string)
 	}
 
+	// TaskRuns records and reads the durable run log. Writes come from this
+	// process (scheduled sends, syncs) and from ingest clients such as the
+	// crawler; reads back the admin dashboard's System log page.
+	TaskRuns interface {
+		// Record stores a run. A terminal status makes it complete in one call;
+		// "running" opens a row for Complete to close.
+		Record(ctx context.Context, run entity.TaskRun) (entity.TaskRun, error)
+		// Complete closes an open run with its outcome.
+		Complete(ctx context.Context, id int64, outcome entity.TaskRun) (entity.TaskRun, error)
+		// List returns a page of runs plus the total matching the same filters.
+		List(ctx context.Context, q repo.TaskRunListQuery, offset, limit int) ([]entity.TaskRun, int, error)
+		// Sources returns the distinct sources that have reported runs.
+		Sources(ctx context.Context) ([]string, error)
+		// Prune drops runs past the retention window, returning how many went.
+		Prune(ctx context.Context) (int64, error)
+		// Started opens a run in the running state and returns its id; 0 means
+		// the record failed and Finish will be a no-op.
+		Started(ctx context.Context, source, task string) (int64, error)
+		// Finish closes a run opened by Started. Tolerates id 0.
+		Finish(ctx context.Context, id int64, status, summary string, detail map[string]any, runErr error) error
+	}
+
 	Admin interface {
 		// ListAlbums returns paginated albums with embedded preview_url already resolved
 		// (cover image when present, otherwise the lowest-id image in the album).
@@ -170,6 +192,10 @@ type (
 		RecordAudit(ctx context.Context, actor, action, targetType, targetID string, metadata map[string]any) error
 		// ListSyncEvents returns paginated sync discovery events, newest first.
 		ListSyncEvents(ctx context.Context, offset, limit int) ([]entity.SyncEvent, int, error)
+		// ListTaskRuns returns a page of the durable run log plus its total.
+		ListTaskRuns(ctx context.Context, q repo.TaskRunListQuery, offset, limit int) ([]entity.TaskRun, int, error)
+		// ListTaskRunSources returns the distinct sources that have reported runs.
+		ListTaskRunSources(ctx context.Context) ([]string, error)
 		GetSystemStatus(ctx context.Context) (entity.SystemStatus, error)
 		// ListJobs returns the most recent background jobs, newest first.
 		ListJobs(ctx context.Context) []entity.Job

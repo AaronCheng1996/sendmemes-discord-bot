@@ -478,6 +478,42 @@ func (r *V1) listSyncEvents(ctx *fiber.Ctx) error {
 	})
 }
 
+func (r *V1) listTaskRuns(ctx *fiber.Ctx) error {
+	offset, limit := clampPagination(parseIntQuery(ctx, "offset", 0), parseIntQuery(ctx, "limit", defaultListLimit))
+	q := repo.TaskRunListQuery{
+		Source: strings.TrimSpace(ctx.Query("source")),
+		Status: strings.TrimSpace(ctx.Query("status")),
+	}
+	items, total, err := r.a.ListTaskRuns(ctx.UserContext(), q, offset, limit)
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - listTaskRuns")
+		return errorResponse(ctx, http.StatusInternalServerError, "failed to list task runs")
+	}
+	if items == nil {
+		items = []entity.TaskRun{}
+	}
+	return ctx.Status(http.StatusOK).JSON(response.Page[entity.TaskRun]{
+		Items:  items,
+		Total:  total,
+		Offset: offset,
+		Limit:  limit,
+	})
+}
+
+// listTaskRunSources backs the System log page's source filter, which cannot be
+// hardcoded: an ingest client names itself.
+func (r *V1) listTaskRunSources(ctx *fiber.Ctx) error {
+	sources, err := r.a.ListTaskRunSources(ctx.UserContext())
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - listTaskRunSources")
+		return errorResponse(ctx, http.StatusInternalServerError, "failed to list task run sources")
+	}
+	if sources == nil {
+		sources = []string{}
+	}
+	return ctx.Status(http.StatusOK).JSON(sources)
+}
+
 func (r *V1) getSystemStatus(ctx *fiber.Ctx) error {
 	out, err := r.a.GetSystemStatus(ctx.UserContext())
 	if err != nil {

@@ -1,6 +1,10 @@
 package request
 
-import "github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
+import (
+	"time"
+
+	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
+)
 
 type AlbumCreate struct {
 	Name           string `json:"name" validate:"required"`
@@ -73,4 +77,27 @@ type ScheduleTriggerNow struct {
 // AlbumSendTest triggers a one-off preview send for the album in the URL path.
 type AlbumSendTest struct {
 	ChannelID string `json:"channel_id"`
+}
+
+// TaskRunCreate reports one execution to the run log. A terminal status
+// ("succeeded" / "failed") records a finished run in a single call; "running"
+// opens a row for TaskRunComplete to close. Timestamps default to now.
+type TaskRunCreate struct {
+	Source     string         `json:"source" validate:"required"`
+	Task       string         `json:"task"`
+	Status     string         `json:"status" validate:"required"`
+	StartedAt  *time.Time     `json:"started_at"`
+	FinishedAt *time.Time     `json:"finished_at"`
+	Summary    string         `json:"summary"`
+	Detail     map[string]any `json:"detail"`
+	Error      string         `json:"error"`
+}
+
+// TaskRunComplete closes a run that was opened with status "running".
+type TaskRunComplete struct {
+	Status     string         `json:"status" validate:"required"`
+	FinishedAt *time.Time     `json:"finished_at"`
+	Summary    string         `json:"summary"`
+	Detail     map[string]any `json:"detail"`
+	Error      string         `json:"error"`
 }

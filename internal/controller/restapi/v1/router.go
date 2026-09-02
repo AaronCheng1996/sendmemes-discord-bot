@@ -7,6 +7,16 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// NewIngestRoutes registers the write-only run-reporting routes used by
+// external clients. They live outside the admin group deliberately: a crawler
+// should be able to append run records without holding a key that can rewrite
+// delivery rules.
+func NewIngestRoutes(ingestGroup fiber.Router, runs usecase.TaskRuns, l logger.Interface) {
+	r := &Runs{runs: runs, l: l}
+	ingestGroup.Post("/runs", r.createRun)
+	ingestGroup.Patch("/runs/:id", r.updateRun)
+}
+
 // NewAdminRoutes registers admin CRUD routes.
 func NewAdminRoutes(adminGroup fiber.Router, a usecase.Admin, l logger.Interface) {
 	r := &V1{a: a, l: l, v: validator.New(validator.WithRequiredStructEnabled())}
@@ -37,6 +47,8 @@ func NewAdminRoutes(adminGroup fiber.Router, a usecase.Admin, l logger.Interface
 	adminGroup.Put("/message-defaults", r.putMessageDefaults)
 	adminGroup.Post("/sync/trigger-now", r.triggerSyncNow)
 	adminGroup.Get("/sync-events", r.listSyncEvents)
+	adminGroup.Get("/task-runs", r.listTaskRuns)
+	adminGroup.Get("/task-runs/sources", r.listTaskRunSources)
 	adminGroup.Get("/system/status", r.getSystemStatus)
 	adminGroup.Get("/jobs", r.listJobs)
 }

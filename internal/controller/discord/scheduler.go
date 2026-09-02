@@ -77,7 +77,9 @@ func (b *Bot) nextSyncWait(intervalStr string) time.Duration {
 func (b *Bot) doSync() {
 	ctx := context.Background()
 	b.l.Info("pCloud sync started")
+	started := time.Now().UTC()
 	report, err := b.syncUC.SyncImages(ctx)
+	b.recordSyncRun(ctx, "scheduled", started, &report, err)
 	if err != nil {
 		b.l.Error(fmt.Errorf("doSync: %w", err))
 		return
@@ -94,6 +96,118 @@ func (b *Bot) doSync() {
 		b.vlog("sync recorded %d activity-log notice(s) (removals/renames); not delivered to Discord", len(report.Notices))
 	}
 	b.notifySyncEvents(ctx, report)
+}
+
+// recordSyncRun writes one row to the durable run log describing a sync,
+// whichever way it was started. The counts it keeps are the ones nobody can
+// reconstruct from the albums table afterwards: what this particular run found,
+// retired and renamed.
+func (b *Bot) recordSyncRun(ctx context.Context, trigger string, started time.Time, report *entity.SyncReport, runErr error) {
+	newImages, newVideos := 0, 0
+	for i := range report.Events {
+		newImages += report.Events[i].NewImages
+		newVideos += report.Events[i].NewVideos
+	}
+	removedImages, removedVideos := 0, 0
+	for i := range report.Notices {
+		removedImages += report.Notices[i].RemovedImages
+		removedVideos += report.Notices[i].RemovedVideos
+	}
+
+	detail := map[string]any{
+		"trigger":        trigger,
+		"albums_changed": len(report.Events),
+		"new_images":     newImages,
+		"new_videos":     newVideos,
+		"removed_images": removedImages,
+		"removed_videos": removedVideos,
+		"missing_albums": report.MissingAlbums,
+		"notices":        len(report.Notices),
+		"empty_scan":     report.EmptyScan,
+		"initial_import": report.InitialImport,
+	}
+
+	status := entity.TaskRunSucceeded
+	summary := fmt.Sprintf("%d album(s) changed, +%d image(s) +%d video(s), -%d image(s) -%d video(s)",
+		len(report.Events), newImages, newVideos, removedImages, removedVideos)
+	switch {
+	case runErr != nil:
+		status = entity.TaskRunFailed
+		summary = "Sync failed"
+	case report.EmptyScan:
+		// Not an error — the source answered — but the run did nothing and the
+		// missing pass was skipped, which is worth spotting in the log.
+		summary = "Source returned no media at all; missing-album pass skipped"
+	}
+
+	b.recordRun(ctx, &entity.TaskRun{
+		Source:    entity.TaskRunSourceSync,
+		Task:      trigger,
+		Status:    status,
+		StartedAt: started,
+		Summary:   summary,
+		Detail:    detail,
+		Error:     errText(runErr),
+	})
+}
+
+// taskRunSweepInterval is how often expired run rows are swept. The retention
+// window is measured in weeks, so a sweep a few times a day is plenty; running
+// it more often would only add queries.
+const taskRunSweepInterval = 6 * time.Hour
+
+// runTaskRunRetention drops run rows past their retention window. Without it
+// the table grows without bound — a crawler reporting every pass is exactly the
+// client that would fill it.
+func (b *Bot) runTaskRunRetention() {
+	if b.runsUC == nil {
+		return
+	}
+	sweep := func() {
+		n, err := b.runsUC.Prune(context.Background())
+		if err != nil {
+			b.l.Error(fmt.Errorf("runTaskRunRetention: %w", err))
+			return
+		}
+		if n > 0 {
+			b.vlog("task run retention: pruned %d expired run(s)", n)
+		}
+	}
+
+	// Sweep once at startup: an instance that only runs for a few hours a day
+	// would otherwise never reach a tick.
+	sweep()
+
+	ticker := time.NewTicker(taskRunSweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			sweep()
+		case <-b.stopCh:
+			return
+		}
+	}
+}
+
+// recordRun appends one finished run to the durable log. Recording is
+// best-effort by design: a database hiccup must not turn a successful send into
+// a failure, so it is logged and swallowed.
+func (b *Bot) recordRun(ctx context.Context, run *entity.TaskRun) {
+	if b.runsUC == nil {
+		return
+	}
+	if _, err := b.runsUC.Record(ctx, *run); err != nil {
+		b.l.Error(fmt.Errorf("recordRun %s/%q: %w", run.Source, run.Task, err))
+	}
+}
+
+// errText renders an error for a run row, empty when there was none.
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // notifySyncEvents posts discovered content to every enabled delivery rule whose
@@ -400,15 +514,68 @@ func (b *Bot) runScheduledRule(ctx context.Context, rule entity.DeliveryRule) {
 	}
 }
 
+// doScheduledSend runs one scheduled push and records it in the durable log, so
+// "how did the 2pm send go" is one row on the System log page rather than a
+// scroll through the process output.
 func (b *Bot) doScheduledSend(sc sendContext, historySize int, style entity.MessageStyle, filter entity.AlbumPathFilter) (entity.ManualScheduleTriggerResult, error) {
 	ctx := context.Background()
+	started := time.Now().UTC()
+
+	result, detail, err := b.scheduledSend(ctx, sc, historySize, style, filter)
+	detail["history_size"] = historySize
+	detail["album_scope"] = filter.Describe()
+	detail["channel_id"] = sc.ChannelID
+
+	task := sc.RuleName
+	if task == "" {
+		// A manual trigger belongs to no rule; name it by where it landed.
+		task = "channel " + sc.ChannelID
+	}
+
+	status, summary := entity.TaskRunSucceeded, fmt.Sprintf("Posted %q to %s", result.AlbumName, sc.ChannelID)
+	switch {
+	case err != nil:
+		status = entity.TaskRunFailed
+		summary = "Scheduled send failed"
+		if result.AlbumName != "" {
+			summary = fmt.Sprintf("Scheduled send of %q failed", result.AlbumName)
+		}
+	case !result.Triggered:
+		// The album was picked but nothing reached Discord — an empty album, or
+		// every attachment over budget. No error came back, so without this the
+		// run would read as a success that posted nothing.
+		status = entity.TaskRunFailed
+		summary = fmt.Sprintf("Selected %q but nothing was delivered", result.AlbumName)
+	}
+
+	b.recordRun(ctx, &entity.TaskRun{
+		Source:    entity.TaskRunSourceScheduledSend,
+		Task:      task,
+		Status:    status,
+		StartedAt: started,
+		Summary:   summary,
+		Detail:    detail,
+		Error:     errText(err),
+	})
+
+	return result, err
+}
+
+// scheduledSend is doScheduledSend's actual work, returning the detail payload
+// its run row carries alongside the result.
+func (b *Bot) scheduledSend(ctx context.Context, sc sendContext, historySize int, style entity.MessageStyle, filter entity.AlbumPathFilter) (entity.ManualScheduleTriggerResult, map[string]any, error) {
+	detail := map[string]any{}
 	channelID := sc.ChannelID
 	b.vlog("scheduled send: selecting album (history=%d albums=%s)", historySize, filter.Describe())
 	album, err := b.imagesUC.GetScheduledAlbum(ctx, historySize, filter)
 	if err != nil {
 		b.l.Error(fmt.Errorf("doScheduledSend GetScheduledAlbum: %w", err))
-		return entity.ManualScheduleTriggerResult{}, err
+		return entity.ManualScheduleTriggerResult{}, detail, err
 	}
+	detail["album_id"] = album.ID
+	detail["album_name"] = album.Name
+	detail["send_mode"] = string(album.SendMode)
+
 	b.vlog("scheduled send: album=%q id=%d mode=%s sending to channel %s", album.Name, album.ID, album.SendMode, channelID)
 	msg := b.deliverAlbum(ctx, channelID, album, sc, style)
 	result := entity.ManualScheduleTriggerResult{
@@ -421,12 +588,14 @@ func (b *Bot) doScheduledSend(sc sendContext, historySize int, style entity.Mess
 		b.trackScheduledMsg(msg.ID, album.ID)
 		b.vlog("scheduled send: completed album=%q messageID=%s", album.Name, msg.ID)
 		result.MessageID = msg.ID
+		detail["message_id"] = msg.ID
 	}
 	// Mark sent regardless of delivery outcome so a broken album is not re-picked
 	// on every tick.
 	if err := b.imagesUC.MarkAlbumSent(ctx, album.ID); err != nil {
 		b.l.Error(fmt.Errorf("doScheduledSend MarkAlbumSent: %w", err))
-		return result, err
+		return result, detail, err
 	}
-	return result, nil
+
+	return result, detail, nil
 }

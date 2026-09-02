@@ -762,6 +762,135 @@ func (mr *MockAdminRuntimeMockRecorder) TriggerSyncNow(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TriggerSyncNow", reflect.TypeOf((*MockAdminRuntime)(nil).TriggerSyncNow), ctx)
 }
 
+// MockTaskRuns is a mock of TaskRuns interface.
+type MockTaskRuns struct {
+	ctrl     *gomock.Controller
+	recorder *MockTaskRunsMockRecorder
+	isgomock struct{}
+}
+
+// MockTaskRunsMockRecorder is the mock recorder for MockTaskRuns.
+type MockTaskRunsMockRecorder struct {
+	mock *MockTaskRuns
+}
+
+// NewMockTaskRuns creates a new mock instance.
+func NewMockTaskRuns(ctrl *gomock.Controller) *MockTaskRuns {
+	mock := &MockTaskRuns{ctrl: ctrl}
+	mock.recorder = &MockTaskRunsMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockTaskRuns) EXPECT() *MockTaskRunsMockRecorder {
+	return m.recorder
+}
+
+// Complete mocks base method.
+func (m *MockTaskRuns) Complete(ctx context.Context, id int64, outcome entity.TaskRun) (entity.TaskRun, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Complete", ctx, id, outcome)
+	ret0, _ := ret[0].(entity.TaskRun)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Complete indicates an expected call of Complete.
+func (mr *MockTaskRunsMockRecorder) Complete(ctx, id, outcome any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Complete", reflect.TypeOf((*MockTaskRuns)(nil).Complete), ctx, id, outcome)
+}
+
+// Finish mocks base method.
+func (m *MockTaskRuns) Finish(ctx context.Context, id int64, status, summary string, detail map[string]any, runErr error) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Finish", ctx, id, status, summary, detail, runErr)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Finish indicates an expected call of Finish.
+func (mr *MockTaskRunsMockRecorder) Finish(ctx, id, status, summary, detail, runErr any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Finish", reflect.TypeOf((*MockTaskRuns)(nil).Finish), ctx, id, status, summary, detail, runErr)
+}
+
+// List mocks base method.
+func (m *MockTaskRuns) List(ctx context.Context, q repo.TaskRunListQuery, offset, limit int) ([]entity.TaskRun, int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "List", ctx, q, offset, limit)
+	ret0, _ := ret[0].([]entity.TaskRun)
+	ret1, _ := ret[1].(int)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// List indicates an expected call of List.
+func (mr *MockTaskRunsMockRecorder) List(ctx, q, offset, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockTaskRuns)(nil).List), ctx, q, offset, limit)
+}
+
+// Prune mocks base method.
+func (m *MockTaskRuns) Prune(ctx context.Context) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Prune", ctx)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Prune indicates an expected call of Prune.
+func (mr *MockTaskRunsMockRecorder) Prune(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Prune", reflect.TypeOf((*MockTaskRuns)(nil).Prune), ctx)
+}
+
+// Record mocks base method.
+func (m *MockTaskRuns) Record(ctx context.Context, run entity.TaskRun) (entity.TaskRun, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Record", ctx, run)
+	ret0, _ := ret[0].(entity.TaskRun)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Record indicates an expected call of Record.
+func (mr *MockTaskRunsMockRecorder) Record(ctx, run any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Record", reflect.TypeOf((*MockTaskRuns)(nil).Record), ctx, run)
+}
+
+// Sources mocks base method.
+func (m *MockTaskRuns) Sources(ctx context.Context) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Sources", ctx)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Sources indicates an expected call of Sources.
+func (mr *MockTaskRunsMockRecorder) Sources(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Sources", reflect.TypeOf((*MockTaskRuns)(nil).Sources), ctx)
+}
+
+// Started mocks base method.
+func (m *MockTaskRuns) Started(ctx context.Context, source, task string) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Started", ctx, source, task)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Started indicates an expected call of Started.
+func (mr *MockTaskRunsMockRecorder) Started(ctx, source, task any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Started", reflect.TypeOf((*MockTaskRuns)(nil).Started), ctx, source, task)
+}
+
 // MockAdmin is a mock of Admin interface.
 type MockAdmin struct {
 	ctrl     *gomock.Controller
@@ -1023,6 +1152,37 @@ func (m *MockAdmin) ListSyncEvents(ctx context.Context, offset, limit int) ([]en
 func (mr *MockAdminMockRecorder) ListSyncEvents(ctx, offset, limit any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListSyncEvents", reflect.TypeOf((*MockAdmin)(nil).ListSyncEvents), ctx, offset, limit)
+}
+
+// ListTaskRunSources mocks base method.
+func (m *MockAdmin) ListTaskRunSources(ctx context.Context) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListTaskRunSources", ctx)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListTaskRunSources indicates an expected call of ListTaskRunSources.
+func (mr *MockAdminMockRecorder) ListTaskRunSources(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTaskRunSources", reflect.TypeOf((*MockAdmin)(nil).ListTaskRunSources), ctx)
+}
+
+// ListTaskRuns mocks base method.
+func (m *MockAdmin) ListTaskRuns(ctx context.Context, q repo.TaskRunListQuery, offset, limit int) ([]entity.TaskRun, int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListTaskRuns", ctx, q, offset, limit)
+	ret0, _ := ret[0].([]entity.TaskRun)
+	ret1, _ := ret[1].(int)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// ListTaskRuns indicates an expected call of ListTaskRuns.
+func (mr *MockAdminMockRecorder) ListTaskRuns(ctx, q, offset, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTaskRuns", reflect.TypeOf((*MockAdmin)(nil).ListTaskRuns), ctx, q, offset, limit)
 }
 
 // RecordAudit mocks base method.

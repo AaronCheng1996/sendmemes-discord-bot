@@ -208,6 +208,46 @@ recorded. Such an album stays *inside* an exclude filter and *outside* an
 include one, so an unsynced library keeps behaving as it did rather than
 silently dropping out of the daily push.
 
+### System log, and reporting runs from outside
+
+Every scheduled send and every sync writes one row to `task_runs`, and the
+dashboard's **System log** page shows one line per run — collapsed by default,
+expanded on click to reveal the run's `detail` payload and any error. That is
+the point of the table: "how did the 2pm push go" is one row, not ten log lines.
+Rows older than **30 days** are swept automatically.
+
+External clients report their own runs to a **write-only** endpoint guarded by
+`INGEST_API_KEY`, a credential deliberately separate from `ADMIN_API_KEY` — a
+crawler running on another host should be able to append run records, not
+rewrite delivery rules. Report a finished run in one call:
+
+```bash
+curl -X POST "$API/v1/runs" -H "X-Ingest-Key: $INGEST_API_KEY"   -H 'Content-Type: application/json' -d '{
+    "source": "crawler",
+    "task": "SomeArtist",
+    "status": "succeeded",
+    "summary": "Fetched 14 new images, 0 skipped",
+    "detail": {"downloaded": 14, "skipped": 0}
+  }'
+```
+
+`status` is `succeeded`, `failed` or `running`. A terminal status completes the
+run in that one call; `running` returns an id to close later, which is worth it
+only for work long enough to be worth watching:
+
+```bash
+curl -X PATCH "$API/v1/runs/123" -H "X-Ingest-Key: $INGEST_API_KEY"   -H 'Content-Type: application/json'   -d '{"status": "failed", "summary": "Gallery returned 403", "error": "..."}'
+```
+
+`source` and `task` are free-form: `source` groups the rows and populates the
+page's filter, `task` names what the run was about. Both are capped at 200
+characters, `summary` at 2000 and `detail` at 16 KB, so a misbehaving client
+cannot fill the table one field at a time.
+
+This is not the same thing as the in-memory job list behind the dashboard's
+progress indicator: that one is capped at 50 and forgotten on restart, and it
+exists to show what is running right now. `task_runs` is the durable history.
+
 ### Customizing messages
 
 Three layers shape a post, each overriding the one below it **per field**:
@@ -358,6 +398,8 @@ apply in every mode. An album is the top style layer, so its `caption` and
   (`GET /jobs`)
 - Sync activity feed (`/sync-events`) — paginated events for the dashboard
   Activity page: content discovered, files and folders removed, folders renamed
+- Run log (`/task-runs`, plus `/task-runs/sources` for the filter) — the
+  System log page's durable history, filterable by `source` and `status`
 - Aggregated system status (DB ping + Discord session + sync interval + rule
   count + next scheduled run + last sync time + album/image/video counts) at
   `/system/status`

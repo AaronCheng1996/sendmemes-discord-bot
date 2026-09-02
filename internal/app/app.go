@@ -23,6 +23,7 @@ import (
 	jobsuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/jobs"
 	rulesuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/rules"
 	syncuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/sync"
+	taskrunsuc "github.com/AaronCheng1996/sendmemes-discord-bot/internal/usecase/taskruns"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/httpserver"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/logger"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/postgres"
@@ -46,6 +47,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	appSettingsRepo := persistent.NewAppSettingsRepo(pg)
 	adminAuditRepo := persistent.NewAdminAuditRepo(pg)
 	syncEventsRepo := persistent.NewSyncEventsRepo(pg)
+	taskRunsRepo := persistent.NewTaskRunsRepo(pg)
 	systemRepo := persistent.NewSystemRepo(pg)
 
 	// MediaSource (pCloud or local filesystem) + sync use case
@@ -64,6 +66,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	imagesUseCase := images.New(imagesRepo, albumsRepo, mediaSource, cfg.HTTP.PublicURL)
 	rulesUseCase := rulesuc.New(deliveryRulesRepo)
 	appSettingsUseCase := appsettingsuc.New(appSettingsRepo, cfg.PCloud.SyncInterval)
+	taskRunsUseCase := taskrunsuc.New(taskRunsRepo)
 
 	// Seed env-derived defaults once (no-op when rows already exist).
 	seedCtx := context.Background()
@@ -75,17 +78,17 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	}
 
 	// Discord Bot
-	discordBot, err := discord.NewBot(cfg, l, imagesUseCase, syncUseCase, rulesUseCase, appSettingsUseCase)
+	discordBot, err := discord.NewBot(cfg, l, imagesUseCase, syncUseCase, rulesUseCase, appSettingsUseCase, taskRunsUseCase)
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - discord.NewBot: %w", err))
 	}
 	discordBot.Start()
 	jobsManager := jobsuc.New()
-	adminUseCase := adminuc.New(albumsRepo, imagesRepo, imagesUseCase, rulesUseCase, appSettingsUseCase, adminAuditRepo, syncEventsRepo, systemRepo, discordBot, jobsManager, defaultSendMode)
+	adminUseCase := adminuc.New(albumsRepo, imagesRepo, imagesUseCase, rulesUseCase, appSettingsUseCase, adminAuditRepo, syncEventsRepo, taskRunsUseCase, systemRepo, discordBot, jobsManager, defaultSendMode)
 
 	// HTTP Server (REST API)
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
-	restapi.NewRouter(httpServer.App, cfg, adminUseCase, l)
+	restapi.NewRouter(httpServer.App, cfg, adminUseCase, taskRunsUseCase, l)
 	httpServer.Start()
 
 	// Waiting signal
