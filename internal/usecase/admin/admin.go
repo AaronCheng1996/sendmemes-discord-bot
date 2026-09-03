@@ -381,6 +381,39 @@ func (uc *UseCase) ListSyncEvents(ctx context.Context, offset, limit int) ([]ent
 	return items, total, nil
 }
 
+// ListSyncEventMedia resolves an activity event's sampled file names to image
+// rows with preview URLs.
+//
+// The event stores at most a handful of names, which is the cap on what this can
+// return — and comfortably more than the dashboard shows. Matching on names
+// rather than "the album's newest files" is what keeps an old event showing what
+// *it* was about rather than whatever arrived since.
+func (uc *UseCase) ListSyncEventMedia(ctx context.Context, eventID int64) ([]entity.Image, error) {
+	ev, err := uc.syncEvents.GetByID(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+	if ev.AlbumID == 0 || len(ev.FileNames) == 0 {
+		return nil, nil
+	}
+
+	items, err := uc.images.ListByAlbumAndNames(ctx, ev.AlbumID, ev.FileNames)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		url, perr := uc.imagesUC.ResolveURL(ctx, items[i])
+		if perr != nil {
+			// Best-effort, exactly as in the image list: a file whose link
+			// cannot be resolved still belongs in the response by name.
+			continue
+		}
+		items[i].PreviewURL = url
+	}
+
+	return items, nil
+}
+
 // ListTaskRuns returns a page of the durable run log plus its total.
 func (uc *UseCase) ListTaskRuns(ctx context.Context, q repo.TaskRunListQuery, offset, limit int) ([]entity.TaskRun, int, error) {
 	return uc.taskRuns.List(ctx, q, offset, limit)
@@ -389,6 +422,29 @@ func (uc *UseCase) ListTaskRuns(ctx context.Context, q repo.TaskRunListQuery, of
 // ListTaskRunSources returns the distinct sources that have reported runs.
 func (uc *UseCase) ListTaskRunSources(ctx context.Context) ([]string, error) {
 	return uc.taskRuns.Sources(ctx)
+}
+
+// HasIngestAPIKey reports whether the run-reporting endpoint has a credential
+// in force. Deliberately a boolean: an admin may replace the key, not read it.
+func (uc *UseCase) HasIngestAPIKey(ctx context.Context) (bool, error) {
+	return uc.appSettings.HasIngestAPIKey(ctx)
+}
+
+// SetIngestAPIKey replaces the run-reporting credential and returns whether one
+// is now in force. The audit entry records that it changed, never the value.
+func (uc *UseCase) SetIngestAPIKey(ctx context.Context, key, actor string) (bool, error) {
+	if err := uc.appSettings.SetIngestAPIKey(ctx, key); err != nil {
+		return false, err
+	}
+	configured, err := uc.appSettings.HasIngestAPIKey(ctx)
+	if err != nil {
+		return false, err
+	}
+	_ = uc.RecordAudit(ctx, actor, "settings.ingest_key", "settings", "ingest_api_key", map[string]any{
+		"configured": configured,
+	})
+
+	return configured, nil
 }
 
 func (uc *UseCase) GetSystemStatus(ctx context.Context) (entity.SystemStatus, error) {

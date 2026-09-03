@@ -15,7 +15,7 @@ func TestSyncIntervalFallback(t *testing.T) {
 
 	ctrl := gomock.NewController(t)
 	repo := NewMockAppSettingsRepo(ctrl)
-	uc := appsettingsuc.New(repo, "1h")
+	uc := appsettingsuc.New(repo, "1h", "")
 	ctx := context.Background()
 
 	// No stored row: env default is used.
@@ -36,7 +36,7 @@ func TestSetSyncIntervalValidation(t *testing.T) {
 
 	ctrl := gomock.NewController(t)
 	repo := NewMockAppSettingsRepo(ctrl)
-	uc := appsettingsuc.New(repo, "1h")
+	uc := appsettingsuc.New(repo, "1h", "")
 	ctx := context.Background()
 
 	// Invalid duration is rejected before persisting.

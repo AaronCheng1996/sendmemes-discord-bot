@@ -65,7 +65,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	// Use-Case: images, delivery rules, app settings
 	imagesUseCase := images.New(imagesRepo, albumsRepo, mediaSource, cfg.HTTP.PublicURL)
 	rulesUseCase := rulesuc.New(deliveryRulesRepo)
-	appSettingsUseCase := appsettingsuc.New(appSettingsRepo, cfg.PCloud.SyncInterval)
+	appSettingsUseCase := appsettingsuc.New(appSettingsRepo, cfg.PCloud.SyncInterval, cfg.Ingest.APIKey)
 	taskRunsUseCase := taskrunsuc.New(taskRunsRepo)
 
 	// Seed env-derived defaults once (no-op when rows already exist).
@@ -88,7 +88,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	// HTTP Server (REST API)
 	httpServer := httpserver.New(l, httpserver.Port(cfg.HTTP.Port), httpserver.Prefork(cfg.HTTP.UsePreforkMode))
-	restapi.NewRouter(httpServer.App, cfg, adminUseCase, taskRunsUseCase, l)
+	restapi.NewRouter(httpServer.App, cfg, adminUseCase, taskRunsUseCase, appSettingsUseCase, l)
 	httpServer.Start()
 
 	// Waiting signal

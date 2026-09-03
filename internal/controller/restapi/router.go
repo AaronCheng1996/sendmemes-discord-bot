@@ -16,7 +16,7 @@ import (
 )
 
 // NewRouter -.
-func NewRouter(app *fiber.App, cfg *config.Config, a usecase.Admin, runs usecase.TaskRuns, l logger.Interface) {
+func NewRouter(app *fiber.App, cfg *config.Config, a usecase.Admin, runs usecase.TaskRuns, settings usecase.AppSettings, l logger.Interface) {
 	// Options
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
@@ -51,8 +51,9 @@ func NewRouter(app *fiber.App, cfg *config.Config, a usecase.Admin, runs usecase
 		adminGroup := apiV1Group.Group("/admin", middleware.AdminAPIKey(cfg.Admin.APIKey))
 		v1.NewAdminRoutes(adminGroup, a, l)
 
-		// Separate credential, and nothing but the run log behind it.
-		ingestGroup := apiV1Group.Group("", middleware.IngestAPIKey(cfg.Ingest.APIKey))
+		// Separate credential, and nothing but the run log behind it. Resolved
+		// per request so rotating it from the dashboard needs no restart.
+		ingestGroup := apiV1Group.Group("", middleware.IngestAPIKey(settings.GetIngestAPIKey))
 		v1.NewIngestRoutes(ingestGroup, runs, l)
 	}
 }

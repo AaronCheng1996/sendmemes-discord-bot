@@ -566,6 +566,21 @@ func (mr *MockAppSettingsMockRecorder) Get(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockAppSettings)(nil).Get), ctx)
 }
 
+// GetIngestAPIKey mocks base method.
+func (m *MockAppSettings) GetIngestAPIKey(ctx context.Context) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetIngestAPIKey", ctx)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetIngestAPIKey indicates an expected call of GetIngestAPIKey.
+func (mr *MockAppSettingsMockRecorder) GetIngestAPIKey(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetIngestAPIKey", reflect.TypeOf((*MockAppSettings)(nil).GetIngestAPIKey), ctx)
+}
+
 // GetSyncInterval mocks base method.
 func (m *MockAppSettings) GetSyncInterval(ctx context.Context) (string, error) {
 	m.ctrl.T.Helper()
@@ -579,6 +594,35 @@ func (m *MockAppSettings) GetSyncInterval(ctx context.Context) (string, error) {
 func (mr *MockAppSettingsMockRecorder) GetSyncInterval(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSyncInterval", reflect.TypeOf((*MockAppSettings)(nil).GetSyncInterval), ctx)
+}
+
+// HasIngestAPIKey mocks base method.
+func (m *MockAppSettings) HasIngestAPIKey(ctx context.Context) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HasIngestAPIKey", ctx)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// HasIngestAPIKey indicates an expected call of HasIngestAPIKey.
+func (mr *MockAppSettingsMockRecorder) HasIngestAPIKey(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HasIngestAPIKey", reflect.TypeOf((*MockAppSettings)(nil).HasIngestAPIKey), ctx)
+}
+
+// SetIngestAPIKey mocks base method.
+func (m *MockAppSettings) SetIngestAPIKey(ctx context.Context, key string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetIngestAPIKey", ctx, key)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SetIngestAPIKey indicates an expected call of SetIngestAPIKey.
+func (mr *MockAppSettingsMockRecorder) SetIngestAPIKey(ctx, key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetIngestAPIKey", reflect.TypeOf((*MockAppSettings)(nil).SetIngestAPIKey), ctx, key)
 }
 
 // SetMessageDefaults mocks base method.
@@ -1077,6 +1121,21 @@ func (mr *MockAdminMockRecorder) GetSystemStatus(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSystemStatus", reflect.TypeOf((*MockAdmin)(nil).GetSystemStatus), ctx)
 }
 
+// HasIngestAPIKey mocks base method.
+func (m *MockAdmin) HasIngestAPIKey(ctx context.Context) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HasIngestAPIKey", ctx)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// HasIngestAPIKey indicates an expected call of HasIngestAPIKey.
+func (mr *MockAdminMockRecorder) HasIngestAPIKey(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HasIngestAPIKey", reflect.TypeOf((*MockAdmin)(nil).HasIngestAPIKey), ctx)
+}
+
 // ListAlbums mocks base method.
 func (m *MockAdmin) ListAlbums(ctx context.Context, q repo.AlbumAdminListQuery, offset, limit int) ([]entity.Album, int, error) {
 	m.ctrl.T.Helper()
@@ -1136,6 +1195,21 @@ func (m *MockAdmin) ListRules(ctx context.Context) ([]entity.DeliveryRule, error
 func (mr *MockAdminMockRecorder) ListRules(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListRules", reflect.TypeOf((*MockAdmin)(nil).ListRules), ctx)
+}
+
+// ListSyncEventMedia mocks base method.
+func (m *MockAdmin) ListSyncEventMedia(ctx context.Context, eventID int64) ([]entity.Image, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListSyncEventMedia", ctx, eventID)
+	ret0, _ := ret[0].([]entity.Image)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListSyncEventMedia indicates an expected call of ListSyncEventMedia.
+func (mr *MockAdminMockRecorder) ListSyncEventMedia(ctx, eventID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListSyncEventMedia", reflect.TypeOf((*MockAdmin)(nil).ListSyncEventMedia), ctx, eventID)
 }
 
 // ListSyncEvents mocks base method.
@@ -1212,6 +1286,21 @@ func (m *MockAdmin) SendAlbumTest(ctx context.Context, albumID int, channelID, a
 func (mr *MockAdminMockRecorder) SendAlbumTest(ctx, albumID, channelID, actor any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SendAlbumTest", reflect.TypeOf((*MockAdmin)(nil).SendAlbumTest), ctx, albumID, channelID, actor)
+}
+
+// SetIngestAPIKey mocks base method.
+func (m *MockAdmin) SetIngestAPIKey(ctx context.Context, key, actor string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetIngestAPIKey", ctx, key, actor)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetIngestAPIKey indicates an expected call of SetIngestAPIKey.
+func (mr *MockAdminMockRecorder) SetIngestAPIKey(ctx, key, actor any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetIngestAPIKey", reflect.TypeOf((*MockAdmin)(nil).SetIngestAPIKey), ctx, key, actor)
 }
 
 // TestRule mocks base method.

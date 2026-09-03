@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	sq "github.com/Masterminds/squirrel"
-	"github.com/jackc/pgx/v5"
-
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/repo"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/postgres"
+	sq "github.com/Masterminds/squirrel"
+	"github.com/jackc/pgx/v5"
 )
 
 // ImagesRepo -.
@@ -352,6 +351,27 @@ func (r *ImagesRepo) GetRandomVideoByAlbum(ctx context.Context, albumID int) (en
 		return entity.Image{}, false, fmt.Errorf("ImagesRepo - GetRandomVideoByAlbum - QueryRow: %w", err)
 	}
 	return e, true, nil
+}
+
+// ListByAlbumAndNames returns the images in albumID whose filename is in names.
+// Soft-deleted rows are included on purpose: a removal event names files that
+// are no longer live, and its thumbnails are exactly what someone reviewing the
+// activity log wants to see.
+func (r *ImagesRepo) ListByAlbumAndNames(ctx context.Context, albumID int, names []string) ([]entity.Image, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+
+	sql, args, err := imageSelectBuilderScoped(r, true).
+		Where(sq.Eq{"i.album_id": albumID}).
+		Where(sq.Eq{"i.url": names}).
+		OrderBy("i.id ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("ImagesRepo - ListByAlbumAndNames - r.Builder: %w", err)
+	}
+
+	return r.queryImages(ctx, "ImagesRepo - ListByAlbumAndNames", sql, args)
 }
 
 // FindCoverByAlbum returns the image in albumID whose filename matches the cover

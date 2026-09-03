@@ -232,10 +232,10 @@ curl -s -H "X-Admin-Key: $ADMIN_API_KEY" "$API/v1/admin/albums?limit=200" \
   | jq -r '.items[] | "\(.name)\t\(.source_path)"'
 ```
 
-### System log, and reporting runs from outside
+### Logs, and reporting runs from outside
 
 Every scheduled send and every sync writes one row to `task_runs`, and the
-dashboard's **System log** page shows one line per run — collapsed by default,
+dashboard's **Logs** page shows one line per run — collapsed by default,
 expanded on click to reveal the run's `detail` payload and any error. That is
 the point of the table: "how did the 2pm push go" is one row, not ten log lines.
 Rows older than **30 days** are swept automatically.
@@ -290,6 +290,12 @@ Failures come back as `400` with `{"error": "..."}`; a missing or wrong
 `X-Ingest-Key` is `403`/`401` with a plain-text body. `Authorization: Bearer …`
 works in place of the header.
 
+The key lives in `app_settings` and is set from **Settings → Logs**, which takes
+a replacement but never shows the stored one — an admin can rotate the
+credential, not read it back. `INGEST_API_KEY` seeds it on first boot and
+remains the fallback while nothing is stored, so an existing deployment keeps
+working and a cleared field does not lock a client out.
+
 This is not the same thing as the in-memory job list behind the dashboard's
 progress indicator: that one is capped at 50 and forgotten on restart, and it
 exists to show what is running right now. `task_runs` is the durable history.
@@ -300,7 +306,7 @@ Three layers shape a post, each overriding the one below it **per field**:
 
 | Layer | Where | Sets |
 |---|---|---|
-| App defaults | Connection page → Message defaults | format, title, body |
+| App defaults | Settings page → Message defaults | format, title, body |
 | Delivery rule | Schedule page → rule form | format, title, body |
 | Album | Albums page → **Config** button (`send_config_json`) | format, title, body |
 
@@ -445,7 +451,7 @@ apply in every mode. An album is the top style layer, so its `caption` and
 - Sync activity feed (`/sync-events`) — paginated events for the dashboard
   Activity page: content discovered, files and folders removed, folders renamed
 - Run log (`/task-runs`, plus `/task-runs/sources` for the filter) — the
-  System log page's durable history, filterable by `source` and `status`
+  Logs page's durable history, filterable by `source` and `status`
 - Aggregated system status (DB ping + Discord session + sync interval + rule
   count + next scheduled run + last sync time + album/image/video counts) at
   `/system/status`
@@ -494,7 +500,7 @@ Highlights:
 | `PCLOUD_ACCESS_TOKEN` *or* `PCLOUD_USERNAME` + `PCLOUD_PASSWORD` | pCloud authentication (only when `MEDIA_SOURCE=pcloud`). `PCLOUD_TOKEN_TYPE=session` (default, sent as `auth=`) or `oauth` (sent as `access_token=`); pCloud's API does not support 2FA |
 | `CLOUD_MAIN_FOLDER_ID` | Comma-separated pCloud folder IDs holding album subfolders |
 | `PCLOUD_API_ENDPOINT` | `https://api.pcloud.com` (US) or `https://eapi.pcloud.com` (EU) |
-| `PCLOUD_SYNC_INTERVAL` | Seeds `app_settings.sync_interval` (once); afterwards editable at runtime from the Connection page |
+| `PCLOUD_SYNC_INTERVAL` | Seeds `app_settings.sync_interval` (once); afterwards editable at runtime from the Settings page |
 | `METRICS_ENABLED` | Toggle the Prometheus metrics handler |
 
 ## Running locally

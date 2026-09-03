@@ -9,6 +9,7 @@ import (
 
 	"github.com/AaronCheng1996/sendmemes-discord-bot/internal/entity"
 	"github.com/AaronCheng1996/sendmemes-discord-bot/pkg/postgres"
+	sq "github.com/Masterminds/squirrel"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -101,6 +102,43 @@ func (r *SyncEventsRepo) List(ctx context.Context, offset, limit int) ([]entity.
 		return nil, fmt.Errorf("SyncEventsRepo - List - rows.Err: %w", err)
 	}
 	return events, nil
+}
+
+// GetByID returns one event by primary key.
+func (r *SyncEventsRepo) GetByID(ctx context.Context, id int64) (entity.SyncEvent, error) {
+	sql, args, err := r.Builder.
+		Select(
+			"id", "event_type", "COALESCE(album_id, 0)", "album_name",
+			"new_images", "new_videos", "removed_images", "removed_videos",
+			"COALESCE(previous_name, '')", "file_names", "created_at",
+		).
+		From("sync_events").
+		Where(sq.Eq{"id": id}).
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return entity.SyncEvent{}, fmt.Errorf("SyncEventsRepo - GetByID - r.Builder: %w", err)
+	}
+
+	var ev entity.SyncEvent
+	var rawNames []byte
+	if err = r.Pool.QueryRow(ctx, sql, args...).Scan(
+		&ev.ID, &ev.EventType, &ev.AlbumID, &ev.AlbumName,
+		&ev.NewImages, &ev.NewVideos, &ev.RemovedImages, &ev.RemovedVideos,
+		&ev.PreviousName, &rawNames, &ev.CreatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return entity.SyncEvent{}, fmt.Errorf("SyncEventsRepo - GetByID - event %d not found", id)
+		}
+		return entity.SyncEvent{}, fmt.Errorf("SyncEventsRepo - GetByID - QueryRow: %w", err)
+	}
+	if len(rawNames) > 0 {
+		if err = json.Unmarshal(rawNames, &ev.FileNames); err != nil {
+			return entity.SyncEvent{}, fmt.Errorf("SyncEventsRepo - GetByID - Unmarshal file_names: %w", err)
+		}
+	}
+
+	return ev, nil
 }
 
 // Count returns the total number of stored events.

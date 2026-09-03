@@ -44,9 +44,12 @@ func NewAdminRoutes(adminGroup fiber.Router, a usecase.Admin, l logger.Interface
 
 	adminGroup.Get("/sync-settings", r.getSyncSettings)
 	adminGroup.Put("/sync-settings", r.putSyncSettings)
+	adminGroup.Get("/ingest-key", r.getIngestKeyStatus)
+	adminGroup.Put("/ingest-key", r.putIngestKey)
 	adminGroup.Put("/message-defaults", r.putMessageDefaults)
 	adminGroup.Post("/sync/trigger-now", r.triggerSyncNow)
 	adminGroup.Get("/sync-events", r.listSyncEvents)
+	adminGroup.Get("/sync-events/:id/media", r.listSyncEventMedia)
 	adminGroup.Get("/task-runs", r.listTaskRuns)
 	adminGroup.Get("/task-runs/sources", r.listTaskRunSources)
 	adminGroup.Get("/system/status", r.getSystemStatus)

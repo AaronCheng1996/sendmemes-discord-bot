@@ -530,6 +530,21 @@ func (mr *MockImagesRepoMockRecorder) List(ctx, q, offset, limit any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockImagesRepo)(nil).List), ctx, q, offset, limit)
 }
 
+// ListByAlbumAndNames mocks base method.
+func (m *MockImagesRepo) ListByAlbumAndNames(ctx context.Context, albumID int, names []string) ([]entity.Image, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListByAlbumAndNames", ctx, albumID, names)
+	ret0, _ := ret[0].([]entity.Image)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListByAlbumAndNames indicates an expected call of ListByAlbumAndNames.
+func (mr *MockImagesRepoMockRecorder) ListByAlbumAndNames(ctx, albumID, names any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListByAlbumAndNames", reflect.TypeOf((*MockImagesRepo)(nil).ListByAlbumAndNames), ctx, albumID, names)
+}
+
 // SetPublicLink mocks base method.
 func (m *MockImagesRepo) SetPublicLink(ctx context.Context, id int, link string) error {
 	m.ctrl.T.Helper()
@@ -862,6 +877,21 @@ func (m *MockSyncEventsRepo) Count(ctx context.Context) (int, error) {
 func (mr *MockSyncEventsRepoMockRecorder) Count(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Count", reflect.TypeOf((*MockSyncEventsRepo)(nil).Count), ctx)
+}
+
+// GetByID mocks base method.
+func (m *MockSyncEventsRepo) GetByID(ctx context.Context, id int64) (entity.SyncEvent, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetByID", ctx, id)
+	ret0, _ := ret[0].(entity.SyncEvent)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetByID indicates an expected call of GetByID.
+func (mr *MockSyncEventsRepoMockRecorder) GetByID(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByID", reflect.TypeOf((*MockSyncEventsRepo)(nil).GetByID), ctx, id)
 }
 
 // Insert mocks base method.

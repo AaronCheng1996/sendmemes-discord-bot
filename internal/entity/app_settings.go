@@ -9,7 +9,11 @@ type AppSettings struct {
 	// MessageStyle is the bottom layer of message presentation; delivery rules
 	// and albums override it per field.
 	MessageStyle MessageStyle `json:"message_style"`
-	UpdatedAt    time.Time    `json:"updated_at,omitempty"`
+	// IngestAPIKey guards POST /v1/runs. It is deliberately json:"-": the API
+	// reports only whether a key is set, never the key itself, so an admin
+	// session cannot leak the credential through a response body.
+	IngestAPIKey string    `json:"-"`
+	UpdatedAt    time.Time `json:"updated_at,omitempty"`
 }
 
 // Style exposes the app-wide defaults as the bottom message-style layer.

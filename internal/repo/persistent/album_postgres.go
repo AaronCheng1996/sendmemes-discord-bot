@@ -75,6 +75,41 @@ func albumSelectBuilder(r *AlbumsRepo) sq.SelectBuilder {
 	return r.Builder.Select(albumColumns()...).From("albums")
 }
 
+// albumMediaCountExpr counts an album's live files, and albumUpdatedAtExpr dates
+// its newest one. Both are computed rather than stored: the images table is the
+// only truth for either, and a denormalised copy would drift the first time a
+// sync retired a file. Only the admin list pays for them.
+const (
+	albumMediaCountExpr = "(SELECT COUNT(*) FROM images i WHERE i.album_id = albums.id AND i.deleted_at IS NULL)"
+	albumUpdatedAtExpr  = "GREATEST(albums.created_at, COALESCE(" +
+		"(SELECT MAX(i.created_at) FROM images i WHERE i.album_id = albums.id AND i.deleted_at IS NULL), albums.created_at))"
+)
+
+// albumListSelectBuilder is the admin list's projection: the album columns plus
+// the two computed ones the dashboard sorts and reports on.
+func albumListSelectBuilder(r *AlbumsRepo) sq.SelectBuilder {
+	cols := append(albumColumns(), albumMediaCountExpr, albumUpdatedAtExpr)
+	return r.Builder.Select(cols...).From("albums")
+}
+
+// scanAlbumListRow scans an albumListSelectBuilder row.
+func scanAlbumListRow(rows pgx.Rows) (entity.Album, error) {
+	var a entity.Album
+	var lastSentAt, missingSince, updatedAt *time.Time
+	if err := rows.Scan(
+		&a.ID, &a.Name, &a.FolderID, &a.SourcePath, &a.HasCover, &a.CoverImageID,
+		&a.SendMode, &a.SendConfigJSON, &lastSentAt, &a.PositiveRating, &missingSince,
+		&a.MediaCount, &updatedAt,
+	); err != nil {
+		return entity.Album{}, err
+	}
+	a.LastSentAt = lastSentAt
+	a.MissingSince = missingSince
+	a.UpdatedAt = updatedAt
+
+	return a, nil
+}
+
 func (r *AlbumsRepo) albumAdminOrderBy(q repo.AlbumAdminListQuery) string {
 	dir := "DESC"
 	if q.SortAsc {
@@ -87,6 +122,10 @@ func (r *AlbumsRepo) albumAdminOrderBy(q repo.AlbumAdminListQuery) string {
 		return "positive_rating " + dir + ", id ASC"
 	case "cover":
 		return "has_cover " + dir + ", id ASC"
+	case "media_count":
+		return albumMediaCountExpr + " " + dir + ", id ASC"
+	case "updated":
+		return albumUpdatedAtExpr + " " + dir + ", id " + dir
 	default:
 		return "id " + dir
 	}
@@ -193,7 +232,7 @@ func (r *AlbumsRepo) List(ctx context.Context, q repo.AlbumAdminListQuery, offse
 		offset = 0
 	}
 
-	b := albumSelectBuilder(r)
+	b := albumListSelectBuilder(r)
 	b = r.applyAlbumAdminFilters(b, q)
 	sql, args, err := b.
 		OrderBy(r.albumAdminOrderBy(q)).
@@ -212,7 +251,7 @@ func (r *AlbumsRepo) List(ctx context.Context, q repo.AlbumAdminListQuery, offse
 
 	albums := make([]entity.Album, 0, limit)
 	for rows.Next() {
-		a, scanErr := scanAlbumRow(rows)
+		a, scanErr := scanAlbumListRow(rows)
 		if scanErr != nil {
 			return nil, fmt.Errorf("AlbumsRepo - List - Scan: %w", scanErr)
 		}

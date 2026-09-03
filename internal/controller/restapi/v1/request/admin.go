@@ -57,6 +57,12 @@ type SyncSettingsPut struct {
 	SyncInterval string `json:"sync_interval" validate:"required"`
 }
 
+// IngestKeyPut replaces the credential guarding POST /v1/runs. An empty key
+// clears the stored one, falling back to the INGEST_API_KEY env value.
+type IngestKeyPut struct {
+	IngestAPIKey string `json:"ingest_api_key"`
+}
+
 // MessageDefaultsPut sets the app-wide message presentation defaults — the
 // bottom layer that delivery rules and albums override.
 type MessageDefaultsPut struct {

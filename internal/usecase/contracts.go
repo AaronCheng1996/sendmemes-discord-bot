@@ -112,6 +112,16 @@ type (
 		// defaults that delivery rules and albums layer on top of.
 		Get(ctx context.Context) (entity.AppSettings, error)
 		SetMessageDefaults(ctx context.Context, style entity.MessageStyle) (entity.AppSettings, error)
+		// GetIngestAPIKey returns the credential guarding POST /v1/runs (stored
+		// value, or the env default while none is stored). Server-side only —
+		// nothing built on this may put the key in an API response.
+		GetIngestAPIKey(ctx context.Context) (string, error)
+		// SetIngestAPIKey stores a new ingest credential; empty clears it back
+		// to the env default.
+		SetIngestAPIKey(ctx context.Context, key string) error
+		// HasIngestAPIKey reports whether any key is in force. This, not the key,
+		// is what the dashboard is told.
+		HasIngestAPIKey(ctx context.Context) (bool, error)
 	}
 
 	// Jobs runs long-running deliveries in the background and exposes their state.
@@ -192,10 +202,20 @@ type (
 		RecordAudit(ctx context.Context, actor, action, targetType, targetID string, metadata map[string]any) error
 		// ListSyncEvents returns paginated sync discovery events, newest first.
 		ListSyncEvents(ctx context.Context, offset, limit int) ([]entity.SyncEvent, int, error)
+		// ListSyncEventMedia resolves one activity event's sampled file names to
+		// image rows with preview URLs, so the dashboard can show what an event
+		// was actually about instead of just naming files.
+		ListSyncEventMedia(ctx context.Context, eventID int64) ([]entity.Image, error)
 		// ListTaskRuns returns a page of the durable run log plus its total.
 		ListTaskRuns(ctx context.Context, q repo.TaskRunListQuery, offset, limit int) ([]entity.TaskRun, int, error)
 		// ListTaskRunSources returns the distinct sources that have reported runs.
 		ListTaskRunSources(ctx context.Context) ([]string, error)
+		// HasIngestAPIKey reports whether the run-reporting endpoint has a
+		// credential in force. The key itself is never exposed.
+		HasIngestAPIKey(ctx context.Context) (bool, error)
+		// SetIngestAPIKey replaces that credential, returning whether one is now
+		// in force. An empty key clears the stored value back to the env default.
+		SetIngestAPIKey(ctx context.Context, key, actor string) (bool, error)
 		GetSystemStatus(ctx context.Context) (entity.SystemStatus, error)
 		// ListJobs returns the most recent background jobs, newest first.
 		ListJobs(ctx context.Context) []entity.Job

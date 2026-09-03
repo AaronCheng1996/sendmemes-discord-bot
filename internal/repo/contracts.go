@@ -126,6 +126,10 @@ type (
 		// Used when the album's whole folder disappeared, so the dashboard stops
 		// listing files that cannot be fetched any more.
 		SoftDeleteByAlbum(ctx context.Context, albumID int, source string) ([]entity.Image, error)
+		// ListByAlbumAndNames returns the images in albumID whose filename is in
+		// names, soft-deleted rows included — a removal event names files that
+		// are, by definition, no longer live.
+		ListByAlbumAndNames(ctx context.Context, albumID int, names []string) ([]entity.Image, error)
 		// FindCoverByAlbum returns the image in albumID whose filename matches
 		// the cover convention (cover.* or _cover.*), case-insensitive.
 		FindCoverByAlbum(ctx context.Context, albumID int) (entity.Image, bool, error)
@@ -168,6 +172,8 @@ type (
 		// List returns events newest-first with offset/limit pagination.
 		List(ctx context.Context, offset, limit int) ([]entity.SyncEvent, error)
 		Count(ctx context.Context) (int, error)
+		// GetByID returns one event by primary key.
+		GetByID(ctx context.Context, id int64) (entity.SyncEvent, error)
 		// LatestAt returns the created_at of the most recent event, or nil when
 		// no sync event has ever been recorded.
 		LatestAt(ctx context.Context) (*time.Time, error)

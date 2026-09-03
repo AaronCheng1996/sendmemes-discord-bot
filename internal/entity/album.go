@@ -109,4 +109,12 @@ type Album struct {
 	// PreviewURL is resolved on demand by the admin list endpoint (cover image
 	// when present, otherwise the lowest-id image in the album). Not persisted.
 	PreviewURL string `json:"preview_url,omitempty"`
+	// MediaCount is how many live files the album holds. Computed by the admin
+	// list query, not stored — the images table is the only truth for it.
+	MediaCount int `json:"media_count"`
+	// UpdatedAt is when the album's content last changed: the newest live file's
+	// arrival, or the album's own creation when it holds nothing. Computed by
+	// the admin list query. A send or a rating does not move it — this answers
+	// "what got new pictures recently", which is what the dashboard sorts on.
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }

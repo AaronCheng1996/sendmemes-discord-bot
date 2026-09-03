@@ -413,6 +413,30 @@ func (r *V1) putSyncSettings(ctx *fiber.Ctx) error {
 	return ctx.Status(http.StatusOK).JSON(out)
 }
 
+// getIngestKeyStatus reports whether a key is in force. The key itself is never
+// returned — an admin can replace it, not read it back.
+func (r *V1) getIngestKeyStatus(ctx *fiber.Ctx) error {
+	configured, err := r.a.HasIngestAPIKey(ctx.UserContext())
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - getIngestKeyStatus")
+		return errorResponse(ctx, http.StatusInternalServerError, "failed to read the ingest key status")
+	}
+	return ctx.Status(http.StatusOK).JSON(fiber.Map{"configured": configured})
+}
+
+func (r *V1) putIngestKey(ctx *fiber.Ctx) error {
+	var body request.IngestKeyPut
+	if err := ctx.BodyParser(&body); err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid request body")
+	}
+	configured, err := r.a.SetIngestAPIKey(ctx.UserContext(), body.IngestAPIKey, actorFromCtx(ctx))
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - putIngestKey")
+		return errorResponse(ctx, http.StatusBadRequest, err.Error())
+	}
+	return ctx.Status(http.StatusOK).JSON(fiber.Map{"configured": configured})
+}
+
 func (r *V1) testRule(ctx *fiber.Ctx) error {
 	id, err := parseID64Param(ctx)
 	if err != nil {
@@ -476,6 +500,24 @@ func (r *V1) listSyncEvents(ctx *fiber.Ctx) error {
 		Offset: offset,
 		Limit:  limit,
 	})
+}
+
+// listSyncEventMedia backs the Activity page's expanded row: the images the
+// event was about, resolved from the names it recorded.
+func (r *V1) listSyncEventMedia(ctx *fiber.Ctx) error {
+	id, err := parseID64Param(ctx)
+	if err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid id")
+	}
+	items, err := r.a.ListSyncEventMedia(ctx.UserContext(), id)
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - listSyncEventMedia")
+		return errorResponse(ctx, http.StatusNotFound, "sync event not found")
+	}
+	if items == nil {
+		items = []entity.Image{}
+	}
+	return ctx.Status(http.StatusOK).JSON(items)
 }
 
 func (r *V1) listTaskRuns(ctx *fiber.Ctx) error {
