@@ -520,6 +520,27 @@ func (r *V1) listSyncEventMedia(ctx *fiber.Ctx) error {
 	return ctx.Status(http.StatusOK).JSON(items)
 }
 
+// listAlbumMedia backs the Albums page's expanded row.
+// defaultAlbumMediaLimit matches the number of cells the dashboard's expanded
+// album row renders.
+const defaultAlbumMediaLimit = 6
+
+func (r *V1) listAlbumMedia(ctx *fiber.Ctx) error {
+	id, err := parseIDParam(ctx)
+	if err != nil {
+		return errorResponse(ctx, http.StatusBadRequest, "invalid id")
+	}
+	items, err := r.a.ListAlbumMedia(ctx.UserContext(), id, parseIntQuery(ctx, "limit", defaultAlbumMediaLimit))
+	if err != nil {
+		r.l.Error(err, "restapi - v1 - listAlbumMedia")
+		return errorResponse(ctx, http.StatusNotFound, "album not found")
+	}
+	if items == nil {
+		items = []entity.Image{}
+	}
+	return ctx.Status(http.StatusOK).JSON(items)
+}
+
 func (r *V1) listTaskRuns(ctx *fiber.Ctx) error {
 	offset, limit := clampPagination(parseIntQuery(ctx, "offset", 0), parseIntQuery(ctx, "limit", defaultListLimit))
 	q := repo.TaskRunListQuery{

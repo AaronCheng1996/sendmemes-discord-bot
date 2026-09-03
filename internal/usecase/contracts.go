@@ -206,6 +206,9 @@ type (
 		// image rows with preview URLs, so the dashboard can show what an event
 		// was actually about instead of just naming files.
 		ListSyncEventMedia(ctx context.Context, eventID int64) ([]entity.Image, error)
+		// ListAlbumMedia returns an album's first `limit` live files with preview
+		// URLs, cover first — what the dashboard's expanded album row shows.
+		ListAlbumMedia(ctx context.Context, albumID, limit int) ([]entity.Image, error)
 		// ListTaskRuns returns a page of the durable run log plus its total.
 		ListTaskRuns(ctx context.Context, q repo.TaskRunListQuery, offset, limit int) ([]entity.TaskRun, int, error)
 		// ListTaskRunSources returns the distinct sources that have reported runs.

@@ -401,17 +401,70 @@ func (uc *UseCase) ListSyncEventMedia(ctx context.Context, eventID int64) ([]ent
 	if err != nil {
 		return nil, err
 	}
+	uc.attachPreviewURLs(ctx, items)
+
+	return items, nil
+}
+
+// ListAlbumMedia returns the album's first `limit` live files for the dashboard's
+// expanded row, cover first. The cover is hoisted here rather than in the
+// browser because the server is what knows which image it is.
+func (uc *UseCase) ListAlbumMedia(ctx context.Context, albumID, limit int) ([]entity.Image, error) {
+	if limit <= 0 {
+		limit = 6
+	}
+	album, err := uc.albums.GetByID(ctx, albumID)
+	if err != nil {
+		return nil, err
+	}
+
+	items, err := uc.images.List(ctx, repo.ImageAdminListQuery{
+		AlbumScopeID: albumID,
+		SortBy:       "id",
+		SortAsc:      true,
+	}, 0, limit)
+	if err != nil {
+		return nil, err
+	}
+	if album.HasCover && album.CoverImageID > 0 {
+		hoistCover(items, album.CoverImageID)
+	}
+	uc.attachPreviewURLs(ctx, items)
+
+	return items, nil
+}
+
+// hoistCover moves the cover to the front of items, in place.
+func hoistCover(items []entity.Image, coverID int) {
 	for i := range items {
-		url, perr := uc.imagesUC.ResolveURL(ctx, items[i])
-		if perr != nil {
-			// Best-effort, exactly as in the image list: a file whose link
-			// cannot be resolved still belongs in the response by name.
+		if items[i].ID != coverID {
+			continue
+		}
+		cover := items[i]
+		copy(items[1:i+1], items[:i])
+		items[0] = cover
+
+		return
+	}
+}
+
+// attachPreviewURLs fills in PreviewURL for a set of images.
+//
+// It resolves *preview* URLs, not download ones: a pCloud download link is
+// minted for the server and is both short-lived and IP-bound, so a browser on
+// any other address gets nothing. The preview link is the permanent public
+// thumbnail — the same one the album cover has always used.
+//
+// Best-effort per image: one that cannot be resolved still belongs in the
+// response, where the caller renders its filename instead.
+func (uc *UseCase) attachPreviewURLs(ctx context.Context, items []entity.Image) {
+	for i := range items {
+		url, err := uc.imagesUC.ResolvePreviewURL(ctx, items[i])
+		if err != nil {
 			continue
 		}
 		items[i].PreviewURL = url
 	}
-
-	return items, nil
 }
 
 // ListTaskRuns returns a page of the durable run log plus its total.

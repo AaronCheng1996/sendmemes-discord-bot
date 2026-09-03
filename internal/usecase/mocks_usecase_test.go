@@ -1136,6 +1136,21 @@ func (mr *MockAdminMockRecorder) HasIngestAPIKey(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HasIngestAPIKey", reflect.TypeOf((*MockAdmin)(nil).HasIngestAPIKey), ctx)
 }
 
+// ListAlbumMedia mocks base method.
+func (m *MockAdmin) ListAlbumMedia(ctx context.Context, albumID, limit int) ([]entity.Image, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListAlbumMedia", ctx, albumID, limit)
+	ret0, _ := ret[0].([]entity.Image)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListAlbumMedia indicates an expected call of ListAlbumMedia.
+func (mr *MockAdminMockRecorder) ListAlbumMedia(ctx, albumID, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAlbumMedia", reflect.TypeOf((*MockAdmin)(nil).ListAlbumMedia), ctx, albumID, limit)
+}
+
 // ListAlbums mocks base method.
 func (m *MockAdmin) ListAlbums(ctx context.Context, q repo.AlbumAdminListQuery, offset, limit int) ([]entity.Album, int, error) {
 	m.ctrl.T.Helper()
