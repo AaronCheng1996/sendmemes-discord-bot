@@ -1,6 +1,6 @@
 module github.com/AaronCheng1996/sendmemes-discord-bot
 
-go 1.25.0
+go 1.26.0
 
 tool (
 	github.com/daixiang0/gci
@@ -25,7 +25,7 @@ require (
 	github.com/rs/zerolog v1.35.1
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/mock v0.6.0
-	golang.org/x/sync v0.22.0
+	golang.org/x/sync v0.23.0
 )
 
 require (
