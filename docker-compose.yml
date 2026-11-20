@@ -23,6 +23,7 @@ x-backend-app-environment: &x-backend-app-environment
   # Discord
   # Admin
   ADMIN_API_KEY: "${ADMIN_API_KEY}"
+  INGEST_API_KEY: "${INGEST_API_KEY}"
   # Discord
   DISCORD_TOKEN: "${DISCORD_TOKEN}"
   DISCORD_APPLICATION_ID: "${DISCORD_APPLICATION_ID}"
@@ -33,6 +34,9 @@ x-backend-app-environment: &x-backend-app-environment
   DISCORD_SEND_HISTORY_SIZE: "${DISCORD_SEND_HISTORY_SIZE:-10}"
   DISCORD_VERBOSE_LOG: "${DISCORD_VERBOSE_LOG:-true}"
   ALBUM_DEFAULT_SEND_MODE: "${ALBUM_DEFAULT_SEND_MODE:-Random}"
+  DISCORD_UPLOAD_LIMIT_MB: "${DISCORD_UPLOAD_LIMIT_MB:-20}"
+  FULL_ALBUM_PAGE_THRESHOLD: "${FULL_ALBUM_PAGE_THRESHOLD:-200}"
+  FULL_ALBUM_PAGE_SIZE: "${FULL_ALBUM_PAGE_SIZE:-100}"
   # Media source: "pcloud" (default) or "local" — see the app service's
   # volumes for how to mount a folder when using "local".
   MEDIA_SOURCE: "${MEDIA_SOURCE:-pcloud}"
